@@ -1,0 +1,11 @@
+{
+  "_comment": "Deploy to pilot-protocol/catalog/publishers/registry.json. Maps publisher keys to identity for reviewers (SPEC §5.6). Identity only in RC1 — not yet a cryptographic gate.",
+  "publishers": [
+    {
+      "pubkey": "ed25519:EjoZEiV+j6oNZLRW...",
+      "name": "Alex Godoroja",
+      "contact": "alex@vulturelabs.io",
+      "apps": ["io.pilot.cosift"]
+    }
+  ]
+}

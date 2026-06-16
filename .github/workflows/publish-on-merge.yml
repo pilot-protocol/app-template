@@ -1,0 +1,42 @@
+# On merge to main, publish any new/changed submission: release the bundle on
+# pilot-protocol/catalog and open a catalogue.json PR on TeoSlayer/pilotprotocol.
+#
+# Requires repo secret CATALOG_PUBLISH_TOKEN — a PAT or GitHub App token with:
+#   - contents:write on pilot-protocol/catalog (create releases)
+#   - contents:write + pull_requests:write on TeoSlayer/pilotprotocol (catalogue PR)
+# Without it, this job no-ops with a clear message (submissions still validate on PR).
+name: publish-on-merge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "submissions/**"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # to diff the merge commit for changed submissions
+
+      - name: Guard — token present
+        run: |
+          if [ -z "${{ secrets.CATALOG_PUBLISH_TOKEN }}" ]; then
+            echo "CATALOG_PUBLISH_TOKEN not set — skipping publish. Add the secret to enable automation."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+        id: guard
+
+      - name: Publish changed submissions
+        if: steps.guard.outputs.skip != '1'
+        env:
+          GH_TOKEN: ${{ secrets.CATALOG_PUBLISH_TOKEN }}
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only HEAD~1 HEAD -- 'submissions/**/submission.json' || true)"
+          [ -n "$changed" ] || { echo "no submission.json changed"; exit 0; }
+          for sub in $changed; do
+            scripts/publish-submission.sh "$(dirname "$sub")"
+          done

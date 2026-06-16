@@ -1,0 +1,37 @@
+# Gates every submission PR (SPEC §7.1). Builds the verifier and runs the full
+# review gate on each submitted bundle. Green here + human checklist = mergeable.
+name: submission-validate
+
+on:
+  pull_request:
+    paths:
+      - "submissions/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Build verifier
+        run: go build -o /tmp/pilot-app ./cmd/pilot-app
+
+      - name: Verify every submitted bundle
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          found=0
+          for sub in submissions/*/submission.json; do
+            dir="$(dirname "$sub")"
+            bundle="$dir/$(jq -r .bundle "$sub")"
+            echo "::group::verify $dir"
+            test -f "$bundle" || { echo "missing bundle $bundle"; exit 1; }
+            /tmp/pilot-app verify "$bundle"
+            echo "::endgroup::"
+            found=1
+          done
+          if [ "$found" = 0 ]; then echo "no submissions found under submissions/"; fi

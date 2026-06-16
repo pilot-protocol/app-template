@@ -1,0 +1,78 @@
+# pilot.app.yaml — declarative spec for a Pilot Protocol app-store adapter.
+# Run `pilot-app init -c pilot.app.yaml` to generate a buildable project.
+
+id: io.pilot.weather              # reverse-DNS app id (required)
+app_version: 0.1.0                # semver; bump every build (required)
+description: "Current conditions and forecasts over the public weather corpus."
+
+# --- optional; sensible defaults derived from id ---
+# namespace: weather              # method prefix (default: last segment of id)
+# binary_name: weather-app        # compiled binary (default: <namespace>-app)
+# go_module: github.com/pilot-protocol/weather-app
+# manifest_version: 1             # bump only when grants change
+
+publisher:
+  key_file: weather-publisher.key # ed25519 key, gitignored (pilotctl appstore gen-key)
+
+backend:
+  type: http                      # http | cli
+  base_url: https://weather.pilotprotocol.network   # baked-in production default
+  # env_prefix: WEATHER           # override; default = NAMESPACE upper -> {PREFIX}_BACKEND_URL
+
+methods:
+  - name: weather.current         # must be prefixed <namespace>.
+    summary: "Current conditions for a lat/lon."
+    kind: utility                 # utility | status | meta
+    duration: fast                # fast | med | slow (sets default per-call timeout)
+    roundtrip: "~0.4s"            # optional, measured warm, shown in <ns>.help
+    http:
+      verb: GET                   # GET -> params become query string
+      path: /current
+    params:                       # name -> human description (for <ns>.help only)
+      lat: "string (required)"
+      lon: "string (required)"
+
+  - name: weather.forecast
+    summary: "Multi-day forecast for a lat/lon."
+    kind: utility
+    duration: med
+    http:
+      verb: GET
+      path: /forecast
+    params:
+      lat: "string (required)"
+      lon: "string (required)"
+      days: "int (default 7)"
+
+  - name: weather.report
+    summary: "LLM-synthesized natural-language weather briefing."
+    kind: utility
+    duration: slow
+    timeout: 120s                 # override the per-class default
+    http:
+      verb: POST                  # POST -> payload forwarded as the JSON body
+      path: /report
+
+  - name: weather.health
+    summary: "Liveness probe."
+    kind: status
+    duration: fast
+    http:
+      verb: GET
+      path: /healthz
+
+grants:
+  rate_per_min: 120               # net.dial rate limit (default 120)
+  # extra:                        # verbatim extra grants, if needed
+  #   - {cap: fs.read, target: "$APP/cache.json"}
+
+# --- a cli backend instead (planned archetype; see docs/CLI-ADAPTER.md) ---
+# backend:
+#   type: cli
+#   command: ["weathercli"]       # base argv; method args appended
+# methods:
+#   - name: weather.current
+#     summary: "Current conditions."
+#     duration: fast
+#     cli:
+#       args: ["current", "--lat", "${lat}", "--lon", "${lon}"]  # ${field} from payload

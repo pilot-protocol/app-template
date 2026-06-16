@@ -1,0 +1,6 @@
+# built tool binary
+/pilot-app
+# generated test output
+/out/
+# never commit publisher signing keys
+*.key
