@@ -1,0 +1,8 @@
+{
+  "id": "io.pilot.cosiftgen",
+  "version": "0.1.0",
+  "namespace": "cosiftgen",
+  "description": "CI smoke-test submission (generated cosift adapter) — do not merge.",
+  "bundle": "io.pilot.cosiftgen-0.1.0.tar.gz",
+  "bundle_sha256": "e052b76543a82eb5a09cfb91328c18befc76328a32ebbd8bda67f133dfbcb45f"
+}
