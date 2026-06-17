@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review submission · Pilot</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="wrap narrow">
+  <div class="top"><span class="brand">Pilot App Store</span><a class="brand" href="/admin">Review →</a></div>
+  {{template "legend" .}}
+  <div class="stephdr"><span class="muted mono">Final step</span><h1>Review submission</h1></div>
+  <p class="lede">Confirm everything below. On submit, the server builds, signs, and verifies the adapter, then queues it for review.</p>
+
+  {{if .Problems}}
+  <div class="card problems">
+    <h2>Fix before submitting</h2>
+    <ul>{{range .Problems}}<li class="bad">{{.}}</li>{{end}}</ul>
+  </div>
+  {{end}}
+
+  <div class="card review">
+    <h2>Identity</h2>
+    <table>
+      <tr><th>App ID</th><td class="mono">{{.Cfg.ID}}</td></tr>
+      <tr><th>Version</th><td class="mono">{{.Cfg.AppVersion}}</td></tr>
+      <tr><th>Description</th><td>{{.Cfg.Description}}</td></tr>
+    </table>
+  </div>
+
+  <div class="card review">
+    <h2>Backend</h2>
+    <table>
+      <tr><th>Base URL</th><td class="mono">{{.Cfg.Backend.BaseURL}}</td></tr>
+      {{range $k, $v := .Cfg.Backend.Headers}}<tr><th>Header</th><td class="mono">{{$k}}: {{$v}}</td></tr>{{end}}
+    </table>
+  </div>
+
+  <div class="card review">
+    <h2>Methods</h2>
+    <table class="methods">
+      <tr><th>Method</th><th>Verb</th><th>Path</th><th>Latency</th><th>Params</th></tr>
+      {{range .Cfg.Methods}}
+      <tr>
+        <td class="mono">{{.Name}}</td>
+        <td class="mono">{{.HTTP.Verb}}</td>
+        <td class="mono">{{.HTTP.Path}}</td>
+        <td>{{.Duration}}</td>
+        <td class="mono">{{range $i, $k := .SortedParamKeys}}{{if $i}}, {{end}}{{$k}}{{end}}</td>
+      </tr>
+      {{end}}
+      <tr><td class="mono">{{.Cfg.Namespace}}.help</td><td class="mono">—</td><td class="mono">(local)</td><td>fast</td><td class="muted">auto-added</td></tr>
+    </table>
+  </div>
+
+  <div class="card review">
+    <h2>Store listing</h2>
+    <table>
+      <tr><th>Display name</th><td>{{.Cfg.Listing.DisplayName}}</td></tr>
+      <tr><th>Tagline</th><td>{{.Cfg.Listing.Tagline}}</td></tr>
+      <tr><th>Vendor</th><td>{{.Cfg.Listing.Vendor.Name}}{{if .Cfg.Listing.Vendor.URL}} · <span class="mono">{{.Cfg.Listing.Vendor.URL}}</span>{{end}}{{if .Cfg.Listing.Vendor.Contact}} · <span class="mono">{{.Cfg.Listing.Vendor.Contact}}</span>{{end}}</td></tr>
+      <tr><th>License</th><td class="mono">{{.Cfg.Listing.License}}</td></tr>
+      <tr><th>Homepage</th><td class="mono">{{.Cfg.Listing.Homepage}}</td></tr>
+      <tr><th>Source</th><td class="mono">{{.Cfg.Listing.SourceURL}}</td></tr>
+      <tr><th>Categories</th><td>{{range $i, $c := .Cfg.Listing.Categories}}{{if $i}}, {{end}}{{$c}}{{end}}</td></tr>
+      <tr><th>Keywords</th><td>{{range $i, $k := .Cfg.Listing.Keywords}}{{if $i}}, {{end}}{{$k}}{{end}}</td></tr>
+    </table>
+  </div>
+
+  <div class="navrow">
+    <a class="back" href="/step/{{ (index .Steps 0).Slug }}?d={{.DraftID}}">← Edit</a>
+    {{if .Problems}}
+      <button class="primary" type="button" disabled title="Fix the issues above">Submit for review</button>
+    {{else}}
+      <form method="post" action="/submit"><input type="hidden" name="d" value="{{.DraftID}}"><button class="primary" type="submit">Submit for review</button></form>
+    {{end}}
+  </div>
+</div>
+</body>
+</html>
