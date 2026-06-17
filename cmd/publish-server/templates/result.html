@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Submitted · Pilot</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><span class="brand">Pilot App Store</span><a class="brand" href="/">← New submission</a></div>
+  <h1>Submitted <span class="soft">✓</span></h1>
+  <p class="lede">The server built, signed, and verified your app. It's now <span class="pill pending">pending</span> review.</p>
+
+  <div class="card">
+    <h2>What we built &amp; verified</h2>
+    <table>
+      <tr><th>App</th><td class="mono">{{.S.ID}}</td></tr>
+      <tr><th>Version</th><td class="mono">{{.S.Version}}</td></tr>
+      <tr><th>Display</th><td>{{.S.DisplayName}}</td></tr>
+      <tr><th>Bundle sha256</th><td class="mono">{{.S.BundleSHA}}</td></tr>
+      <tr><th>Signed by</th><td class="mono">{{.Publisher}}</td></tr>
+    </table>
+    <p class="muted" style="margin-top:16px">The bundle passed the full catalogue review gate (manifest validity, signature, binary-sha pin, <code>&lt;ns&gt;.help</code> discovery). A reviewer will approve it; on approval the publish workflow releases it to the catalog.</p>
+  </div>
+
+  <div class="card">
+    <h2>Next</h2>
+    <p class="muted">Track it on the <a href="/admin">review page</a>. No further action needed from you.</p>
+  </div>
+</div>
+</body>
+</html>
