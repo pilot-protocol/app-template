@@ -4,3 +4,6 @@
 /out/
 # never commit publisher signing keys
 *.key
+
+# browse-tool artifacts
+.gstack/
