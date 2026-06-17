@@ -23,6 +23,8 @@ which is exactly what this generates.
 ```bash
 go build -o pilot-app ./cmd/pilot-app
 
+go install github.com/pilot-protocol/app-template/cmd/pilot-app@latest
+
 pilot-app example > pilot.app.yaml      # starter spec, fully annotated
 $EDITOR pilot.app.yaml                  # point it at your API, list your methods
 pilot-app validate                      # catch spec errors early
@@ -31,12 +33,19 @@ pilot-app init -o ./my-app              # scaffold the adapter project
 cd my-app
 make gen-key                            # one-time ed25519 publisher key (gitignored)
 make package                            # build -> pin -> sign -> tarball
-make publish-help                       # prints the release + catalogue-PR commands
+pilot-app verify io.pilot.<id>-<ver>.tar.gz   # optional: run the gate locally
+
+# fork this repo, then publish through the single front door:
+pilot-app submit -C . --prepare /path/to/app-template-fork
+# commit submissions/<id>/ and open a PR to pilot-protocol/app-template
 ```
 
-Then: release the tarball on `pilot-protocol/catalog`, add a one-line entry to
-`catalogue/catalogue.json` on `TeoSlayer/pilotprotocol@main` via PR (the
-review gate), and anyone can `pilotctl appstore install <your.id>`.
+CI verifies the bundle and a maintainer reviews; on merge, automation releases it
+on `pilot-protocol/catalog` and opens the `catalogue.json` data entry on
+`TeoSlayer/pilotprotocol`. Then anyone can `pilotctl appstore install <your.id>`.
+You only ever touch **one repo** (`app-template`); see
+[`submissions/README.md`](submissions/README.md) and
+[`docs/APP-PUBLISHING-SPEC.md`](docs/APP-PUBLISHING-SPEC.md).
 
 ## The spec (`pilot.app.yaml`)
 

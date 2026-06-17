@@ -29,17 +29,21 @@ disagree, that's a bug in one of them — file it.
 ## 2. Where things live (topology)
 
 ```
-pilot-protocol/<app>            PRIVATE source repo (pilot.app.yaml + generated adapter)
-pilot-protocol/catalog          PUBLIC — bundle tarballs as GitHub Release assets  (the "CDN")
-pilot-protocol/catalog          PUBLIC — publishers/registry.json  (publisher identity, RC1)
-TeoSlayer/pilotprotocol@main    catalogue/catalogue.json  (the index; PR-gated = the review gate)
+pilot-protocol/app-template     PUBLIC — the tool, this SPEC, submission CI, publish automation, the single front door
+pilot-protocol/catalog          PUBLIC — bundle tarballs as GitHub Release assets ("CDN") + publishers/registry.json
+TeoSlayer/pilotprotocol@main    catalogue/catalogue.json  (the index — data entries only)
 ~/.pilot/apps/<id>/             install root on each host (manifest.json, bin/, app.sock, supervisor.log)
 ```
 
-**Invariant:** app bundles release on `pilot-protocol/catalog`, **never** on
-`TeoSlayer/pilotprotocol` — releases there drive the platform installer's
-"latest" and would shadow the platform binaries. The platform repo only ever
-receives the one-line catalogue index edit, by PR.
+**Invariants:**
+- App bundles release on `pilot-protocol/catalog`, **never** on
+  `TeoSlayer/pilotprotocol` — releases there drive the platform installer's
+  "latest" and would shadow the platform binaries.
+- The platform repo's *only* app-store footprint is `catalogue.json` **data
+  entries** (one line per app), written by automation. No app-store tooling, CI,
+  or templates live in the platform repo — all of that lives in `app-template`.
+  The gate runs in `app-template` (§7) before any catalogue entry is opened, so
+  a second in-platform-repo gate would be redundant.
 
 ---
 
@@ -64,30 +68,33 @@ endpoints, grants. `pilot-app validate` gives fast feedback.
 
 Signing happens **after** pinning — the binary hash is in the signed payload.
 
-### 3.3 Submit
-`pilot-app submit` (§6) runs the **same checks CI will run** locally, then emits:
-- the exact `gh release create … -R pilot-protocol/catalog` command, and
-- the `catalogue.json` entry JSON (`id`, `version`, `description`, `bundle_url`, `bundle_sha256`).
-
-With `--execute` it performs the release and opens the catalogue PR. Default is
-emit-only (no outward action without an explicit flag).
+### 3.3 Submit (single front door)
+`pilot-app submit -C . --prepare <app-template-fork>` runs the **same checks CI
+will run** locally, then writes a submission payload into a fork of the single
+central repo `pilot-protocol/app-template`: `submissions/<id>/` containing the
+signed bundle + a `submission.json`. The publisher commits that and opens **one
+PR** — to `app-template`. They never need push to any org repo, and never touch
+the platform repo or the catalogue directly.
 
 ### 3.4 Review (the gate)
-The catalogue PR is the gate. Two layers, both required to merge:
-- **CI** (§7) — automated, objective: bundle resolves, `bundle_sha256` matches,
-  manifest parses + `Validate()`s + signature verifies, `exposes` contains a
-  `<ns>.help` method, no unknown caps, version is a monotonic non-downgrade.
-- **Human** (§7.2) — reviewer checklist: publisher identity, grant
+The **submission PR on `app-template`** is the gate. Two layers, both required:
+- **CI** (§7) — `submission-validate` runs `pilot-app verify` on the bundle:
+  manifest parses + `Validate()`s + signature verifies, binary sha pinned,
+  `exposes` contains a `<ns>.help` method, no unknown caps, id/version consistent.
+- **Human** (§7.2) — maintainer checklist: publisher identity, grant
   proportionality (especially any `proc.exec`/`fs.write`/`key.sign`), description
   accuracy, backend ownership.
 
-RC1 trust model: publishers are **self-signed**; the human PR review + CI is the
-trust boundary. `TrustedPublishers` enforcement (cryptographic allowlist) is a
-documented future toggle (§8), not required to ship.
+RC1 trust model: publishers are **self-signed**; the submission PR review + CI is
+the trust boundary. `TrustedPublishers` enforcement (cryptographic allowlist) is
+a documented future toggle (§8), not required to ship.
 
-### 3.5 Publish
-On merge: the bundle is a public release asset; the catalogue entry is live on
-`main`. No further action — hosts pick it up on next `catalogue`/`install`.
+### 3.5 Publish (automated)
+On merge to `app-template`, the `publish-on-merge` automation re-verifies the
+bundle, releases it on `pilot-protocol/catalog`, and opens the one-line
+`catalogue.json` PR on `TeoSlayer/pilotprotocol`. Once a maintainer merges that
+data PR, hosts pick the app up on next `catalogue`/`install`. The platform repo's
+only change is that one catalogue data entry.
 
 ### 3.6 Install (agent host)
 ```
@@ -197,19 +204,20 @@ Identity only in RC1 — not yet a cryptographic gate.
 
 ## 6. `pilot-app submit`
 
-Local pre-flight + publish helper. Default emits commands; `--execute` runs them.
-1. Re-runs §7.1 static checks on the built bundle.
-2. Emits the `gh release create` command (target `pilot-protocol/catalog`).
-3. Emits the `catalogue.json` entry to paste/PR.
-4. `--execute`: creates the release and opens the catalogue PR as
-   `Alex Godoroja <alex@vulturelabs.io>` (never mentions tooling/AI in commits).
+Single-front-door submission helper.
+1. Re-runs §7.1 checks on the built bundle (pre-flight).
+2. `--prepare <fork>` writes `submissions/<id>/` (bundle + `submission.json`) into
+   a fork/checkout of `pilot-protocol/app-template`; the publisher commits + PRs it.
+3. Without `--prepare`, it prints the underlying release + catalogue steps for the
+   **org-maintainer direct path** (no client needs this).
 
 ---
 
 ## 7. The review gate
 
-### 7.1 CI checks (objective, scripted — `scripts/validate-catalogue.sh`)
-For each changed/added catalogue entry:
+### 7.1 CI checks (objective — `submission-validate` workflow in `app-template`)
+Runs `pilot-app verify` on each submitted bundle (and the publish automation
+re-runs it before opening any catalogue PR). Checks:
 1. `bundle_url` resolves (HTTP 200) and downloads.
 2. `sha256(tarball) == bundle_sha256`.
 3. Tarball contains `manifest.json` + `bin/<binary>`.
@@ -238,8 +246,8 @@ recommended but not required in CI (needs a daemon).
 | Gap | RC1 disposition | Owner / where |
 |---|---|---|
 | **G1** Submission package | **DONE** — `pilot-app submit` | `cmd/pilot-app` |
-| **G2** Review gate | **DONE** — PR template + checklist (§7.2) | `pilot-protocol/.github` (catalog) |
-| **G3** Catalogue CI | **DONE** — `validate-catalogue.sh` + workflow | `scripts/`, platform `.github` |
+| **G2** Review gate | **DONE** — submission PR template + checklist (§7.2) | `app-template/.github` |
+| **G3** Catalogue CI | **DONE** — `submission-validate` workflow (verifier) | `app-template/.github/workflows` |
 | **G4** Publisher identity | **DONE (identity)** — `publishers/registry.json` (§5.6) | `pilot-protocol/catalog` |
 | **G4′** Trust anchor (crypto) | *DEFERRED* — populate `TrustedPublishers` + enforce `VerifyTrustAnchor` in supervisor scan when desired | `app-store/pkg/manifest`, `plugin/appstore/supervisor.go` |
 | **G5** Revocation | *PLANNED* — `revoked.json` deny-list (§3.10) | `app-store` + `catalog` |
@@ -257,12 +265,13 @@ RC1 publishing to be standardized and safe under the PR+CI trust model.
 ## 9. Quick reference
 
 ```bash
+go install github.com/pilot-protocol/app-template/cmd/pilot-app@latest
 pilot-app example > pilot.app.yaml && $EDITOR pilot.app.yaml
 pilot-app validate
 pilot-app init -o ./my-app
 cd my-app && make gen-key && make package
-pilot-app submit -C .                 # emits release + catalogue PR steps (add --execute to run)
-# reviewer merges the catalogue PR after CI + checklist
+pilot-app submit -C . --prepare /path/to/app-template-fork   # writes submissions/<id>/
+# commit + PR to pilot-protocol/app-template; CI + maintainer gate; merge → auto-publish
 pilotctl appstore install io.pilot.my-app
 pilotctl appstore call io.pilot.my-app my-app.help '{}'
 ```

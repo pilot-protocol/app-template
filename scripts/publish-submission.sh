@@ -17,6 +17,11 @@ BUNDLE="$DIR/$(jq -r .bundle "$META")"
 SHA="$(jq -r .bundle_sha256 "$META")"
 test -f "$BUNDLE" || { echo "missing bundle $BUNDLE"; exit 1; }
 
+# Re-run the review gate before touching any org repo — the platform repo must
+# never receive a catalogue entry for a bundle that doesn't pass verification.
+echo "==> verifying $BUNDLE before publish"
+"${PILOT_APP_BIN:-pilot-app}" verify "$BUNDLE"
+
 CATALOG_REPO="pilot-protocol/catalog"
 PLATFORM_REPO="TeoSlayer/pilotprotocol"
 TAG="${NS}-v${VERSION}"
