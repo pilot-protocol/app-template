@@ -29,28 +29,33 @@
     </table>
   </div>
 
+  {{$cli := eq .Cfg.Backend.Type "cli"}}
   <div class="card review">
     <h2>Backend</h2>
     <table>
-      <tr><th>Base URL</th><td class="mono">{{.Cfg.Backend.BaseURL}}</td></tr>
-      {{range $k, $v := .Cfg.Backend.Headers}}<tr><th>Header</th><td class="mono">{{$k}}: {{$v}}</td></tr>{{end}}
+      <tr><th>Type</th><td>{{if $cli}}Local CLI{{else}}HTTP API{{end}}</td></tr>
+      {{if $cli}}
+        <tr><th>Command</th><td class="mono">{{range $i, $c := .Cfg.Backend.Command}}{{if $i}} {{end}}{{$c}}{{end}}</td></tr>
+      {{else}}
+        <tr><th>Base URL</th><td class="mono">{{.Cfg.Backend.BaseURL}}</td></tr>
+        {{range $k, $v := .Cfg.Backend.Headers}}<tr><th>Header</th><td class="mono">{{$k}}: {{$v}}</td></tr>{{end}}
+      {{end}}
     </table>
   </div>
 
   <div class="card review">
     <h2>Methods</h2>
     <table class="methods">
-      <tr><th>Method</th><th>Verb</th><th>Path</th><th>Latency</th><th>Params</th></tr>
+      {{if $cli}}<tr><th>Method</th><th>CLI args</th><th>Latency</th><th>Params</th></tr>{{else}}<tr><th>Method</th><th>Verb</th><th>Path</th><th>Latency</th><th>Params</th></tr>{{end}}
       {{range .Cfg.Methods}}
       <tr>
         <td class="mono">{{.Name}}</td>
-        <td class="mono">{{.HTTP.Verb}}</td>
-        <td class="mono">{{.HTTP.Path}}</td>
+        {{if $cli}}<td class="mono">{{range $i, $a := .CLI.Args}}{{if $i}} {{end}}{{$a}}{{end}}</td>{{else}}<td class="mono">{{.HTTP.Verb}}</td><td class="mono">{{.HTTP.Path}}</td>{{end}}
         <td>{{.Duration}}</td>
         <td class="mono">{{range $i, $k := .SortedParamKeys}}{{if $i}}, {{end}}{{$k}}{{end}}</td>
       </tr>
       {{end}}
-      <tr><td class="mono">{{.Cfg.Namespace}}.help</td><td class="mono">—</td><td class="mono">(local)</td><td>fast</td><td class="muted">auto-added</td></tr>
+      {{if $cli}}<tr><td class="mono">{{.Cfg.Namespace}}.help</td><td class="mono">(local)</td><td>fast</td><td class="muted">auto-added</td></tr>{{else}}<tr><td class="mono">{{.Cfg.Namespace}}.help</td><td class="mono">—</td><td class="mono">(local)</td><td>fast</td><td class="muted">auto-added</td></tr>{{end}}
     </table>
   </div>
 

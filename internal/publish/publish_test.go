@@ -9,17 +9,17 @@ import (
 
 func TestFormToConfig(t *testing.T) {
 	v := url.Values{
-		"id":               {"io.pilot.parallel"},
+		"id":               {"io.pilot.example"},
 		"app_version":      {"0.1.0"},
 		"description":      {"Search API"},
-		"backend_base_url": {"https://api.parallel.ai"},
+		"backend_base_url": {"https://api.example.com"},
 		"header_name":      {"x-api-key"},
 		"header_value":     {"${PARALLEL_API_KEY}"},
-		"method_name":      {"parallel.search", ""},
+		"method_name":      {"example.search", ""},
 		"method_verb":      {"POST", "GET"},
 		"method_path":      {"/v1/search", "/skip"},
 		"method_duration":  {"med", "fast"},
-		"display_name":     {"Parallel"},
+		"display_name":     {"Example"},
 		"license":          {"Apache-2.0"},
 		"categories":       {"search, research"},
 	}
@@ -27,16 +27,16 @@ func TestFormToConfig(t *testing.T) {
 	if errs := cfg.Validate(); len(errs) > 0 {
 		t.Fatalf("expected valid config, got %v", errs)
 	}
-	if meta.ID != "io.pilot.parallel" || meta.Version != "0.1.0" {
+	if meta.ID != "io.pilot.example" || meta.Version != "0.1.0" {
 		t.Errorf("meta wrong: %+v", meta)
 	}
 	if cfg.Backend.Headers["x-api-key"] != "${PARALLEL_API_KEY}" || !cfg.Backend.NeedsSecrets() {
 		t.Errorf("auth header not mapped: %+v", cfg.Backend.Headers)
 	}
-	if len(cfg.Methods) != 1 || cfg.Methods[0].Name != "parallel.search" || cfg.Methods[0].HTTP.Verb != "POST" {
+	if len(cfg.Methods) != 1 || cfg.Methods[0].Name != "example.search" || cfg.Methods[0].HTTP.Verb != "POST" {
 		t.Errorf("methods mismapped (empty rows must be skipped): %+v", cfg.Methods)
 	}
-	if cfg.Listing.DisplayName != "Parallel" || cfg.Listing.License != "Apache-2.0" || len(cfg.Listing.Categories) != 2 {
+	if cfg.Listing.DisplayName != "Example" || cfg.Listing.License != "Apache-2.0" || len(cfg.Listing.Categories) != 2 {
 		t.Errorf("listing not mapped: %+v", cfg.Listing)
 	}
 }

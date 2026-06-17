@@ -18,10 +18,13 @@ type Step struct {
 }
 
 // Steps is the ordered wizard. Review is rendered after the last data step.
+// The "type" step (API vs CLI) comes before the backend step, so the backend
+// and methods steps render the right fields for the chosen kind.
 var Steps = []Step{
 	{Slug: "identity", Title: "Identity", Keys: []string{"id", "app_version", "description"}},
-	{Slug: "backend", Title: "Backend", Keys: []string{"backend_base_url", "header_name", "header_value"}},
-	{Slug: "methods", Title: "Methods", Keys: []string{"method_name", "method_verb", "method_path", "method_summary", "method_duration", "method_params"}},
+	{Slug: "type", Title: "Type", Keys: []string{"backend_type"}},
+	{Slug: "backend", Title: "Backend", Keys: []string{"backend_base_url", "backend_command", "header_name", "header_value"}},
+	{Slug: "methods", Title: "Methods", Keys: []string{"method_name", "method_verb", "method_path", "method_args", "method_summary", "method_duration", "method_params"}},
 	{Slug: "listing", Title: "Listing", Keys: []string{"display_name", "tagline", "vendor_name", "vendor_url", "vendor_contact", "homepage", "source_url", "license", "categories", "keywords"}},
 }
 
@@ -87,7 +90,7 @@ func (d *DraftStore) MergeStep(id string, step Step, posted url.Values) error {
 func (d *DraftStore) Delete(id string) { _ = os.Remove(d.path(id)) }
 
 // RowView is one method/header row, for pre-filling the repeat groups.
-type RowView struct{ Name, Verb, Path, Summary, Duration, Params, Value string }
+type RowView struct{ Name, Verb, Path, Args, Summary, Duration, Params, Value string }
 
 // MethodRows reconstructs the method rows from a draft (always at least one).
 func MethodRows(v url.Values) []RowView {
@@ -99,8 +102,8 @@ func MethodRows(v url.Values) []RowView {
 	for i := range names {
 		out[i] = RowView{
 			Name: names[i], Verb: at(v["method_verb"], i), Path: at(v["method_path"], i),
-			Summary: at(v["method_summary"], i), Duration: orDefault(at(v["method_duration"], i), "fast"),
-			Params: at(v["method_params"], i),
+			Args: at(v["method_args"], i), Summary: at(v["method_summary"], i),
+			Duration: orDefault(at(v["method_duration"], i), "fast"), Params: at(v["method_params"], i),
 		}
 		if out[i].Verb == "" {
 			out[i].Verb = "GET"

@@ -57,22 +57,22 @@ methods:
 `
 
 const authSpec = `
-id: io.pilot.parallel
+id: io.pilot.example
 app_version: 0.1.0
 description: "Search via an authenticated API."
 backend:
   type: http
-  base_url: https://api.parallel.ai
+  base_url: https://api.example.com
   headers:
     x-api-key: "${PARALLEL_API_KEY}"
 methods:
-  - name: parallel.search
+  - name: example.search
     summary: "Search."
     duration: med
     http: {verb: POST, path: /v1/search}
 listing:
-  display_name: Parallel
-  vendor: {name: Parallel}
+  display_name: Example
+  vendor: {name: Example}
   license: Apache-2.0
   categories: [search]
 `
@@ -185,15 +185,15 @@ func TestAuthAddsSecretsGrantAndHeaderWiring(t *testing.T) {
 func TestBuildMetadataMirrorsSpec(t *testing.T) {
 	cfg := parseSpec(t, authSpec)
 	m := BuildMetadata(cfg)
-	if m.SchemaVersion != 1 || m.ID != "io.pilot.parallel" || m.DisplayName != "Parallel" {
+	if m.SchemaVersion != 1 || m.ID != "io.pilot.example" || m.DisplayName != "Example" {
 		t.Errorf("metadata core fields wrong: %+v", m)
 	}
-	if m.License != "Apache-2.0" || len(m.Categories) != 1 || m.Vendor.Name != "Parallel" {
+	if m.License != "Apache-2.0" || len(m.Categories) != 1 || m.Vendor.Name != "Example" {
 		t.Errorf("listing fields not carried: %+v", m)
 	}
 	// methods = declared + auto help
-	if len(m.Methods) != 2 || m.Methods[len(m.Methods)-1].Name != "parallel.help" {
-		t.Errorf("expected declared methods + parallel.help, got %+v", m.Methods)
+	if len(m.Methods) != 2 || m.Methods[len(m.Methods)-1].Name != "example.help" {
+		t.Errorf("expected declared methods + example.help, got %+v", m.Methods)
 	}
 	// runtime facts are filled later, not here
 	if m.Size.BundleBytes != 0 || m.Vendor.PublisherPubkey != "" {
