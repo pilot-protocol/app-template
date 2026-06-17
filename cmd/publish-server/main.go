@@ -110,6 +110,16 @@ func stepIndex(slug string) (publish.Step, int, bool) {
 	return publish.Step{}, 0, false
 }
 
+func (s *server) renderStep(w http.ResponseWriter, step publish.Step, idx int, id string, draft url.Values, errs []string) {
+	s.render(w, "step.html", map[string]any{
+		"DraftID": id, "Step": step, "Num": idx + 1, "Total": len(publish.Steps),
+		"CurIdx": idx, "Steps": publish.Steps, "Values": draft,
+		"MethodRows": publish.MethodRows(draft), "HeaderRows": publish.HeaderRows(draft),
+		"Durations": []string{"fast", "med", "slow"},
+		"Last":      idx == len(publish.Steps)-1, "Errors": errs,
+	})
+}
+
 func (s *server) handleStep(w http.ResponseWriter, r *http.Request) {
 	step, idx, ok := stepIndex(r.PathValue("slug"))
 	if !ok {
@@ -122,13 +132,7 @@ func (s *server) handleStep(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther) // unknown/expired draft → fresh start
 		return
 	}
-	s.render(w, "step.html", map[string]any{
-		"DraftID": id, "Step": step, "Num": idx + 1, "Total": len(publish.Steps),
-		"CurIdx": idx, "Steps": publish.Steps, "Values": draft,
-		"MethodRows": publish.MethodRows(draft), "HeaderRows": publish.HeaderRows(draft),
-		"Durations": []string{"fast", "med", "slow"},
-		"Last":      idx == len(publish.Steps)-1,
-	})
+	s.renderStep(w, step, idx, id, draft, nil)
 }
 
 func (s *server) handleStepPost(w http.ResponseWriter, r *http.Request) {
@@ -144,6 +148,12 @@ func (s *server) handleStepPost(w http.ResponseWriter, r *http.Request) {
 	id := r.FormValue("d")
 	if err := s.drafts.MergeStep(id, step, r.PostForm); err != nil { // SAVE on every Next
 		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	draft, _ := s.drafts.Load(id)
+	// Server-authoritative per-step validation: block advancing while invalid.
+	if errs := publish.ValidateStep(step.Slug, draft); len(errs) > 0 {
+		s.renderStep(w, step, idx, id, draft, errs)
 		return
 	}
 	if idx+1 < len(publish.Steps) {

@@ -11,71 +11,98 @@
   <div class="top"><span class="brand">Pilot App Store</span><a class="brand" href="/admin">Review →</a></div>
   {{template "legend" .}}
   <div class="stephdr">
-    <span class="muted mono">Step {{.Num}} of {{.Total}}</span>
+    <span class="muted">Step {{.Num}} of {{.Total}}</span>
     <h1>{{.Step.Title}}</h1>
   </div>
 
+  {{if .Errors}}<div class="steperr">{{range .Errors}}<div>{{.}}</div>{{end}}</div>{{end}}
+
   <form method="post" action="/step/{{.Step.Slug}}">
     <input type="hidden" name="d" value="{{.DraftID}}">
+
+    {{if eq .Step.Slug "type"}}
+    <div class="choices">
+      <label class="choice">
+        <input type="radio" name="backend_type" value="http" {{if ne (g .Values "backend_type") "cli"}}checked{{end}}>
+        <div><b>HTTP API</b><span>Your app is a web API. We build a thin adapter that forwards each method to your endpoint.</span></div>
+      </label>
+      <label class="choice">
+        <input type="radio" name="backend_type" value="cli" {{if eq (g .Values "backend_type") "cli"}}checked{{end}}>
+        <div><b>Local CLI</b><span>Your app is a command-line tool. The adapter runs it on the operator's host — you upload no binary.</span></div>
+      </label>
+    </div>
+
+    {{else}}
     <div class="card">
 
     {{if eq .Step.Slug "identity"}}
       <div class="row">
-        <div class="field"><label>App ID</label><input class="mono" name="id" value="{{g .Values "id"}}" placeholder="io.pilot.parallel" required><p class="hint">Reverse-DNS, e.g. <code>io.pilot.&lt;name&gt;</code>.</p></div>
-        <div class="field"><label>Version</label><input class="mono" name="app_version" value="{{g .Values "app_version"}}" placeholder="0.1.0" required><p class="hint">Semver. Bump per build.</p></div>
+        <div class="field"><label>App ID</label><input class="mono" name="id" value="{{g .Values "id"}}" placeholder="io.pilot.myapp" required pattern="[a-z0-9]([a-z0-9_-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9_-]*[a-z0-9])?)+" title="Reverse-DNS, e.g. io.pilot.myapp"><p class="hint">Reverse-DNS, e.g. <code>io.pilot.&lt;name&gt;</code>.</p></div>
+        <div class="field"><label>Version</label><input class="mono" name="app_version" value="{{g .Values "app_version"}}" placeholder="0.1.0" required pattern="\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?" title="Semver, e.g. 0.1.0"><p class="hint">Semver. Bump per build.</p></div>
       </div>
-      <div class="field"><label>Description</label><input name="description" value="{{g .Values "description"}}" placeholder="Web search and deep-research tasks." required></div>
+      <div class="field"><label>Description</label><input name="description" value="{{g .Values "description"}}" placeholder="What your app does, in one line." required></div>
 
     {{else if eq .Step.Slug "backend"}}
-      <div class="field"><label>Base URL</label><input class="mono" name="backend_base_url" value="{{g .Values "backend_base_url"}}" placeholder="https://api.parallel.ai" required><p class="hint">The adapter forwards each method here. Baked in; operators can override.</p></div>
-      <div class="field">
-        <label>Auth headers <span class="muted">(optional)</span></label>
-        <div class="repeat" id="headers">
-          {{range .HeaderRows}}<div class="line hdr">
-            <input class="mono" name="header_name" value="{{.Name}}" placeholder="x-api-key">
-            <input class="mono" name="header_value" value="{{.Value}}" placeholder="${PARALLEL_API_KEY}">
-          </div>{{end}}
+      {{if eq (g .Values "backend_type") "cli"}}
+        <div class="field"><label>Command</label><input class="mono" name="backend_command" value="{{g .Values "backend_command"}}" placeholder="mytool --json" required><p class="hint">The adapter runs this on the operator's host. <b>You upload no binary</b> — the CLI must already be installed there. (CLI apps need the <code>proc.exec</code> capability, coming soon.)</p></div>
+      {{else}}
+        <div class="field"><label>Base URL</label><input class="mono" name="backend_base_url" value="{{g .Values "backend_base_url"}}" placeholder="https://api.example.com" required type="url"><p class="hint">The adapter forwards each method here. Baked in; operators can override.</p></div>
+        <div class="field">
+          <label>Auth headers <span class="muted">(optional)</span></label>
+          <div class="repeat" id="headers">
+            {{range .HeaderRows}}<div class="line hdr">
+              <input class="mono" name="header_name" value="{{.Name}}" placeholder="x-api-key">
+              <input class="mono" name="header_value" value="{{.Value}}" placeholder="${MYAPP_API_KEY}">
+            </div>{{end}}
+          </div>
+          <button type="button" class="addbtn" data-clone="headers">+ header</button>
+          <p class="hint"><code>${TOKEN}</code> resolves at runtime from the operator's env or <code>secrets.json</code> — never stored in the bundle.</p>
         </div>
-        <button type="button" class="addbtn" data-clone="headers">+ header</button>
-        <p class="hint"><code>${TOKEN}</code> resolves at runtime from the operator's env or <code>secrets.json</code> — never stored in the bundle.</p>
-      </div>
+      {{end}}
 
     {{else if eq .Step.Slug "methods"}}
+      {{$cli := eq (g .Values "backend_type") "cli"}}
       <div class="repeat" id="methods">
-        {{range .MethodRows}}<div class="line">
-          <input class="mono" name="method_name" value="{{.Name}}" placeholder="parallel.search">
-          <select name="method_verb"><option {{if eq .Verb "GET"}}selected{{end}}>GET</option><option {{if eq .Verb "POST"}}selected{{end}}>POST</option></select>
-          <input class="mono" name="method_path" value="{{.Path}}" placeholder="/v1/search">
+        {{range .MethodRows}}<div class="line {{if $cli}}cli{{end}}">
+          <input class="mono" name="method_name" value="{{.Name}}" placeholder="myapp.search">
+          {{if $cli}}
+            <input class="mono" name="method_args" value="{{.Args}}" placeholder="args: search ${q}">
+          {{else}}
+            <select name="method_verb"><option {{if eq .Verb "GET"}}selected{{end}}>GET</option><option {{if eq .Verb "POST"}}selected{{end}}>POST</option></select>
+            <input class="mono" name="method_path" value="{{.Path}}" placeholder="/search">
+          {{end}}
           <input name="method_summary" value="{{.Summary}}" placeholder="summary">
           <select name="method_duration">{{$d := .Duration}}{{range $.Durations}}<option {{if eq . $d}}selected{{end}}>{{.}}</option>{{end}}</select>
-          <input class="mono" name="method_params" value="{{.Params}}" placeholder="params: q,k">
+          <input class="mono" name="method_params" value="{{.Params}}" placeholder="params: q">
         </div>{{end}}
       </div>
       <button type="button" class="addbtn" data-clone="methods">+ method</button>
-      <p class="hint">Each row is one method: name · verb · path · summary · latency · params. GET → query string; POST → JSON body. A <code>&lt;ns&gt;.help</code> method is added automatically.</p>
+      {{if $cli}}<p class="hint">Each row is one method: name · CLI args (use <code>${param}</code> placeholders) · summary · latency · param names. A <code>&lt;ns&gt;.help</code> method is added automatically.</p>
+      {{else}}<p class="hint">Each row is one method: name · verb · path · summary · latency · params. GET → query string; POST → JSON body. A <code>&lt;ns&gt;.help</code> method is added automatically.</p>{{end}}
 
     {{else if eq .Step.Slug "listing"}}
       <div class="row">
-        <div class="field"><label>Display name</label><input name="display_name" value="{{g .Values "display_name"}}" placeholder="Parallel"></div>
+        <div class="field"><label>Display name</label><input name="display_name" value="{{g .Values "display_name"}}" placeholder="My App"></div>
         <div class="field"><label>License (SPDX)</label><input class="mono" name="license" value="{{g .Values "license"}}" placeholder="Apache-2.0"></div>
       </div>
-      <div class="field"><label>Tagline</label><input name="tagline" value="{{g .Values "tagline"}}" placeholder="Web search + deep research for agents"></div>
+      <div class="field"><label>Tagline</label><input name="tagline" value="{{g .Values "tagline"}}" placeholder="One-line pitch for the store card"></div>
       <div class="row">
-        <div class="field"><label>Vendor name</label><input name="vendor_name" value="{{g .Values "vendor_name"}}" placeholder="Parallel"></div>
-        <div class="field"><label>Vendor URL</label><input class="mono" name="vendor_url" value="{{g .Values "vendor_url"}}" placeholder="https://parallel.ai"></div>
+        <div class="field"><label>Vendor name</label><input name="vendor_name" value="{{g .Values "vendor_name"}}" placeholder="Acme"></div>
+        <div class="field"><label>Vendor URL</label><input class="mono" name="vendor_url" value="{{g .Values "vendor_url"}}" placeholder="https://example.com"></div>
       </div>
       <div class="row">
-        <div class="field"><label>Vendor contact</label><input class="mono" name="vendor_contact" value="{{g .Values "vendor_contact"}}" placeholder="support@parallel.ai"></div>
-        <div class="field"><label>Homepage</label><input class="mono" name="homepage" value="{{g .Values "homepage"}}" placeholder="https://parallel.ai"></div>
+        <div class="field"><label>Vendor contact</label><input class="mono" name="vendor_contact" value="{{g .Values "vendor_contact"}}" placeholder="support@example.com"></div>
+        <div class="field"><label>Homepage</label><input class="mono" name="homepage" value="{{g .Values "homepage"}}" placeholder="https://example.com"></div>
       </div>
-      <div class="field"><label>Source URL</label><input class="mono" name="source_url" value="{{g .Values "source_url"}}" placeholder="https://github.com/pilot-protocol/parallel-app"></div>
+      <div class="field"><label>Source URL</label><input class="mono" name="source_url" value="{{g .Values "source_url"}}" placeholder="https://github.com/your-org/your-app"></div>
       <div class="row">
-        <div class="field"><label>Categories</label><input name="categories" value="{{g .Values "categories"}}" placeholder="search, research"></div>
-        <div class="field"><label>Keywords</label><input name="keywords" value="{{g .Values "keywords"}}" placeholder="search, web, tasks"></div>
+        <div class="field"><label>Categories</label><input name="categories" value="{{g .Values "categories"}}" placeholder="search, data"></div>
+        <div class="field"><label>Keywords</label><input name="keywords" value="{{g .Values "keywords"}}" placeholder="search, api"></div>
       </div>
     {{end}}
 
     </div>
+    {{end}}
 
     <div class="navrow">
       {{if gt .CurIdx 0}}<a class="back" href="/step/{{ (index .Steps (add .CurIdx -1)).Slug }}?d={{.DraftID}}">← Back</a>{{else}}<span></span>{{end}}
@@ -88,10 +115,10 @@
 // Minimal DOM only — clone the last row of a repeat group. No computation.
 document.querySelectorAll('.addbtn').forEach(function (b) {
   b.addEventListener('click', function () {
-    var g = document.getElementById(b.dataset.clone);
-    var c = g.lastElementChild.cloneNode(true);
+    var grp = document.getElementById(b.dataset.clone);
+    var c = grp.lastElementChild.cloneNode(true);
     c.querySelectorAll('input').forEach(function (i) { i.value = ''; });
-    g.appendChild(c);
+    grp.appendChild(c);
   });
 });
 </script>

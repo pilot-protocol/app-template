@@ -178,7 +178,7 @@ key.sign audit.log`. Standard adapter grant set:
 placeholders resolved **at runtime** from the app's environment or a flat
 `$APP/secrets.json` map. Secrets are supplied by the operator at install time and
 are **never** baked into the bundle. e.g.
-`headers: { x-api-key: "${PARALLEL_API_KEY}" }`.
+`headers: { x-api-key: "${MYAPP_API_KEY}" }`.
 
 ### 5.4 Discovery contract — `<ns>.help` (REQUIRED)
 Every app **must** expose `<namespace>.help`, a local (no-backend) method returning:

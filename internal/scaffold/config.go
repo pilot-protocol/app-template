@@ -91,7 +91,7 @@ type Backend struct {
 	// ${TOKEN} placeholders resolved at runtime from the app's environment or
 	// from $APP/secrets.json — so an API key is supplied by the operator at
 	// install time and is NEVER baked into the bundle. e.g.
-	//   headers: { x-api-key: "${PARALLEL_API_KEY}" }
+	//   headers: { x-api-key: "${MYAPP_API_KEY}" }
 	Headers map[string]string `yaml:"headers"`
 }
 

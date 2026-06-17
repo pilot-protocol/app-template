@@ -12,36 +12,36 @@ import (
 // submits raw field values. Repeated fields (method_*, header_*) are parallel
 // arrays — row i across them describes one method / header.
 func FormToConfig(v url.Values) (*scaffold.Config, specMeta) {
+	isCLI := v.Get("backend_type") == "cli"
 	cfg := &scaffold.Config{
 		ID:          strings.TrimSpace(v.Get("id")),
 		AppVersion:  strings.TrimSpace(v.Get("app_version")),
 		Description: strings.TrimSpace(v.Get("description")),
-		Backend: scaffold.Backend{
-			Type:    "http",
-			BaseURL: strings.TrimSpace(v.Get("backend_base_url")),
-		},
+		Backend:     scaffold.Backend{Type: "http", BaseURL: strings.TrimSpace(v.Get("backend_base_url"))},
 	}
-
-	// Auth headers (name/value parallel arrays).
-	hNames, hVals := v["header_name"], v["header_value"]
-	headers := map[string]string{}
-	for i := range hNames {
-		n := strings.TrimSpace(hNames[i])
-		val := ""
-		if i < len(hVals) {
-			val = strings.TrimSpace(hVals[i])
+	if isCLI {
+		// CLI app: the adapter execs a local command on the host. The customer
+		// uploads no binary — the CLI is expected on the operator's host.
+		cfg.Backend.Type = "cli"
+		cfg.Backend.BaseURL = ""
+		cfg.Backend.Command = strings.Fields(v.Get("backend_command"))
+	} else {
+		// Auth headers (name/value parallel arrays) — HTTP only.
+		hNames, hVals := v["header_name"], v["header_value"]
+		headers := map[string]string{}
+		for i := range hNames {
+			if n := strings.TrimSpace(hNames[i]); n != "" {
+				headers[n] = strings.TrimSpace(at(hVals, i))
+			}
 		}
-		if n != "" {
-			headers[n] = val
+		if len(headers) > 0 {
+			cfg.Backend.Headers = headers
 		}
-	}
-	if len(headers) > 0 {
-		cfg.Backend.Headers = headers
 	}
 
 	// Methods (parallel arrays). Empty-named rows are skipped.
 	names := v["method_name"]
-	verbs, paths := v["method_verb"], v["method_path"]
+	verbs, paths, argv := v["method_verb"], v["method_path"], v["method_args"]
 	sums, durs := v["method_summary"], v["method_duration"]
 	params := v["method_params"]
 	for i := range names {
@@ -49,11 +49,11 @@ func FormToConfig(v url.Values) (*scaffold.Config, specMeta) {
 		if name == "" {
 			continue
 		}
-		m := scaffold.Method{
-			Name:     name,
-			Summary:  at(sums, i),
-			Duration: orDefault(at(durs, i), "fast"),
-			HTTP:     &scaffold.HTTPRoute{Verb: orDefault(at(verbs, i), "GET"), Path: at(paths, i)},
+		m := scaffold.Method{Name: name, Summary: at(sums, i), Duration: orDefault(at(durs, i), "fast")}
+		if isCLI {
+			m.CLI = &scaffold.CLIRoute{Args: strings.Fields(at(argv, i))}
+		} else {
+			m.HTTP = &scaffold.HTTPRoute{Verb: orDefault(at(verbs, i), "GET"), Path: at(paths, i)}
 		}
 		if p := at(params, i); p != "" {
 			m.Params = map[string]string{}
