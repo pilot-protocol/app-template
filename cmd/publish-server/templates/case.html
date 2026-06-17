@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Case {{.C.CaseID}} · Pilot App Store</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><span class="brand">Pilot App Store · Case</span><a class="brand" href="/admin?token={{.Token}}">← All cases</a></div>
+  <h1>{{.C.Submission.Listing.DisplayName}} <span class="soft">{{.C.Submission.Version}}</span></h1>
+  <p class="lede"><span class="pill {{.C.Status}}">{{.C.Status}}</span> · <span class="mono">{{.C.Submission.ID}}</span></p>
+
+  <div class="card review"><h2>App</h2><table>
+    <tr><th>ID</th><td class="mono">{{.C.Submission.ID}}</td></tr>
+    <tr><th>Version</th><td class="mono">{{.C.Submission.Version}}</td></tr>
+    <tr><th>Description</th><td>{{.C.Submission.Description}}</td></tr>
+    <tr><th>Backend</th><td class="mono">{{.C.Submission.Backend.BaseURL}}</td></tr>
+    {{range .C.Submission.Backend.Headers}}<tr><th>Header</th><td class="mono">{{.Name}}: {{.Value}}</td></tr>{{end}}
+  </table></div>
+
+  <div class="card review"><h2>Methods</h2><table class="methods">
+    <tr><th>Method</th><th>Latency</th><th>Path</th><th>Description</th></tr>
+    {{range .C.Submission.Methods}}<tr>
+      <td class="mono">{{.Name}}</td><td>{{.Latency}}</td>
+      <td class="mono">{{.HTTP.Verb}} {{.HTTP.Path}}</td><td>{{.Description}}</td>
+    </tr>{{end}}
+  </table></div>
+
+  <div class="card review"><h2>Listing</h2><table>
+    <tr><th>Display name</th><td>{{.C.Submission.Listing.DisplayName}}</td></tr>
+    <tr><th>Tagline</th><td>{{.C.Submission.Listing.Tagline}}</td></tr>
+    <tr><th>App description</th><td>{{.C.Submission.Listing.AppDescription}}</td></tr>
+    <tr><th>License</th><td class="mono">{{.C.Submission.Listing.License}}</td></tr>
+    <tr><th>Categories</th><td>{{join .C.Submission.Listing.Categories}}</td></tr>
+    <tr><th>Keywords</th><td>{{join .C.Submission.Listing.Keywords}}</td></tr>
+    <tr><th>Source</th><td class="mono">{{.C.Submission.Listing.SourceURL}}</td></tr>
+    {{if .C.Submission.Listing.RequiresBinary}}<tr><th>Binary download</th><td class="mono">{{.C.Submission.Listing.BinaryURL}}</td></tr>{{end}}
+  </table></div>
+
+  <div class="card review"><h2>Vendor</h2><table>
+    <tr><th>Name</th><td>{{.C.Submission.Vendor.Name}}</td></tr>
+    <tr><th>URL</th><td class="mono">{{.C.Submission.Vendor.URL}}</td></tr>
+    <tr><th>Contact</th><td class="mono">{{.C.Submission.Vendor.Contact}}</td></tr>
+    <tr><th>How agents use it</th><td>{{.C.Submission.Vendor.AgentUsage}}</td></tr>
+    <tr><th>Capabilities</th><td>{{.C.Submission.Vendor.Capabilities}}</td></tr>
+  </table></div>
+
+  <div class="card review"><h2>Build</h2><table>
+    <tr><th>Bundle</th><td class="mono">{{.C.Build.BundleName}}</td></tr>
+    <tr><th>Bundle sha256</th><td class="mono">{{.C.Build.BundleSHA256}}</td></tr>
+    <tr><th>Signed by</th><td class="mono">{{.C.Build.Publisher}}</td></tr>
+  </table></div>
+
+  <div class="card review"><h2>Generated pilotctl</h2><pre>{{range .Commands}}{{.}}
+{{end}}</pre></div>
+
+  {{if eq (printf "%s" .C.Status) "pending"}}
+  <div class="navrow">
+    <form class="inline-form" method="post" action="/admin/reject">
+      <input type="hidden" name="id" value="{{.C.CaseID}}"><input type="hidden" name="token" value="{{.Token}}">
+      <input name="reason" placeholder="rejection reason" style="width:200px;display:inline-block;padding:8px 12px">
+      <button class="reject" type="submit">Reject</button>
+    </form>
+    <form class="inline-form" method="post" action="/admin/approve">
+      <input type="hidden" name="id" value="{{.C.CaseID}}"><input type="hidden" name="token" value="{{.Token}}">
+      <button class="primary" type="submit">Approve &amp; publish</button>
+    </form>
+  </div>
+  {{else}}<p class="muted">{{range .C.History}}{{.At}} — {{.Status}}{{if .Note}} ({{.Note}}){{end}}<br>{{end}}</p>{{end}}
+</div>
+</body>
+</html>
