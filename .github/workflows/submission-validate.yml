@@ -1,11 +1,13 @@
-# Gates every submission PR (SPEC §7.1). Builds the verifier and runs the full
-# review gate on each submitted bundle. Green here + human checklist = mergeable.
+# The repo's required check (job `validate`). Runs on every PR:
+#   - builds/vets/tests the pilot-app tool (code PRs), and
+#   - runs the verifier on any submitted bundle (submission PRs, SPEC §7.1).
+# Always runs, so it's a valid branch-protection gate for both PR kinds.
 name: submission-validate
 
 on:
   pull_request:
-    paths:
-      - "submissions/**"
+  push:
+    branches: [main]
 
 jobs:
   validate:
@@ -17,10 +19,13 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Build verifier
-        run: go build -o /tmp/pilot-app ./cmd/pilot-app
+      - name: Build, vet, test the tool
+        run: |
+          go build -o /tmp/pilot-app ./cmd/pilot-app
+          go vet ./...
+          go test ./...
 
-      - name: Verify every submitted bundle
+      - name: Verify any submitted bundles
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -34,4 +39,4 @@ jobs:
             echo "::endgroup::"
             found=1
           done
-          if [ "$found" = 0 ]; then echo "no submissions found under submissions/"; fi
+          if [ "$found" = 0 ]; then echo "no submissions in this PR — tool CI only"; fi

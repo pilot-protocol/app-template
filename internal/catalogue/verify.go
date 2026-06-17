@@ -164,6 +164,51 @@ func EntryForBundle(path string) (Entry, error) {
 	return Entry{ID: m.ID, Version: m.AppVersion, Description: m.Description, BundleURL: url, BundleSHA256: hex.EncodeToString(sum[:])}, nil
 }
 
+// BundleFacts are the runtime facts about a built bundle that the publisher
+// needs to fill metadata.json + the v2 catalogue entry.
+type BundleFacts struct {
+	ID             string
+	Version        string
+	Description    string
+	Publisher      string // store.publisher from the (signed) manifest
+	SHA256         string // sha256 of the tarball
+	BundleBytes    int64  // tarball size
+	InstalledBytes int64  // size of the binary inside the bundle
+}
+
+// ReadBundleFacts opens a local bundle tarball and extracts the facts above.
+func ReadBundleFacts(path string) (BundleFacts, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return BundleFacts{}, err
+	}
+	sum := sha256.Sum256(raw)
+	mfRaw, binBytes, err := extractBundle(raw)
+	if err != nil {
+		return BundleFacts{}, err
+	}
+	var m struct {
+		ID          string `json:"id"`
+		AppVersion  string `json:"app_version"`
+		Description string `json:"description"`
+		Store       struct {
+			Publisher string `json:"publisher"`
+		} `json:"store"`
+	}
+	if err := json.Unmarshal(mfRaw, &m); err != nil {
+		return BundleFacts{}, err
+	}
+	return BundleFacts{
+		ID:             m.ID,
+		Version:        m.AppVersion,
+		Description:    m.Description,
+		Publisher:      m.Store.Publisher,
+		SHA256:         hex.EncodeToString(sum[:]),
+		BundleBytes:    int64(len(raw)),
+		InstalledBytes: int64(len(binBytes)),
+	}, nil
+}
+
 // VerifyCatalogue verifies every entry in a catalogue.json file. If oldPath is
 // non-empty, entries are diffed against it for the downgrade check.
 func VerifyCatalogue(newPath, oldPath string) ([]Result, error) {

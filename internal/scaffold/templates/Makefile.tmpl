@@ -12,12 +12,17 @@ PUBLISHER_KEY ?= {{.Publisher.KeyFile}}
 VERSION       := $(shell sed -n 's/.*"app_version": "\([^"]*\)".*/\1/p' manifest.json)
 TARBALL       := $(APP_ID)-$(VERSION).tar.gz
 
-.PHONY: build test bundle package gen-key verify clean publish-help
+.PHONY: tidy build test bundle package gen-key verify clean publish-help
 
-build:
+# Resolve deps + write go.sum. The scaffold ships go.mod without go.sum (the
+# hashes depend on the resolved module graph), so the first build must tidy.
+tidy:
+	go mod tidy
+
+build: tidy
 	go build -o $(BIN) ./cmd/{{.BinaryName}}
 
-test:
+test: tidy
 	go vet ./...
 	go test ./...
 

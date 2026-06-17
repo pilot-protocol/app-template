@@ -36,7 +36,10 @@ else
   gh release create "$TAG" "/tmp/$ASSET" -R "$CATALOG_REPO" -t "$ID v$VERSION" -n "Pilot app-store bundle for $ID"
 fi
 
-echo "==> updating catalogue.json on $PLATFORM_REPO via PR"
+BUNDLE_BYTES="$(wc -c < "$BUNDLE" | tr -d ' ')"
+MDSRC="$DIR/metadata.json"   # the v2 store-page record, emitted by `pilot-app submit`
+
+echo "==> updating catalogue (v2) on $PLATFORM_REPO via PR"
 WORK="$(mktemp -d)"
 gh repo clone "$PLATFORM_REPO" "$WORK/platform" -- --depth 1 >/dev/null 2>&1
 cd "$WORK/platform"
@@ -46,13 +49,41 @@ BRANCH="catalogue/${ID}-${VERSION}"
 git checkout -b "$BRANCH"
 
 CAT="catalogue/catalogue.json"
-jq --arg id "$ID" --arg v "$VERSION" --arg d "$DESC" --arg u "$BUNDLE_URL" --arg s "$SHA" '
-  .apps = ((.apps // []) | map(select(.id != $id))) + [{
-    id: $id, version: $v, description: $d, bundle_url: $u, bundle_sha256: $s
-  }]
-' "$CAT" > "$CAT.tmp" && mv "$CAT.tmp" "$CAT"
+APPDIR="catalogue/apps/${ID}"
+META_URL="https://raw.githubusercontent.com/${PLATFORM_REPO}/main/${APPDIR}/metadata.json"
 
-git add "$CAT"
+if [ -f "$MDSRC" ]; then
+  # v2 listing: publish the per-app metadata.json + a fully-populated entry.
+  mkdir -p "$APPDIR"
+  cp "$MDSRC" "$APPDIR/metadata.json"
+  META_SHA="$(shasum -a 256 "$APPDIR/metadata.json" | awk '{print $1}')"
+  DISPLAY="$(jq -r '.display_name // ""' "$MDSRC")"
+  VENDOR="$(jq -r '.vendor.name // ""' "$MDSRC")"
+  LICENSE="$(jq -r '.license // ""' "$MDSRC")"
+  SOURCE="$(jq -r '.source_url // ""' "$MDSRC")"
+  jq --arg id "$ID" --arg v "$VERSION" --arg d "$DESC" --arg u "$BUNDLE_URL" --arg s "$SHA" \
+     --argjson sz "$BUNDLE_BYTES" --arg dn "$DISPLAY" --arg ven "$VENDOR" --arg lic "$LICENSE" \
+     --arg src "$SOURCE" --arg mu "$META_URL" --arg ms "$META_SHA" \
+     --slurpfile md "$MDSRC" '
+    (.version = 2) |
+    .apps = ((.apps // []) | map(select(.id != $id))) + [{
+      id: $id, version: $v, description: $d, bundle_url: $u, bundle_sha256: $s,
+      display_name: $dn, vendor: $ven, categories: ($md[0].categories // []),
+      bundle_size: $sz, source_url: $src, license: $lic,
+      metadata_url: $mu, metadata_sha256: $ms
+    }]
+  ' "$CAT" > "$CAT.tmp" && mv "$CAT.tmp" "$CAT"
+  git add "$CAT" "$APPDIR/metadata.json"
+else
+  echo "warning: no metadata.json in submission — writing a basic entry (no rich store page)"
+  jq --arg id "$ID" --arg v "$VERSION" --arg d "$DESC" --arg u "$BUNDLE_URL" --arg s "$SHA" '
+    .apps = ((.apps // []) | map(select(.id != $id))) + [{
+      id: $id, version: $v, description: $d, bundle_url: $u, bundle_sha256: $s
+    }]
+  ' "$CAT" > "$CAT.tmp" && mv "$CAT.tmp" "$CAT"
+  git add "$CAT"
+fi
+
 git commit -m "catalogue: ${ID} v${VERSION}"
 git push -u origin "$BRANCH"
 gh pr create -R "$PLATFORM_REPO" --base main --head "$BRANCH" \

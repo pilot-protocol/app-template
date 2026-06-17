@@ -22,6 +22,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+{{- if .Backend.Headers}}
+	"strings"
+{{- end}}
 	"syscall"
 	"time"
 
@@ -48,7 +51,7 @@ func main() {
 
 	cfg := resolveConfig(*manifestPath)
 {{- if eq .Backend.Type "http"}}
-	client, err := backend.New(backend.Config{BaseURL: cfg.BackendURL})
+	client, err := backend.New(backend.Config{BaseURL: cfg.BackendURL{{if .Backend.Headers}}, Headers: resolveHeaders(*manifestPath){{end}}})
 	if err != nil {
 		log.Fatalf("{{.BinaryName}}: backend config: %v", err)
 	}
@@ -308,3 +311,62 @@ func resolveConfig(manifestPath string) appConfig {
 	}
 	return cfg
 }
+{{if .Backend.Headers}}
+// resolveHeaders builds the headers sent on every backend request. ${TOKEN}
+// placeholders are filled at runtime from the environment or from a flat
+// $APP/secrets.json map — so secrets (e.g. an API key) are supplied by the
+// operator at install time and are NEVER baked into the bundle.
+func resolveHeaders(manifestPath string) map[string]string {
+	raw := map[string]string{
+{{- range $k := .Backend.SortedHeaderKeys}}
+		{{printf "%q" $k}}: {{printf "%q" (index $.Backend.Headers $k)}},
+{{- end}}
+	}
+	secrets := loadSecrets(manifestPath)
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		out[k] = expandSecrets(v, secrets)
+	}
+	return out
+}
+
+// loadSecrets reads $APP/secrets.json (a flat {"NAME":"value"} map) if present.
+// Absent or unreadable → empty map (env vars can still satisfy placeholders).
+func loadSecrets(manifestPath string) map[string]string {
+	dir := os.Getenv("APP")
+	if manifestPath != "" {
+		dir = filepath.Dir(manifestPath)
+	}
+	out := map[string]string{}
+	if dir == "" {
+		return out
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "secrets.json")); err == nil {
+		_ = json.Unmarshal(b, &out)
+	}
+	return out
+}
+
+// expandSecrets replaces ${NAME} tokens in s, preferring the environment, then
+// the secrets map. An unresolved token expands to empty.
+func expandSecrets(s string, secrets map[string]string) string {
+	out := s
+	for {
+		i := strings.Index(out, "${")
+		if i < 0 {
+			break
+		}
+		j := strings.Index(out[i:], "}")
+		if j < 0 {
+			break
+		}
+		name := out[i+2 : i+j]
+		val := os.Getenv(name)
+		if val == "" {
+			val = secrets[name]
+		}
+		out = out[:i] + val + out[i+j+1:]
+	}
+	return out
+}
+{{end}}

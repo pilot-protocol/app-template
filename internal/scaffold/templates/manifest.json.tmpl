@@ -15,11 +15,12 @@
   ],
   "grants": [
     {"cap": "fs.read", "target": "$APP/config.json"},
+{{- if .Backend.NeedsSecrets}}
+    {"cap": "fs.read", "target": "$APP/secrets.json"},
+{{- end}}
     {"cap": "audit.log", "target": "*"},
 {{- if eq .Backend.Type "http"}}
     {"cap": "net.dial", "target": "{{.BackendHost}}",
-     "if": {"kind": "rate", "params": {"per": "min", "limit": {{.Grants.RatePerMin}}}}},
-    {"cap": "net.dial", "target": "127.0.0.1",
      "if": {"kind": "rate", "params": {"per": "min", "limit": {{.Grants.RatePerMin}}}}}
 {{- else}}
     {"cap": "proc.exec", "target": "{{index .Backend.Command 0}}",

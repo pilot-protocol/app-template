@@ -47,5 +47,7 @@ backend, drop `~/.pilot/apps/{{.ID}}/config.json` (`{"backend_url":"..."}`) and
 ## Regenerating
 
 Edit `pilot.app.yaml` and re-run `pilot-app init`. `cmd/`, `internal/backend/`,
-and `manifest.json` are generated — keep changes in the spec, not the code.
+`manifest.json`, and `metadata.json` are generated — keep changes in the spec,
+not the code. Secrets are never committed: drop API keys in `secrets.json`
+(gitignored) or the environment; `${TOKEN}` headers resolve them at runtime.
 Bump `app_version` in the spec for every new binary.
