@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Check your submission · Pilot</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><span class="brand">Pilot App Store</span><a class="brand" href="/">← Back</a></div>
+  <h1>Almost there</h1>
+  <p class="lede">The server checked your submission and found a few things to fix:</p>
+  <div class="card">
+    <h2>Fix these</h2>
+    <ul>
+      {{range .Errors}}<li class="bad" style="margin-bottom:8px">{{.}}</li>{{end}}
+    </ul>
+    <p class="muted"><a href="/">← Return to the form</a> and resubmit.</p>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Publish an app · Pilot</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><span class="brand">Pilot App Store</span><a class="brand" href="/admin">Review →</a></div>
+  <h1>Publish an app <span class="soft">for review</span></h1>
+  <p class="lede">Describe your existing HTTP API. We build, sign, and verify the adapter on our side — nothing is compiled in your browser. On approval it ships to the Pilot app store.</p>
+
+  <form method="post" action="/submit">
+    <div class="card">
+      <h2>Identity</h2>
+      <div class="row">
+        <div class="field">
+          <label>App ID</label>
+          <input class="mono" name="id" placeholder="io.pilot.parallel" required>
+          <p class="hint">Reverse-DNS, e.g. <code>io.pilot.&lt;name&gt;</code>.</p>
+        </div>
+        <div class="field">
+          <label>Version</label>
+          <input class="mono" name="app_version" placeholder="0.1.0" required>
+          <p class="hint">Semver. Bump for every new build.</p>
+        </div>
+      </div>
+      <div class="field">
+        <label>Description</label>
+        <input name="description" placeholder="Web search and deep-research tasks." required>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Backend</h2>
+      <div class="field">
+        <label>Base URL</label>
+        <input class="mono" name="backend_base_url" placeholder="https://api.parallel.ai" required>
+        <p class="hint">The adapter forwards each method to this API. Ships baked in; operators can override.</p>
+      </div>
+      <div class="field">
+        <label>Auth headers <span class="muted">(optional)</span></label>
+        <div class="repeat" id="headers">
+          <div class="line hdr">
+            <input class="mono" name="header_name" placeholder="x-api-key">
+            <input class="mono" name="header_value" placeholder="${PARALLEL_API_KEY}">
+          </div>
+        </div>
+        <button type="button" class="addbtn" data-clone="headers">+ header</button>
+        <p class="hint"><code>${TOKEN}</code> values resolve at runtime from the operator's env or <code>secrets.json</code> — never stored in the bundle.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Methods</h2>
+      <div class="repeat" id="methods">
+        <div class="line">
+          <input class="mono" name="method_name" placeholder="parallel.search">
+          <select name="method_verb"><option>GET</option><option>POST</option></select>
+          <input class="mono" name="method_path" placeholder="/v1/search">
+          <input name="method_summary" placeholder="summary">
+          <select name="method_duration">
+            {{range .Durations}}<option>{{.}}</option>{{end}}
+          </select>
+        </div>
+      </div>
+      <button type="button" class="addbtn" data-clone="methods">+ method</button>
+      <p class="hint">GET → params become the query string; POST → the payload is the JSON body. A <code>&lt;ns&gt;.help</code> method is added automatically.</p>
+      <div class="field" style="margin-top:16px">
+        <label>Param names per method <span class="muted">(optional, comma-separated, matched by row order)</span></label>
+        <input class="mono" name="method_params" placeholder="q,k">
+        <input class="mono" name="method_params" placeholder="run_id" style="margin-top:8px">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Store listing</h2>
+      <div class="row">
+        <div class="field"><label>Display name</label><input name="display_name" placeholder="Parallel"></div>
+        <div class="field"><label>License (SPDX)</label><input class="mono" name="license" placeholder="Apache-2.0"></div>
+      </div>
+      <div class="field"><label>Tagline</label><input name="tagline" placeholder="Web search + deep research for agents"></div>
+      <div class="row">
+        <div class="field"><label>Vendor name</label><input name="vendor_name" placeholder="Parallel"></div>
+        <div class="field"><label>Vendor URL</label><input class="mono" name="vendor_url" placeholder="https://parallel.ai"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Vendor contact</label><input class="mono" name="vendor_contact" placeholder="support@parallel.ai"></div>
+        <div class="field"><label>Homepage</label><input class="mono" name="homepage" placeholder="https://parallel.ai"></div>
+      </div>
+      <div class="field"><label>Source URL</label><input class="mono" name="source_url" placeholder="https://github.com/pilot-protocol/parallel-app"></div>
+      <div class="row">
+        <div class="field"><label>Categories</label><input name="categories" placeholder="search, research"></div>
+        <div class="field"><label>Keywords</label><input name="keywords" placeholder="search, web, tasks"></div>
+      </div>
+    </div>
+
+    <div class="actions"><button class="primary" type="submit">Submit for review</button></div>
+  </form>
+</div>
+
+<script>
+// Minimal DOM only — no computation. Clone the last row of a repeat group.
+document.querySelectorAll('.addbtn').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var g = document.getElementById(b.dataset.clone);
+    var last = g.lastElementChild;
+    var c = last.cloneNode(true);
+    c.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+    g.appendChild(c);
+  });
+});
+</script>
+</body>
+</html>

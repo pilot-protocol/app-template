@@ -1,0 +1,85 @@
+/* Pilot app-store submission GUI — reuses pilot-protocol/website design tokens. */
+:root {
+  --sans: 'Inter Tight', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --serif: 'Instrument Serif', 'Times New Roman', serif;
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --bg: #fafaf7;
+  --bg-2: #f0efea;
+  --ink: #0b0b0a;
+  --ink-dim: #5a5a54;
+  --ink-faint: #c7c6be;
+  --line: #e6e5df;
+  --line-2: #d8d7d0;
+  --accent: oklch(0.72 0.19 125);
+  --accent-ink: #0b0b0a;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-font-smoothing: antialiased; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--ink);
+  margin: 0;
+  line-height: 1.5;
+  font-size: 16px;
+}
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--accent); }
+
+.wrap { max-width: 760px; margin: 0 auto; padding: 64px 24px 96px; }
+.top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.brand { font-family: var(--mono); font-size: 13px; letter-spacing: 0.04em; color: var(--ink-dim); text-transform: uppercase; }
+h1 { font-size: 40px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 8px; }
+h1 .soft { color: var(--ink-dim); font-weight: 400; }
+.lede { font-family: var(--serif); font-size: 21px; color: var(--ink-dim); margin: 0 0 48px; line-height: 1.4; }
+
+.card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 28px 28px 8px; margin-bottom: 24px; }
+.card > h2 { font-size: 13px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); margin: 0 0 20px; font-weight: 500; }
+
+.field { margin-bottom: 20px; }
+.field label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
+.field .hint { font-size: 13px; color: var(--ink-dim); margin: 4px 0 0; }
+input, select, textarea {
+  width: 100%; font: inherit; font-size: 15px; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line-2); border-radius: 9px;
+  padding: 11px 13px; transition: border-color .12s ease, box-shadow .12s ease;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+textarea { resize: vertical; min-height: 72px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.mono { font-family: var(--mono); }
+
+.repeat .line { display: grid; grid-template-columns: 1.4fr 90px 1.4fr 1fr 90px; gap: 10px; margin-bottom: 10px; align-items: center; }
+.repeat .line.hdr { grid-template-columns: 1fr 1.4fr; }
+.addbtn { background: none; border: 1px dashed var(--line-2); color: var(--ink-dim); border-radius: 9px; padding: 9px 14px; font: inherit; font-size: 14px; cursor: pointer; width: auto; }
+.addbtn:hover { border-color: var(--accent); color: var(--accent); }
+
+.actions { position: sticky; bottom: 0; background: linear-gradient(transparent, var(--bg) 30%); padding: 24px 0; margin-top: 8px; }
+button.primary {
+  background: var(--accent); color: var(--accent-ink); border: none; border-radius: 10px;
+  padding: 14px 26px; font: inherit; font-weight: 600; font-size: 16px; cursor: pointer; width: auto;
+  transition: filter .12s ease;
+}
+button.primary:hover { filter: brightness(1.05); }
+.muted { color: var(--ink-dim); font-size: 14px; }
+
+/* result + admin */
+.ok { color: oklch(0.55 0.16 145); font-weight: 600; }
+.bad { color: oklch(0.55 0.2 28); font-weight: 600; }
+.pill { display: inline-block; font-family: var(--mono); font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.pill.pending { color: #8a6d1a; border-color: #e3cf8f; background: #fbf6e4; }
+.pill.approved { color: oklch(0.5 0.16 145); border-color: #b9dcc0; background: #eef7f0; }
+.pill.rejected { color: oklch(0.5 0.2 28); border-color: #e3b9b9; background: #fbeeee; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--mono); font-size: 12px; text-transform: uppercase; color: var(--ink-dim); letter-spacing: 0.04em; }
+code, pre { font-family: var(--mono); font-size: 13px; }
+pre { background: var(--bg-2); border: 1px solid var(--line); border-radius: 9px; padding: 14px; overflow-x: auto; }
+.inline-form { display: inline; }
+.inline-form button { background: none; border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; width: auto; }
+.inline-form button.approve:hover { border-color: var(--accent); color: var(--accent); }
+.inline-form button.reject:hover { border-color: oklch(0.6 0.2 28); color: oklch(0.55 0.2 28); }

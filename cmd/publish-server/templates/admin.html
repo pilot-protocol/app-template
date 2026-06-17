@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review · Pilot App Store</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><span class="brand">Pilot App Store · Review</span><a class="brand" href="/">+ New submission</a></div>
+  <h1>Submissions</h1>
+  <p class="lede">Approving triggers the publish workflow: release on <code>pilot-protocol/catalog</code> + the catalogue v2 entry on the platform repo.</p>
+
+  <div class="card" style="padding:8px 28px 8px">
+    <table>
+      <tr><th>App</th><th>Ver</th><th>Status</th><th>Updated</th><th>Action</th></tr>
+      {{range .Subs}}
+      <tr>
+        <td><strong>{{.DisplayName}}</strong><br><span class="mono muted">{{.ID}}</span>{{if .Detail}}<br><span class="muted">{{.Detail}}</span>{{end}}</td>
+        <td class="mono">{{.Version}}</td>
+        <td><span class="pill {{.Status}}">{{.Status}}</span></td>
+        <td class="mono muted">{{.UpdatedAt}}</td>
+        <td>
+          {{if eq (printf "%s" .Status) "pending"}}
+          <form class="inline-form" method="post" action="/admin/approve">
+            <input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="token" value="{{$.Token}}">
+            <button class="approve" type="submit">Approve &amp; publish</button>
+          </form>
+          <form class="inline-form" method="post" action="/admin/reject">
+            <input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="token" value="{{$.Token}}">
+            <input name="reason" placeholder="reason" style="width:120px;display:inline-block;padding:6px 10px">
+            <button class="reject" type="submit">Reject</button>
+          </form>
+          {{else}}<span class="muted">—</span>{{end}}
+        </td>
+      </tr>
+      {{else}}
+      <tr><td colspan="5" class="muted" style="padding:24px 10px">No submissions yet.</td></tr>
+      {{end}}
+    </table>
+  </div>
+</div>
+</body>
+</html>
