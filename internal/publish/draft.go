@@ -20,6 +20,10 @@ type Step struct {
 // Steps is the ordered wizard. Review is rendered after the last data step.
 // The "type" step (API vs CLI) comes before the backend step, so the backend
 // and methods steps render the right fields for the chosen kind.
+//
+// TODO(native-apps): the "cli" path is COMING SOON (blocked at the type step).
+// When binary delivery ships (docs/NATIVE-APPS.md), the backend step gains
+// per-OS/arch download URL + sha256 + exec command, and methods map to args.
 var Steps = []Step{
 	{Slug: "identity", Title: "Identity", Keys: []string{"id", "app_version", "description"}},
 	{Slug: "type", Title: "Type", Keys: []string{"backend_type"}},

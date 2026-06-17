@@ -23,12 +23,12 @@
     {{if eq .Step.Slug "type"}}
     <div class="choices">
       <label class="choice">
-        <input type="radio" name="backend_type" value="http" {{if ne (g .Values "backend_type") "cli"}}checked{{end}}>
+        <input type="radio" name="backend_type" value="http" checked>
         <div><b>HTTP API</b><span>Your app is a web API. We build a thin adapter that forwards each method to your endpoint.</span></div>
       </label>
-      <label class="choice">
-        <input type="radio" name="backend_type" value="cli" {{if eq (g .Values "backend_type") "cli"}}checked{{end}}>
-        <div><b>Local CLI</b><span>Your app is a command-line tool. The adapter runs it on the operator's host — you upload no binary.</span></div>
+      <label class="choice disabled">
+        <input type="radio" name="backend_type" value="cli" disabled>
+        <div><b>Native / CLI app <span class="badge">Coming soon</span></b><span>The store delivers your binary to the host (download URL + checksum) and an adapter drives it. In design — see docs/NATIVE-APPS.md.</span></div>
       </label>
     </div>
 
