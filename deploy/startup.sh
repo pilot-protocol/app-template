@@ -15,8 +15,11 @@ ARCH=linux-amd64
 apt-get update -y
 apt-get install -y git curl ca-certificates
 
-curl -fsSL "https://go.dev/dl/go${GO_VERSION}.${ARCH}.tar.gz" -o /tmp/go.tgz
-rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tgz
+# Install Go only if the right version isn't already on disk (fast reboots).
+if ! /usr/local/go/bin/go version 2>/dev/null | grep -q "go${GO_VERSION}"; then
+  curl -fsSL "https://go.dev/dl/go${GO_VERSION}.${ARCH}.tar.gz" -o /tmp/go.tgz
+  rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tgz
+fi
 export PATH=$PATH:/usr/local/go/bin
 
 meta() { curl -s -H 'Metadata-Flavor: Google' "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1" || true; }
@@ -42,6 +45,8 @@ Wants=network-online.target
 
 [Service]
 User=pilot
+# Bind :80 as a non-root user (the privileged-port capability, nothing more).
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 Environment=PATH=/usr/local/go/bin:/usr/bin:/bin
 Environment=HOME=/opt/pilot
 Environment=PILOT_PUBLISH_TOKEN=${PUBLISH_TOKEN}
