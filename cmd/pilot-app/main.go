@@ -54,11 +54,12 @@ Usage:
   pilot-app validate -c pilot.app.yaml            validate a spec, no output
   pilot-app verify   <bundle.tar.gz | catalogue.json>
                                                   run the catalogue review-gate checks (SPEC §7.1)
-  pilot-app submit   -C <project-dir>             emit release + catalogue-PR steps (--execute to run)
+  pilot-app submit   -C <project-dir> --prepare <app-template-fork>
+                                                  write a submission PR payload (the single front door)
   pilot-app example                               print a starter pilot.app.yaml
 
 After init:
-  cd <dir> && make gen-key && make package && pilot-app submit -C .
+  cd <dir> && make gen-key && make package && pilot-app submit -C . --prepare <fork>
 `)
 }
 
