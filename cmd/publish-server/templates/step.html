@@ -37,8 +37,8 @@
 
     {{if eq .Step.Slug "identity"}}
       <div class="row">
-        <div class="field"><label>App ID</label><input class="mono" name="id" value="{{g .Values "id"}}" placeholder="io.pilot.myapp" required pattern="[a-z0-9]([a-z0-9_-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9_-]*[a-z0-9])?)+" title="Reverse-DNS, e.g. io.pilot.myapp"><p class="hint">Reverse-DNS, e.g. <code>io.pilot.&lt;name&gt;</code>.</p></div>
-        <div class="field"><label>Version</label><input class="mono" name="app_version" value="{{g .Values "app_version"}}" placeholder="0.1.0" required pattern="\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?" title="Semver, e.g. 0.1.0"><p class="hint">Semver. Bump per build.</p></div>
+        <div class="field"><label>App ID</label><input class="mono" name="id" value="{{g .Values "id"}}" placeholder="io.pilot.myapp" required pattern="[a-z0-9]([a-z0-9_\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9_\-]*[a-z0-9])?)+" title="Reverse-DNS, e.g. io.pilot.myapp"><p class="hint">Reverse-DNS, e.g. <code>io.pilot.&lt;name&gt;</code>.</p></div>
+        <div class="field"><label>Version</label><input class="mono" name="app_version" value="{{g .Values "app_version"}}" placeholder="0.1.0" required pattern="\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?" title="Semver, e.g. 0.1.0"><p class="hint">Semver. Bump per build.</p></div>
       </div>
       <div class="field"><label>Description</label><input name="description" value="{{g .Values "description"}}" placeholder="What your app does, in one line." required></div>
 
@@ -117,10 +117,34 @@ document.querySelectorAll('.addbtn').forEach(function (b) {
   b.addEventListener('click', function () {
     var grp = document.getElementById(b.dataset.clone);
     var c = grp.lastElementChild.cloneNode(true);
-    c.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+    c.querySelectorAll('input').forEach(function (i) { i.value = ''; wireValidation(i); });
     grp.appendChild(c);
   });
 });
+
+// Live field validation — uses the browser's NATIVE constraint API
+// (checkValidity / validationMessage). No app logic computed in the browser;
+// it just surfaces, as you type, what the server will also enforce on Next.
+function wireValidation(el) {
+  if (!el.willValidate || el.dataset.vWired) return;
+  el.dataset.vWired = "1";
+  var msg = document.createElement("div");
+  msg.className = "fielderr";
+  el.insertAdjacentElement("afterend", msg);
+  function check() {
+    if (el.value && !el.checkValidity()) {
+      msg.textContent = el.title || el.validationMessage;
+      el.classList.add("invalid");
+    } else {
+      msg.textContent = "";
+      el.classList.remove("invalid");
+    }
+  }
+  el.addEventListener("input", check);
+  el.addEventListener("blur", check);
+  check(); // surface errors on pre-filled (draft) values immediately
+}
+document.querySelectorAll("form input").forEach(wireValidation);
 </script>
 </body>
 </html>

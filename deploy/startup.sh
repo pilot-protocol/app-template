@@ -61,5 +61,10 @@ WantedBy=multi-user.target
 UNIT
 
 systemctl daemon-reload
-systemctl enable --now pilot-publish
-echo "pilot-publish started"
+systemctl enable pilot-publish
+# RESTART (not just enable --now): on a reboot/reset systemd auto-starts the
+# previously-enabled service with the OLD on-disk binary BEFORE this script
+# rebuilds it. enable --now is then a no-op and the stale binary keeps serving.
+# An explicit restart loads the freshly-built binary every deploy.
+systemctl restart pilot-publish
+echo "pilot-publish (re)started on the freshly built binary"
