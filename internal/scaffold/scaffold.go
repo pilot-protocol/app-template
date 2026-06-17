@@ -40,6 +40,22 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 	}
 
 	var written []string
+
+	// metadata.json (catalogue v2 store-page record) is built from a Go model,
+	// not a text template — JSON is safer to assemble structurally.
+	meta, err := marshalMetadata(BuildMetadata(cfg))
+	if err != nil {
+		return written, fmt.Errorf("build metadata.json: %w", err)
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return written, fmt.Errorf("mkdir %s: %w", outDir, err)
+	}
+	metaDest := filepath.Join(outDir, "metadata.json")
+	if err := os.WriteFile(metaDest, meta, 0o644); err != nil {
+		return written, fmt.Errorf("write metadata.json: %w", err)
+	}
+	written = append(written, "metadata.json")
+
 	for _, f := range files {
 		rendered, err := render(f.tmpl, cfg)
 		if err != nil {

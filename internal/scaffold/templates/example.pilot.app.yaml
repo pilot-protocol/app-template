@@ -18,6 +18,9 @@ backend:
   type: http                      # http | cli
   base_url: https://weather.pilotprotocol.network   # baked-in production default
   # env_prefix: WEATHER           # override; default = NAMESPACE upper -> {PREFIX}_BACKEND_URL
+  # headers:                      # sent on every request; ${TOKEN} resolved at runtime
+  #   x-api-key: "${WEATHER_API_KEY}"   # from env or $APP/secrets.json — NEVER baked in
+  #   authorization: "Bearer ${WEATHER_TOKEN}"
 
 methods:
   - name: weather.current         # must be prefixed <namespace>.
@@ -65,6 +68,25 @@ grants:
   rate_per_min: 120               # net.dial rate limit (default 120)
   # extra:                        # verbatim extra grants, if needed
   #   - {cap: fs.read, target: "$APP/cache.json"}
+
+# Store-page listing (catalogue v2). Drives the rich view: display name, vendor,
+# categories, license, changelog. Omit and you get a bare listing.
+listing:
+  display_name: Weather
+  tagline: "Current conditions and forecasts for agents"
+  vendor:
+    name: Pilot Protocol
+    url: https://pilotprotocol.network
+    contact: apps@pilotprotocol.network
+  homepage: https://pilotprotocol.network
+  source_url: https://github.com/pilot-protocol/weather-app
+  license: MIT                    # SPDX id
+  categories: [weather, data]
+  keywords: [weather, forecast, conditions]
+  # changelog:                    # optional; defaults to one entry from app_version + description
+  #   - version: 0.1.0
+  #     date: "2026-06-16"
+  #     notes: ["Initial release"]
 
 # --- a cli backend instead (planned archetype; see docs/CLI-ADAPTER.md) ---
 # backend:

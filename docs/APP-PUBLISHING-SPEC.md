@@ -167,8 +167,18 @@ Schema is `app-store/pkg/manifest`. Generated, never hand-edited. Key rules:
 ### 5.3 Capabilities (grants)
 Known today: `fs.read fs.write fs.append fs.delete net.dial net.call ipc.call
 key.sign audit.log`. Standard adapter grant set:
-- HTTP: `net.dial → <backend-host>` (rate-limited) + `fs.read $APP/config.json` + `audit.log`.
+- HTTP: `net.dial → <backend-host>` (rate-limited, the backend host only — no
+  stray `127.0.0.1`) + `fs.read $APP/config.json` + `audit.log`.
+- HTTP with auth: when `backend.headers` reference a `${SECRET}`, also
+  `fs.read $APP/secrets.json` (the operator drops the key there at install).
 - CLI *(PLANNED)*: `proc.exec → <executable>` — requires adding the cap (§8, G6).
+
+### 5.3a Auth & secrets
+`backend.headers` are sent on every request; values may contain `${TOKEN}`
+placeholders resolved **at runtime** from the app's environment or a flat
+`$APP/secrets.json` map. Secrets are supplied by the operator at install time and
+are **never** baked into the bundle. e.g.
+`headers: { x-api-key: "${PARALLEL_API_KEY}" }`.
 
 ### 5.4 Discovery contract — `<ns>.help` (REQUIRED)
 Every app **must** expose `<namespace>.help`, a local (no-backend) method returning:
@@ -182,15 +192,26 @@ Every app **must** expose `<namespace>.help`, a local (no-backend) method return
 The generator emits this automatically. CI rejects any app whose `exposes`
 lacks a `.help` method (§7).
 
-### 5.5 `catalogue.json` entry
+### 5.5 `catalogue.json` entry (v2) + `metadata.json`
+Top level: `{"version":2,"updated_at":"<RFC3339>","apps":[ … ]}`. Each entry
+carries the index fields **and** the store-card fields, plus a sha-pinned pointer
+to a per-app `metadata.json` that drives the full rich-view page:
 ```json
-{ "id":"io.pilot.x", "version":"0.1.0",
-  "description":"one line, accurate",
+{ "id":"io.pilot.x", "version":"0.1.0", "description":"one line",
   "bundle_url":"https://github.com/pilot-protocol/catalog/releases/download/<ns>-v0.1.0/io.pilot.x-0.1.0.tar.gz",
-  "bundle_sha256":"<64-hex of the tarball>" }
+  "bundle_sha256":"<tarball sha>",
+  "display_name":"X", "vendor":"Acme", "categories":["search"],
+  "bundle_size":4776763, "source_url":"https://…", "license":"Apache-2.0",
+  "metadata_url":"https://raw.githubusercontent.com/TeoSlayer/pilotprotocol/main/catalogue/apps/io.pilot.x/metadata.json",
+  "metadata_sha256":"<metadata.json sha>" }
 ```
-Top level: `{"version":1,"updated_at":"<RFC3339>","apps":[ … ]}`. Preserve
-existing entries; one entry per app (latest version).
+`metadata.json` (committed to `catalogue/apps/<id>/` on the platform repo) holds
+`display_name, tagline, description_md, vendor{name,url,contact,publisher_pubkey},
+homepage, source_url, license, categories, keywords, size{bundle_bytes,installed_bytes},
+compat, methods[], changelog[], links[]`. **The generator emits it** from the
+spec's `listing:` block (`pilot-app init`), and `pilot-app submit` fills the
+post-build facts (publisher pubkey + sizes). Omit `listing:` and the app renders a
+bare card. Preserve existing entries; one entry per app (latest version).
 
 ### 5.6 Publisher registry *(RC1 identity, G4)*
 `pilot-protocol/catalog/publishers/registry.json`: maps publisher pubkey → human

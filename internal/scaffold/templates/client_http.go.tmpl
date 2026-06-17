@@ -20,12 +20,15 @@ import (
 // Client talks to one backend over HTTP.
 type Client struct {
 	baseURL string
+	headers map[string]string
 	http    *http.Client
 }
 
-// Config configures a Client. BaseURL is required.
+// Config configures a Client. BaseURL is required. Headers (if any) are sent on
+// every request — e.g. an API key resolved by the caller before New.
 type Config struct {
 	BaseURL string
+	Headers map[string]string
 	Timeout time.Duration
 }
 
@@ -58,7 +61,7 @@ func New(cfg Config) (*Client, error) {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
-	return &Client{baseURL: base, http: &http.Client{Timeout: to, Transport: tr}}, nil
+	return &Client{baseURL: base, headers: cfg.Headers, http: &http.Client{Timeout: to, Transport: tr}}, nil
 }
 
 // Get issues GET <path>?<params> and returns the raw JSON body. Empty-valued
@@ -99,6 +102,11 @@ func (c *Client) PostRaw(ctx context.Context, path string, payload json.RawMessa
 
 func (c *Client) do(req *http.Request) (json.RawMessage, error) {
 	req.Header.Set("Accept", "application/json")
+	for k, v := range c.headers {
+		if v != "" {
+			req.Header.Set(k, v)
+		}
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("backend: %s %s: %w", req.Method, req.URL.Path, err)

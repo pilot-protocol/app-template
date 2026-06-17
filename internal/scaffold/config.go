@@ -42,6 +42,36 @@ type Config struct {
 	Backend   Backend   `yaml:"backend"`
 	Methods   []Method  `yaml:"methods"`
 	Grants    Grants    `yaml:"grants"`
+	Listing   Listing   `yaml:"listing"` // store-page metadata (catalogue v2)
+}
+
+// Listing is the store-page metadata that drives the catalogue v2 rich view
+// (display_name, vendor, categories, …) and the per-app metadata.json. Optional
+// but strongly recommended — without it a published app renders a bare listing.
+type Listing struct {
+	DisplayName string         `yaml:"display_name"` // default: Title-cased namespace
+	Tagline     string         `yaml:"tagline"`
+	Homepage    string         `yaml:"homepage"`
+	SourceURL   string         `yaml:"source_url"`
+	License     string         `yaml:"license"` // SPDX id, e.g. "MIT", "AGPL-3.0-or-later"
+	Categories  []string       `yaml:"categories"`
+	Keywords    []string       `yaml:"keywords"`
+	Vendor      Vendor         `yaml:"vendor"`
+	Changelog   []ChangelogRel `yaml:"changelog"`
+}
+
+// Vendor identifies the publisher on the store page.
+type Vendor struct {
+	Name    string `yaml:"name"`
+	URL     string `yaml:"url"`
+	Contact string `yaml:"contact"`
+}
+
+// ChangelogRel is one release's notes for the store page.
+type ChangelogRel struct {
+	Version string   `yaml:"version"`
+	Date    string   `yaml:"date"`
+	Notes   []string `yaml:"notes"`
 }
 
 // Publisher carries the path to the ed25519 signing key (generated once via
@@ -56,6 +86,24 @@ type Backend struct {
 	BaseURL   string   `yaml:"base_url"`   // http: production endpoint, baked in as the default
 	Command   []string `yaml:"command"`    // cli: base argv (method args appended)
 	EnvPrefix string   `yaml:"env_prefix"` // override env var prefix; default = NAMESPACE upper
+
+	// Headers are sent on every backend request (http). Values may contain
+	// ${TOKEN} placeholders resolved at runtime from the app's environment or
+	// from $APP/secrets.json — so an API key is supplied by the operator at
+	// install time and is NEVER baked into the bundle. e.g.
+	//   headers: { x-api-key: "${PARALLEL_API_KEY}" }
+	Headers map[string]string `yaml:"headers"`
+}
+
+// NeedsSecrets reports whether any header value references a ${...} placeholder,
+// in which case the manifest must grant fs.read on $APP/secrets.json.
+func (b Backend) NeedsSecrets() bool {
+	for _, v := range b.Headers {
+		if strings.Contains(v, "${") {
+			return true
+		}
+	}
+	return false
 }
 
 // Method is one IPC method the adapter exposes, mapped to a backend call.
@@ -146,6 +194,9 @@ func (c *Config) Resolve() {
 	}
 	if c.Publisher.KeyFile == "" {
 		c.Publisher.KeyFile = c.Namespace + "-publisher.key"
+	}
+	if c.Listing.DisplayName == "" && c.Namespace != "" {
+		c.Listing.DisplayName = strings.ToUpper(c.Namespace[:1]) + c.Namespace[1:]
 	}
 	if c.Grants.RatePerMin == 0 {
 		c.Grants.RatePerMin = 120
@@ -255,6 +306,16 @@ func (c *Config) BackendHost() string {
 		return ""
 	}
 	return u.Hostname()
+}
+
+// SortedHeaderKeys gives deterministic header ordering for generated code.
+func (b Backend) SortedHeaderKeys() []string {
+	keys := make([]string, 0, len(b.Headers))
+	for k := range b.Headers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // TimeoutFor returns the per-call deadline for a method: explicit value if set,

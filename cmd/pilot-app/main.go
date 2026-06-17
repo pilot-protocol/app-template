@@ -202,6 +202,9 @@ func cmdSubmit(args []string) {
 		if err := os.WriteFile(filepath.Join(subDir, bundleName), mustRead(tarball), 0o644); err != nil {
 			fatalf("copy bundle: %v", err)
 		}
+		// Enrich the project's metadata.json (catalogue v2 store-page record) with
+		// the runtime facts only known post-build: publisher pubkey + sizes.
+		writeEnrichedMetadata(*dir, subDir, tarball)
 		meta := fmt.Sprintf(`{
   "id": %q,
   "version": %q,
@@ -236,6 +239,35 @@ func cmdSubmit(args []string) {
 	fmt.Printf("\nTo publish via the single central repo, run `pilot-app submit -C %s --prepare <app-template-fork>`.\n", *dir)
 	fmt.Printf("\nDirect path (org maintainers only):\n── Step 1: release on pilot-protocol/catalog ──\n%s\n", relCmd)
 	fmt.Printf("\n── Step 2: add to catalogue/catalogue.json on TeoSlayer/pilotprotocol@main (PR) ──\n%s\n", catEntry)
+}
+
+// writeEnrichedMetadata reads the project's metadata.json (from init), fills the
+// post-build runtime facts (publisher pubkey + sizes), and writes it into the
+// submission dir. If the project predates metadata.json, it warns and skips
+// (the listing falls back to the basic catalogue fields).
+func writeEnrichedMetadata(projectDir, subDir, tarball string) {
+	raw, err := os.ReadFile(filepath.Join(projectDir, "metadata.json"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: no metadata.json in project (re-run `pilot-app init` to get a v2 store listing); skipping\n")
+		return
+	}
+	var md scaffold.Metadata
+	if err := json.Unmarshal(raw, &md); err != nil {
+		fatalf("parse project metadata.json: %v", err)
+	}
+	facts, err := catalogue.ReadBundleFacts(tarball)
+	if err != nil {
+		fatalf("read bundle facts: %v", err)
+	}
+	md.Vendor.PublisherPubkey = facts.Publisher
+	md.Size = scaffold.MetaSize{BundleBytes: facts.BundleBytes, InstalledBytes: facts.InstalledBytes}
+	out, err := json.MarshalIndent(md, "", "  ")
+	if err != nil {
+		fatalf("marshal metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "metadata.json"), append(out, '\n'), 0o644); err != nil {
+		fatalf("write submission metadata.json: %v", err)
+	}
 }
 
 func mustRead(p string) []byte {
