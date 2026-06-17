@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -90,7 +91,29 @@ func cmdInit(args []string) {
 	for _, w := range written {
 		fmt.Printf("  %s\n", filepath.Join(dir, w))
 	}
-	fmt.Printf("\nnext:\n  cd %s\n  make gen-key && make package && make publish-help\n", dir)
+
+	// Resolve deps now so the scaffold ships a working go.sum — then a bare
+	// `go build` (or an IDE) works, not just `make`. Best-effort: if the Go
+	// toolchain isn't on PATH, the Makefile's `tidy` step still covers it.
+	if out, err := runGoModTidy(dir); err != nil {
+		fmt.Printf("\nnote: skipped `go mod tidy` (%v) — run it in %s before building.\n%s", err, dir, out)
+	} else {
+		fmt.Printf("  go.sum (resolved deps)\n")
+	}
+
+	fmt.Printf("\nnext:\n  cd %s\n  make gen-key && make package && pilot-app submit -C . --prepare <fork>\n", dir)
+}
+
+// runGoModTidy runs `go mod tidy` in dir to materialize go.sum. Returns the
+// command output on failure for diagnostics.
+func runGoModTidy(dir string) (string, error) {
+	if _, err := exec.LookPath("go"); err != nil {
+		return "", fmt.Errorf("go not found on PATH")
+	}
+	cmd := exec.Command("go", "mod", "tidy")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 func cmdValidate(args []string) {
