@@ -20,8 +20,11 @@ func FormToConfig(v url.Values) (*scaffold.Config, specMeta) {
 		Backend:     scaffold.Backend{Type: "http", BaseURL: strings.TrimSpace(v.Get("backend_base_url"))},
 	}
 	if isCLI {
-		// CLI app: the adapter execs a local command on the host. The customer
-		// uploads no binary — the CLI is expected on the operator's host.
+		// TODO(native-apps): COMING SOON — the GUI currently blocks "cli" at the
+		// type step. The real model (docs/NATIVE-APPS.md) is binary DELIVERY:
+		// collect per-OS/arch download URL + sha256 + exec command here, emit
+		// manifest `assets`, and let the daemon fetch/verify/stage at install —
+		// not exec an assumed-installed command. This branch is the interim shape.
 		cfg.Backend.Type = "cli"
 		cfg.Backend.BaseURL = ""
 		cfg.Backend.Command = strings.Fields(v.Get("backend_command"))

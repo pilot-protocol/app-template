@@ -30,8 +30,12 @@ func ValidateStep(slug string, v url.Values) []string {
 			e = append(e, "Description is required")
 		}
 	case "type":
-		if t := v.Get("backend_type"); t != "http" && t != "cli" {
-			e = append(e, "Choose API or CLI")
+		// TODO(native-apps): allow "cli" once binary delivery ships. See
+		// docs/NATIVE-APPS.md (manifest assets + install fetch/verify/stage).
+		if t := v.Get("backend_type"); t == "cli" {
+			e = append(e, "Native / CLI apps are coming soon — choose HTTP API for now")
+		} else if t != "http" {
+			e = append(e, "Choose an app type")
 		}
 	case "backend":
 		if v.Get("backend_type") == "cli" {

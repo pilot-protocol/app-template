@@ -43,6 +43,11 @@ type Config struct {
 	Methods   []Method  `yaml:"methods"`
 	Grants    Grants    `yaml:"grants"`
 	Listing   Listing   `yaml:"listing"` // store-page metadata (catalogue v2)
+
+	// TODO(native-apps): add `Assets []Asset` (per-OS/arch download url + sha256 +
+	// exec_path) for native/CLI apps that deliver a real binary. The generator
+	// emits manifest `assets`; the daemon fetches/verifies/stages at install.
+	// See docs/NATIVE-APPS.md. Coming soon — http (translation-only) ships first.
 }
 
 // Listing is the store-page metadata that drives the catalogue v2 rich view
