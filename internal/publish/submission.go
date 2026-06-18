@@ -20,8 +20,7 @@ type Submission struct {
 	Version     string `json:"version"`     // semver
 	Description string `json:"description"` // one-line: what the app does
 
-	Email       string `json:"email"`        // publisher email (verified before submit)
-	VerifyToken string `json:"verify_token"` // proof the email was verified (transient; cleared before storage)
+	Email string `json:"email"` // publisher email (for submission/decision notifications)
 
 	Backend SubBackend  `json:"backend"`
 	Methods []SubMethod `json:"methods"`
@@ -219,9 +218,6 @@ func (s Submission) ToConfig() *scaffold.Config {
 
 var reURL = regexp.MustCompile(`^https?://[^\s/]+`)
 var reEmail = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
-
-// ValidEmail reports whether s looks like an email (used by the API handlers).
-func ValidEmail(s string) bool { return reEmail.MatchString(strings.TrimSpace(s)) }
 
 // HelpPreview returns the live <ns>.help document and the pilotctl command lines
 // for the current methods — server-generated so the website preview matches what

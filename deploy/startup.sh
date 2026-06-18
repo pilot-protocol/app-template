@@ -25,6 +25,10 @@ export PATH=$PATH:/usr/local/go/bin
 meta() { curl -s -H 'Metadata-Flavor: Google' "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1" || true; }
 PUBLISH_TOKEN="$(meta pilot-publish-token)"
 ADMIN_TOKEN="$(meta admin-token)"
+ALLOWED_ORIGINS="$(meta allowed-origins)"       # empty -> server defaults to the prod website origins
+SENDGRID_API_KEY="$(meta sendgrid-api-key)"     # empty -> emails fall back to dev log (no real send)
+MAIL_FROM="$(meta mail-from)"                    # empty -> apps@pilotprotocol.network
+MAIL_REGION="$(meta mail-region)"                # "eu" for EU data residency
 
 id -u pilot >/dev/null 2>&1 || useradd -r -m -d /opt/pilot pilot
 install -d -o pilot -g pilot /opt/pilot
@@ -51,6 +55,10 @@ Environment=PATH=/usr/local/go/bin:/usr/bin:/bin
 Environment=HOME=/opt/pilot
 Environment=PILOT_PUBLISH_TOKEN=${PUBLISH_TOKEN}
 Environment=ADMIN_TOKEN=${ADMIN_TOKEN}
+Environment=ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+Environment=SENDGRID_API_KEY=${SENDGRID_API_KEY}
+Environment=MAIL_FROM=${MAIL_FROM}
+Environment=MAIL_REGION=${MAIL_REGION}
 WorkingDirectory=/opt/pilot
 ExecStart=/opt/pilot/publish-server -addr :80 -store /opt/pilot/store -key /opt/pilot/platform.key
 Restart=always

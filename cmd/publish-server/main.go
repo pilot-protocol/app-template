@@ -44,7 +44,6 @@ type server struct {
 	key        ed25519.PrivateKey
 	tmpl       *template.Template
 	mailer     *publish.Mailer
-	codes      *publish.CodeStore
 	pubToken   string
 	adminToken string
 	origins    []string
@@ -74,10 +73,11 @@ func main() {
 	s := &server{
 		cases: cases, key: key, tmpl: tmpl,
 		mailer:     publish.NewMailer(),
-		codes:      publish.NewCodeStore(),
 		pubToken:   os.Getenv("PILOT_PUBLISH_TOKEN"),
 		adminToken: os.Getenv("ADMIN_TOKEN"),
-		origins:    splitOrigins(os.Getenv("ALLOWED_ORIGINS")),
+		// CORS: only the production website may call the API. ALLOWED_ORIGINS
+		// overrides (e.g. add a local origin for testing); default is prod.
+		origins: splitOrigins(allowedOriginsEnv()),
 	}
 
 	mux := http.NewServeMux()
@@ -91,8 +91,6 @@ func main() {
 			`The publish UI lives on the website.</p></body>`))
 	})
 	mux.HandleFunc("/api/preview", s.cors(s.apiPreview))
-	mux.HandleFunc("/api/email/start", s.cors(s.apiEmailStart))
-	mux.HandleFunc("/api/email/verify", s.cors(s.apiEmailVerify))
 	mux.HandleFunc("/api/submit", s.cors(s.apiSubmit))
 	// Self-contained admin assets (embedded). The dashboard depends on nothing
 	// from the website — its CSS ships in this binary and is served from here.
@@ -107,6 +105,15 @@ func main() {
 }
 
 // ── CORS ────────────────────────────────────────────────────────────────────
+
+// allowedOriginsEnv returns ALLOWED_ORIGINS, defaulting to the production
+// website origins when unset so prod works without extra config.
+func allowedOriginsEnv() string {
+	if v := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS")); v != "" {
+		return v
+	}
+	return "https://pilotprotocol.network,https://www.pilotprotocol.network"
+}
 
 func splitOrigins(s string) []string {
 	var out []string
@@ -173,42 +180,6 @@ func (s *server) apiPreview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"help": help, "commands": cmds})
 }
 
-// apiEmailStart sends a verification code to the given email (SendGrid).
-func (s *server) apiEmailStart(w http.ResponseWriter, r *http.Request) {
-	var b struct {
-		Email string `json:"email"`
-	}
-	json.NewDecoder(r.Body).Decode(&b)
-	if !publish.ValidEmail(b.Email) {
-		writeJSON(w, 400, map[string]any{"error": "enter a valid email"})
-		return
-	}
-	code := s.codes.Start(b.Email)
-	subject, htmlBody, text := publish.VerificationEmail(code)
-	if err := s.mailer.Send(b.Email, subject, htmlBody, text); err != nil {
-		log.Printf("email start: send failed: %v", err)
-		writeJSON(w, 502, map[string]any{"error": "could not send the code, please try again"})
-		return
-	}
-	resp := map[string]any{"ok": true}
-	if !s.mailer.RealDelivery() { // dev/placeholder: surface the code so the flow is testable without an inbox
-		resp["dev_code"] = code
-	}
-	writeJSON(w, 200, resp)
-}
-
-// apiEmailVerify checks the code and returns a verification token.
-func (s *server) apiEmailVerify(w http.ResponseWriter, r *http.Request) {
-	var b struct{ Email, Code string }
-	json.NewDecoder(r.Body).Decode(&b)
-	tok, ok := s.codes.Verify(b.Email, b.Code)
-	if !ok {
-		writeJSON(w, 400, map[string]any{"error": "that code is incorrect or expired"})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"token": tok})
-}
-
 func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 	var sub publish.Submission
 	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
@@ -219,11 +190,6 @@ func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 422, map[string]any{"errors": errs})
 		return
 	}
-	if !s.codes.CheckToken(sub.Email, sub.VerifyToken) {
-		writeJSON(w, 401, map[string]any{"errors": []string{"please verify your email again"}})
-		return
-	}
-	sub.VerifyToken = "" // never persist the token
 	bundle, err := publish.BuildBundle(sub.ToConfig(), s.key)
 	if err != nil {
 		writeJSON(w, 500, map[string]any{"errors": []string{"build failed: " + err.Error()}})
