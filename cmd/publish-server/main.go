@@ -43,6 +43,8 @@ type server struct {
 	cases      *publish.CaseStore
 	key        ed25519.PrivateKey
 	tmpl       *template.Template
+	mailer     *publish.Mailer
+	codes      *publish.CodeStore
 	pubToken   string
 	adminToken string
 	origins    []string
@@ -71,6 +73,8 @@ func main() {
 
 	s := &server{
 		cases: cases, key: key, tmpl: tmpl,
+		mailer:     publish.NewMailer(),
+		codes:      publish.NewCodeStore(),
 		pubToken:   os.Getenv("PILOT_PUBLISH_TOKEN"),
 		adminToken: os.Getenv("ADMIN_TOKEN"),
 		origins:    splitOrigins(os.Getenv("ALLOWED_ORIGINS")),
@@ -87,7 +91,12 @@ func main() {
 			`The publish UI lives on the website.</p></body>`))
 	})
 	mux.HandleFunc("/api/preview", s.cors(s.apiPreview))
+	mux.HandleFunc("/api/email/start", s.cors(s.apiEmailStart))
+	mux.HandleFunc("/api/email/verify", s.cors(s.apiEmailVerify))
 	mux.HandleFunc("/api/submit", s.cors(s.apiSubmit))
+	// Self-contained admin assets (embedded). The dashboard depends on nothing
+	// from the website — its CSS ships in this binary and is served from here.
+	mux.Handle("GET /static/", http.FileServer(http.FS(assets)))
 	mux.HandleFunc("GET /admin", s.adminList)
 	mux.HandleFunc("GET /admin/case", s.adminCase)
 	mux.HandleFunc("POST /admin/approve", s.adminApprove)
@@ -164,6 +173,42 @@ func (s *server) apiPreview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"help": help, "commands": cmds})
 }
 
+// apiEmailStart sends a verification code to the given email (SendGrid).
+func (s *server) apiEmailStart(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Email string `json:"email"`
+	}
+	json.NewDecoder(r.Body).Decode(&b)
+	if !publish.ValidEmail(b.Email) {
+		writeJSON(w, 400, map[string]any{"error": "enter a valid email"})
+		return
+	}
+	code := s.codes.Start(b.Email)
+	subject, htmlBody, text := publish.VerificationEmail(code)
+	if err := s.mailer.Send(b.Email, subject, htmlBody, text); err != nil {
+		log.Printf("email start: send failed: %v", err)
+		writeJSON(w, 502, map[string]any{"error": "could not send the code, please try again"})
+		return
+	}
+	resp := map[string]any{"ok": true}
+	if !s.mailer.RealDelivery() { // dev/placeholder: surface the code so the flow is testable without an inbox
+		resp["dev_code"] = code
+	}
+	writeJSON(w, 200, resp)
+}
+
+// apiEmailVerify checks the code and returns a verification token.
+func (s *server) apiEmailVerify(w http.ResponseWriter, r *http.Request) {
+	var b struct{ Email, Code string }
+	json.NewDecoder(r.Body).Decode(&b)
+	tok, ok := s.codes.Verify(b.Email, b.Code)
+	if !ok {
+		writeJSON(w, 400, map[string]any{"error": "that code is incorrect or expired"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"token": tok})
+}
+
 func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 	var sub publish.Submission
 	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
@@ -174,6 +219,11 @@ func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 422, map[string]any{"errors": errs})
 		return
 	}
+	if !s.codes.CheckToken(sub.Email, sub.VerifyToken) {
+		writeJSON(w, 401, map[string]any{"errors": []string{"please verify your email again"}})
+		return
+	}
+	sub.VerifyToken = "" // never persist the token
 	bundle, err := publish.BuildBundle(sub.ToConfig(), s.key)
 	if err != nil {
 		writeJSON(w, 500, map[string]any{"errors": []string{"build failed: " + err.Error()}})
@@ -185,6 +235,11 @@ func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, 409, map[string]any{"errors": []string{err.Error()}})
 		return
+	}
+	// Confirmation email (best-effort; submission already succeeded).
+	subject, htmlBody, text := publish.ConfirmationEmail(sub)
+	if err := s.mailer.Send(sub.Email, subject, htmlBody, text); err != nil {
+		log.Printf("confirmation email to %s failed: %v", sub.Email, err)
 	}
 	writeJSON(w, 200, map[string]any{"case_id": c.CaseID, "status": c.Status})
 }
@@ -231,6 +286,11 @@ func (s *server) adminApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.FormValue("id")
+	guide := strings.TrimSpace(r.FormValue("guide"))
+	if guide == "" {
+		http.Error(w, "a 'how to find your app in the store' guide is required to approve", http.StatusBadRequest)
+		return
+	}
 	c, err := s.cases.Get(id)
 	if err != nil {
 		http.Error(w, "unknown case", 404)
@@ -239,8 +299,13 @@ func (s *server) adminApprove(w http.ResponseWriter, r *http.Request) {
 	sha, perr := publish.TriggerPublish(s.cases.Dir(id), c.Submission.ID, s.pubToken)
 	if perr != nil {
 		s.cases.SetStatus(id, publish.StatusPending, "publish trigger failed: "+perr.Error())
-	} else {
-		s.cases.SetStatus(id, publish.StatusApproved, "published via workflow (commit "+sha+")")
+		s.redirectAdmin(w, r)
+		return
+	}
+	s.cases.SetStatus(id, publish.StatusApproved, "published via workflow (commit "+sha+")")
+	subject, htmlBody, text := publish.AcceptEmail(c.Submission, guide)
+	if err := s.mailer.Send(c.Submission.Email, subject, htmlBody, text); err != nil {
+		log.Printf("accept email to %s failed: %v", c.Submission.Email, err)
 	}
 	s.redirectAdmin(w, r)
 }
@@ -250,11 +315,22 @@ func (s *server) adminReject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "admin token required", http.StatusUnauthorized)
 		return
 	}
-	reason := r.FormValue("reason")
+	id := r.FormValue("id")
+	reason := strings.TrimSpace(r.FormValue("reason"))
 	if reason == "" {
-		reason = "rejected by reviewer"
+		http.Error(w, "a justification is required to reject", http.StatusBadRequest)
+		return
 	}
-	s.cases.SetStatus(r.FormValue("id"), publish.StatusRejected, reason)
+	c, err := s.cases.Get(id)
+	if err != nil {
+		http.Error(w, "unknown case", 404)
+		return
+	}
+	s.cases.SetStatus(id, publish.StatusRejected, reason)
+	subject, htmlBody, text := publish.RejectEmail(c.Submission, reason)
+	if err := s.mailer.Send(c.Submission.Email, subject, htmlBody, text); err != nil {
+		log.Printf("reject email to %s failed: %v", c.Submission.Email, err)
+	}
 	s.redirectAdmin(w, r)
 }
 

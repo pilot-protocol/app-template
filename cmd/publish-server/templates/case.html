@@ -57,15 +57,22 @@
 {{end}}</pre></div>
 
   {{if eq (printf "%s" .C.Status) "pending"}}
-  <div class="navrow">
-    <form class="inline-form" method="post" action="/admin/reject">
+  <div class="card review">
+    <h2>Approve</h2>
+    <form method="post" action="/admin/approve">
       <input type="hidden" name="id" value="{{.C.CaseID}}"><input type="hidden" name="token" value="{{.Token}}">
-      <input name="reason" placeholder="rejection reason" style="width:200px;display:inline-block;padding:8px 12px">
-      <button class="reject" type="submit">Reject</button>
+      <p class="muted" style="margin:0 0 8px">Required: a short guide the publisher gets by email on how to find &amp; use their app in the store.</p>
+      <textarea name="guide" required placeholder="e.g. Run `pilotctl appstore install {{.C.Submission.ID}}`, then `pilotctl appstore call {{.C.Submission.ID}} {{.C.Submission.Namespace}}.help '{}'` to see its methods." style="width:100%;min-height:90px;padding:10px 12px;margin-bottom:10px"></textarea>
+      <button class="primary" type="submit">Approve &amp; publish — email the publisher</button>
     </form>
-    <form class="inline-form" method="post" action="/admin/approve">
+  </div>
+  <div class="card review">
+    <h2>Reject</h2>
+    <form method="post" action="/admin/reject">
       <input type="hidden" name="id" value="{{.C.CaseID}}"><input type="hidden" name="token" value="{{.Token}}">
-      <button class="primary" type="submit">Approve &amp; publish</button>
+      <p class="muted" style="margin:0 0 8px">Required: a justification the publisher gets by email, explaining what to fix.</p>
+      <textarea name="reason" required placeholder="e.g. The backend URL isn't reachable; method weather.current is missing a latency class." style="width:100%;min-height:90px;padding:10px 12px;margin-bottom:10px"></textarea>
+      <button class="reject" type="submit">Reject — email the publisher</button>
     </form>
   </div>
   {{else}}<p class="muted">{{range .C.History}}{{.At}} — {{.Status}}{{if .Note}} ({{.Note}}){{end}}<br>{{end}}</p>{{end}}

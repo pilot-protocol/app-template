@@ -9,7 +9,7 @@ import (
 
 func sampleSubmission() Submission {
 	return Submission{
-		ID: "io.pilot.weather", Version: "0.1.0", Description: "Weather over a public API.",
+		ID: "io.pilot.weather", Version: "0.1.0", Description: "Weather over a public API.", Email: "dev@acme.example",
 		Backend: SubBackend{BaseURL: "https://api.example.com", Headers: []SubHeader{{Name: "x-api-key", Value: "${WEATHER_KEY}"}}},
 		Methods: []SubMethod{
 			{Name: "weather.current", Description: "Current conditions.", Latency: "fast",

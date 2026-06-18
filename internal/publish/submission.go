@@ -20,6 +20,9 @@ type Submission struct {
 	Version     string `json:"version"`     // semver
 	Description string `json:"description"` // one-line: what the app does
 
+	Email       string `json:"email"`        // publisher email (verified before submit)
+	VerifyToken string `json:"verify_token"` // proof the email was verified (transient; cleared before storage)
+
 	Backend SubBackend  `json:"backend"`
 	Methods []SubMethod `json:"methods"`
 	Listing SubListing  `json:"listing"`
@@ -121,6 +124,9 @@ func (s Submission) Validate() []string {
 	if strings.TrimSpace(s.Description) == "" {
 		e = append(e, "App description is required")
 	}
+	if !reEmail.MatchString(strings.TrimSpace(s.Email)) {
+		e = append(e, "A valid email is required")
+	}
 	if !reURL.MatchString(strings.TrimSpace(s.Backend.BaseURL)) {
 		e = append(e, "Backend base URL must be an absolute http(s) URL")
 	}
@@ -212,6 +218,10 @@ func (s Submission) ToConfig() *scaffold.Config {
 }
 
 var reURL = regexp.MustCompile(`^https?://[^\s/]+`)
+var reEmail = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+
+// ValidEmail reports whether s looks like an email (used by the API handlers).
+func ValidEmail(s string) bool { return reEmail.MatchString(strings.TrimSpace(s)) }
 
 // HelpPreview returns the live <ns>.help document and the pilotctl command lines
 // for the current methods — server-generated so the website preview matches what
