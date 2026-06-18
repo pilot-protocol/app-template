@@ -15,15 +15,18 @@ Requires `gcloud auth login` first (project `vulture-vision-cloud`).
 PROJECT=vulture-vision-cloud
 ZONE=us-central1-a
 
-# Tokens the server needs:
-#   PUBLISH_TOKEN — GitHub token with push to pilot-protocol/app-template (admin bypass for protected main)
-#   ADMIN_TOKEN   — any strong secret; gates /admin + approve/reject
+# Tokens / config the server needs (instance metadata → systemd env):
+#   PUBLISH_TOKEN     — GitHub token with push to pilot-protocol/app-template (admin bypass for protected main)
+#   ADMIN_TOKEN       — any strong secret; gates /admin + approve/reject
+#   SENDGRID_API_KEY  — SendGrid key for real email (omit → emails log only; no send)
+#   ALLOWED_ORIGINS   — CORS allow-list; omit → server defaults to the prod website origins
+#   MAIL_FROM         — sender (omit → apps@pilotprotocol.network; must be a verified SendGrid sender/domain)
 gcloud compute instances create pilot-publish \
   --project="$PROJECT" --zone="$ZONE" \
   --machine-type=e2-small \
   --image-family=debian-12 --image-project=debian-cloud \
   --tags=pilot-publish-http \
-  --metadata=admin-token="$ADMIN_TOKEN",pilot-publish-token="$PUBLISH_TOKEN" \
+  --metadata=admin-token="$ADMIN_TOKEN",pilot-publish-token="$PUBLISH_TOKEN",sendgrid-api-key="$SENDGRID_API_KEY",mail-from="apps@pilotprotocol.network",allowed-origins="https://pilotprotocol.network" \
   --metadata-from-file=startup-script=deploy/startup.sh
 
 # Open HTTP (port 80) to the instance:

@@ -43,6 +43,7 @@ type server struct {
 	cases      *publish.CaseStore
 	key        ed25519.PrivateKey
 	tmpl       *template.Template
+	mailer     *publish.Mailer
 	pubToken   string
 	adminToken string
 	origins    []string
@@ -71,9 +72,12 @@ func main() {
 
 	s := &server{
 		cases: cases, key: key, tmpl: tmpl,
+		mailer:     publish.NewMailer(),
 		pubToken:   os.Getenv("PILOT_PUBLISH_TOKEN"),
 		adminToken: os.Getenv("ADMIN_TOKEN"),
-		origins:    splitOrigins(os.Getenv("ALLOWED_ORIGINS")),
+		// CORS: only the production website may call the API. ALLOWED_ORIGINS
+		// overrides (e.g. add a local origin for testing); default is prod.
+		origins: splitOrigins(allowedOriginsEnv()),
 	}
 
 	mux := http.NewServeMux()
@@ -88,6 +92,9 @@ func main() {
 	})
 	mux.HandleFunc("/api/preview", s.cors(s.apiPreview))
 	mux.HandleFunc("/api/submit", s.cors(s.apiSubmit))
+	// Self-contained admin assets (embedded). The dashboard depends on nothing
+	// from the website — its CSS ships in this binary and is served from here.
+	mux.Handle("GET /static/", http.FileServer(http.FS(assets)))
 	mux.HandleFunc("GET /admin", s.adminList)
 	mux.HandleFunc("GET /admin/case", s.adminCase)
 	mux.HandleFunc("POST /admin/approve", s.adminApprove)
@@ -98,6 +105,15 @@ func main() {
 }
 
 // ── CORS ────────────────────────────────────────────────────────────────────
+
+// allowedOriginsEnv returns ALLOWED_ORIGINS, defaulting to the production
+// website origins when unset so prod works without extra config.
+func allowedOriginsEnv() string {
+	if v := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS")); v != "" {
+		return v
+	}
+	return "https://pilotprotocol.network,https://www.pilotprotocol.network"
+}
 
 func splitOrigins(s string) []string {
 	var out []string
@@ -186,6 +202,11 @@ func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 409, map[string]any{"errors": []string{err.Error()}})
 		return
 	}
+	// Confirmation email (best-effort; submission already succeeded).
+	subject, htmlBody, text := publish.ConfirmationEmail(sub)
+	if err := s.mailer.Send(sub.Email, subject, htmlBody, text); err != nil {
+		log.Printf("confirmation email to %s failed: %v", sub.Email, err)
+	}
 	writeJSON(w, 200, map[string]any{"case_id": c.CaseID, "status": c.Status})
 }
 
@@ -231,6 +252,11 @@ func (s *server) adminApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.FormValue("id")
+	guide := strings.TrimSpace(r.FormValue("guide"))
+	if guide == "" {
+		http.Error(w, "a 'how to find your app in the store' guide is required to approve", http.StatusBadRequest)
+		return
+	}
 	c, err := s.cases.Get(id)
 	if err != nil {
 		http.Error(w, "unknown case", 404)
@@ -239,8 +265,13 @@ func (s *server) adminApprove(w http.ResponseWriter, r *http.Request) {
 	sha, perr := publish.TriggerPublish(s.cases.Dir(id), c.Submission.ID, s.pubToken)
 	if perr != nil {
 		s.cases.SetStatus(id, publish.StatusPending, "publish trigger failed: "+perr.Error())
-	} else {
-		s.cases.SetStatus(id, publish.StatusApproved, "published via workflow (commit "+sha+")")
+		s.redirectAdmin(w, r)
+		return
+	}
+	s.cases.SetStatus(id, publish.StatusApproved, "published via workflow (commit "+sha+")")
+	subject, htmlBody, text := publish.AcceptEmail(c.Submission, guide)
+	if err := s.mailer.Send(c.Submission.Email, subject, htmlBody, text); err != nil {
+		log.Printf("accept email to %s failed: %v", c.Submission.Email, err)
 	}
 	s.redirectAdmin(w, r)
 }
@@ -250,11 +281,22 @@ func (s *server) adminReject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "admin token required", http.StatusUnauthorized)
 		return
 	}
-	reason := r.FormValue("reason")
+	id := r.FormValue("id")
+	reason := strings.TrimSpace(r.FormValue("reason"))
 	if reason == "" {
-		reason = "rejected by reviewer"
+		http.Error(w, "a justification is required to reject", http.StatusBadRequest)
+		return
 	}
-	s.cases.SetStatus(r.FormValue("id"), publish.StatusRejected, reason)
+	c, err := s.cases.Get(id)
+	if err != nil {
+		http.Error(w, "unknown case", 404)
+		return
+	}
+	s.cases.SetStatus(id, publish.StatusRejected, reason)
+	subject, htmlBody, text := publish.RejectEmail(c.Submission, reason)
+	if err := s.mailer.Send(c.Submission.Email, subject, htmlBody, text); err != nil {
+		log.Printf("reject email to %s failed: %v", c.Submission.Email, err)
+	}
 	s.redirectAdmin(w, r)
 }
 
