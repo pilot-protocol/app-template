@@ -41,14 +41,12 @@ func main() {
 
 	var wg sync.WaitGroup
 	var codes sync.Map // int -> *int64
-	var lat sync.Map   // per-request latency (ns), collected lock-free-ish
 	latencies := make([]time.Duration, 0, *callers**per)
 	var latMu sync.Mutex
 	bump := func(code int) {
 		v, _ := codes.LoadOrStore(code, new(int64))
 		atomic.AddInt64(v.(*int64), 1)
 	}
-	_ = lat
 
 	start := time.Now()
 	for c := 0; c < *callers; c++ {

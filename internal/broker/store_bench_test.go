@@ -2,7 +2,6 @@ package broker
 
 import (
 	"fmt"
-	"sync"
 	"testing"
 )
 
@@ -68,8 +67,6 @@ func BenchmarkSQLiteFullCall(b *testing.B) {
 		b.Fatal(err)
 	}
 	defer s.Close()
-	var mu sync.Mutex
-	_ = mu
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		s.Admit("app", "caller", 0)
