@@ -28,8 +28,8 @@ fmt-check: ## fail if anything needs formatting
 vet: ## go vet
 	go vet ./...
 
-lint: ## staticcheck (a representative slice of the CI linters)
-	go run honnef.co/go/tools/cmd/staticcheck@latest ./internal/... ./cmd/...
+lint: ## staticcheck (same as the CI lint job)
+	go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 
 cover: race ## show per-package coverage
 	@go tool cover -func=cover.out | tail -1

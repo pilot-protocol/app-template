@@ -61,12 +61,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          # Pinned to a v1 release: the .golangci.yml is v1-format (golangci-lint
-          # v2 changed the config schema). Bump together if you move to v2.
-          version: v1.64.8
-          args: --timeout=5m
+          cache: true
+      # staticcheck via `go run @latest` builds with THIS module's Go toolchain,
+      # so it always matches the go.mod version (golangci-lint v1 is built with an
+      # older Go and refuses a go1.25 module; v2 needs a different config).
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 
   e2e-broker:
     runs-on: ubuntu-latest
