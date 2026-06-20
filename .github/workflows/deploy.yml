@@ -31,6 +31,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Gate on configured project + credentials
         id: gate
         env:
@@ -73,6 +75,12 @@ jobs:
             sudo systemctl restart pilot-broker || echo "pilot-broker unit not installed yet — reset the VM once to bootstrap it"
             echo "deployed: $(cd /opt/pilot/app-template && git rev-parse --short HEAD)"
           '
+
+      - name: Ensure the broker is publicly exposed (idempotent)
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: ./deploy/expose-broker.sh
 
       - name: Smoke-check the services
         if: steps.gate.outputs.enabled == 'true'
