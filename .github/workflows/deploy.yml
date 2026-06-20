@@ -31,14 +31,18 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Gate on configured project
+      - name: Gate on configured project + credentials
         id: gate
+        env:
+          SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
-          if [ -z "${{ vars.GCP_PROJECT }}" ]; then
-            echo "GCP_PROJECT not set — skipping VM deploy (set the repo variable to enable)."
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          else
+          # Require BOTH the project var and the SA key, so setting one without
+          # the other can't fail the auth step on every merge.
+          if [ -n "${{ vars.GCP_PROJECT }}" ] && [ -n "$SA_KEY" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "VM deploy disabled — needs both vars.GCP_PROJECT and secrets.GCP_SA_KEY."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: google-github-actions/auth@v2
@@ -63,7 +67,10 @@ jobs:
               cd /opt/pilot/app-template && git pull --ff-only && \
               go build -o /opt/pilot/publish-server ./cmd/publish-server && \
               go build -o /opt/pilot/broker ./cmd/broker"
-            sudo systemctl restart pilot-publish pilot-broker
+            sudo systemctl restart pilot-publish
+            # The broker unit is created by startup.sh; tolerate its absence on
+            # the first deploy (reset the VM once to bootstrap it).
+            sudo systemctl restart pilot-broker || echo "pilot-broker unit not installed yet — reset the VM once to bootstrap it"
             echo "deployed: $(cd /opt/pilot/app-template && git rev-parse --short HEAD)"
           '
 
@@ -76,5 +83,5 @@ jobs:
         run: |
           gcloud compute ssh "$INSTANCE" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap --command '
             curl -fsS localhost:80/healthz && echo " publish ok"
-            curl -fsS localhost:8099/gw/health && echo " broker ok"
+            curl -fsS localhost:8099/gw/health && echo " broker ok" || echo " broker not up yet (bootstrap pending)"
           '
