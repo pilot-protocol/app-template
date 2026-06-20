@@ -1,0 +1,8 @@
+{
+  "bundle": "io.pilot.sixtyfour-0.1.0.tar.gz",
+  "bundle_sha256": "b259f6a3b84fe16043cb972985efcdcb3d568174ac3c8a4129d551ec8ca9a712",
+  "description": "Sixtyfour is the app-store front door for the Sixtyfour people-intelligence and company-intelligence API. It gives an agent contact discovery (find email / find phone), reverse lookups from an email or phone, full person and company enrichment, and an agentic QA researcher that answers free-form questions about a person or company. All returned as clean structured JSON, every field source-backed.",
+  "id": "io.pilot.sixtyfour",
+  "namespace": "sixtyfour",
+  "version": "0.1.0"
+}

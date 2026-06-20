@@ -1,0 +1,298 @@
+{
+  "case_id": "io.pilot.sixtyfour-0.1.0",
+  "status": "pending",
+  "submission": {
+    "id": "io.pilot.sixtyfour",
+    "version": "0.1.0",
+    "description": "Sixtyfour is the app-store front door for the Sixtyfour people-intelligence and company-intelligence API. It gives an agent contact discovery (find email / find phone), reverse lookups from an email or phone, full person and company enrichment, and an agentic QA researcher that answers free-form questions about a person or company. All returned as clean structured JSON, every field source-backed.",
+    "email": "alex@vulturelabs.io",
+    "backend": {
+      "base_url": "https://api.sixtyfour.ai",
+      "headers": [
+        {
+          "name": "x-api-key",
+          "value": "managed"
+        }
+      ],
+      "auth": "managed",
+      "quota": 50
+    },
+    "methods": [
+      {
+        "name": "sixtyfour.people_intelligence",
+        "description": "People Intelligence: full, source-backed enrichment of a person from seed details.",
+        "latency": "slow",
+        "timeout": "280s",
+        "http": {
+          "verb": "POST",
+          "path": "/people-intelligence"
+        },
+        "params": [
+          {
+            "name": "lead_info",
+            "type": "object",
+            "required": true,
+            "description": "Seed details for the person, e.g. {\"name\":\"Jane Doe\",\"company\":\"Acme\"}"
+          },
+          {
+            "name": "struct",
+            "type": "object",
+            "required": true,
+            "description": "Desired output fields as {field: description}, e.g. {\"title\":\"current job title\"}"
+          }
+        ]
+      },
+      {
+        "name": "sixtyfour.company_intelligence",
+        "description": "Company Intelligence: full, source-backed company profile, optionally with people.",
+        "latency": "slow",
+        "timeout": "280s",
+        "http": {
+          "verb": "POST",
+          "path": "/company-intelligence"
+        },
+        "params": [
+          {
+            "name": "target_company",
+            "type": "object",
+            "required": true,
+            "description": "Company to research, e.g. {\"name\":\"Acme\",\"domain\":\"acme.com\"}"
+          },
+          {
+            "name": "struct",
+            "type": "object",
+            "required": true,
+            "description": "Desired output fields as {field: description}"
+          }
+        ]
+      },
+      {
+        "name": "sixtyfour.find_email",
+        "description": "Contact discovery: find a verified email for a person from partial details.",
+        "latency": "med",
+        "timeout": "",
+        "http": {
+          "verb": "POST",
+          "path": "/find-email"
+        },
+        "params": [
+          {
+            "name": "lead",
+            "type": "object",
+            "required": true,
+            "description": "Person details to resolve, e.g. {\"name\":\"Jane Doe\",\"company\":\"Acme\"}"
+          }
+        ]
+      },
+      {
+        "name": "sixtyfour.find_phone",
+        "description": "Contact discovery: find a phone number for a person from partial details.",
+        "latency": "med",
+        "timeout": "",
+        "http": {
+          "verb": "POST",
+          "path": "/find-phone"
+        },
+        "params": [
+          {
+            "name": "lead",
+            "type": "object",
+            "required": true,
+            "description": "Person details to resolve"
+          }
+        ]
+      },
+      {
+        "name": "sixtyfour.reverse_email",
+        "description": "Reverse lookup: identify the person and company behind an email address.",
+        "latency": "slow",
+        "timeout": "280s",
+        "http": {
+          "verb": "POST",
+          "path": "/reverse-email"
+        },
+        "params": [
+          {
+            "name": "lead",
+            "type": "object",
+            "required": true,
+            "description": "Must include the email, e.g. {\"email\":\"jane@acme.com\"}"
+          }
+        ]
+      },
+      {
+        "name": "sixtyfour.reverse_phone",
+        "description": "Reverse lookup: identify the person and company behind a phone number.",
+        "latency": "slow",
+        "timeout": "280s",
+        "http": {
+          "verb": "POST",
+          "path": "/reverse-phone"
+        },
+        "params": [
+          {
+            "name": "lead",
+            "type": "object",
+            "required": true,
+            "description": "Must include the phone, e.g. {\"phone\":\"+14155550100\"}"
+          }
+        ]
+      },
+      {
+        "name": "sixtyfour.enrich_linkedin",
+        "description": "Enrich a person directly from their LinkedIn profile URL.",
+        "latency": "med",
+        "timeout": "",
+        "http": {
+          "verb": "POST",
+          "path": "/enrich-linkedin"
+        },
+        "params": [
+          {
+            "name": "linkedin_url",
+            "type": "string",
+            "required": true,
+            "description": "Full LinkedIn profile URL"
+          }
+        ]
+      },
+      {
+        "name": "sixtyfour.qa",
+        "description": "Agentic QA researcher: answer free-form qualification questions about a person or company, with sources.",
+        "latency": "slow",
+        "timeout": "280s",
+        "http": {
+          "verb": "POST",
+          "path": "/qa-agent"
+        },
+        "params": [
+          {
+            "name": "data",
+            "type": "object",
+            "required": true,
+            "description": "The entity to research (person or company details)"
+          },
+          {
+            "name": "qualification_criteria",
+            "type": "array",
+            "required": true,
+            "description": "Array of {criteria_name, description} objects, e.g. [{\"criteria_name\":\"public_company\",\"description\":\"Is this company publicly traded?\"}]"
+          }
+        ]
+      },
+      {
+        "name": "sixtyfour.research_agent",
+        "description": "Research agent: autonomous multi-step research over an entity, returning structured findings with sources.",
+        "latency": "slow",
+        "timeout": "280s",
+        "http": {
+          "verb": "POST",
+          "path": "/research-agent"
+        },
+        "params": [
+          {
+            "name": "input_data",
+            "type": "object",
+            "required": true,
+            "description": "The entity/context to research"
+          }
+        ]
+      },
+      {
+        "name": "sixtyfour.filter_search",
+        "description": "Filter Search: structured field-based search across the corpus; returns matching entities.",
+        "latency": "slow",
+        "timeout": "280s",
+        "http": {
+          "verb": "POST",
+          "path": "/search/start-filter-search"
+        },
+        "params": [
+          {
+            "name": "simple_filters",
+            "type": "object",
+            "required": true,
+            "description": "Field filters (string/number/bool values), e.g. {\"industry\":\"Financial Services\"}. See /search/filter-capabilities for fields."
+          },
+          {
+            "name": "max_results",
+            "type": "int",
+            "required": false,
+            "description": "Cap on results returned"
+          }
+        ]
+      },
+      {
+        "name": "sixtyfour.deep_search",
+        "description": "Deep Search (agentic): start a natural-language search. Returns a task_id; results are retrieved asynchronously (see caveats).",
+        "latency": "slow",
+        "timeout": "",
+        "http": {
+          "verb": "POST",
+          "path": "/search/start-deep-search"
+        },
+        "params": [
+          {
+            "name": "query",
+            "type": "string",
+            "required": true,
+            "description": "Natural-language search, e.g. \"Series B fintech companies in NYC\""
+          }
+        ]
+      }
+    ],
+    "listing": {
+      "display_name": "Sixtyfour",
+      "tagline": "People- and company-intelligence: contact discovery, enrichment, and agentic research.",
+      "app_description": "Sixtyfour is the app-store front door for the Sixtyfour people-intelligence and company-intelligence API. Contact discovery (find email / find phone), reverse lookups from an email or phone, full person and company enrichment, an agentic QA researcher, a research agent, and filter/deep search — all returned as clean, structured, source-backed JSON. Pilot brokers one managed key and meters usage per agent.",
+      "license": "Proprietary",
+      "homepage": "https://sixtyfour.ai",
+      "source_url": "https://docs.sixtyfour.ai",
+      "categories": [
+        "data",
+        "enrichment",
+        "sales-intelligence"
+      ],
+      "keywords": [
+        "enrichment",
+        "people",
+        "company",
+        "email",
+        "phone",
+        "lead",
+        "research",
+        "search"
+      ],
+      "requires_binary": false,
+      "binary_url": ""
+    },
+    "vendor": {
+      "name": "Sixtyfour",
+      "url": "",
+      "contact": "",
+      "agent_usage": "",
+      "capabilities": ""
+    }
+  },
+  "build": {
+    "bundle_name": "io.pilot.sixtyfour-0.1.0.tar.gz",
+    "bundle_sha256": "b259f6a3b84fe16043cb972985efcdcb3d568174ac3c8a4129d551ec8ca9a712",
+    "publisher": "ed25519:Jdb7+p9ekRD96GPlpx173dDt7dSIWgdDyLnVo2e4yi0=",
+    "bundle_bytes": 0,
+    "installed_bytes": 0
+  },
+  "history": [
+    {
+      "at": "2026-06-20T22:10:00Z",
+      "status": "pending",
+      "note": "submitted"
+    },
+    {
+      "at": "2026-06-20T22:10:20Z",
+      "status": "pending",
+      "note": "broker-registered; catalog publish failed (retry): git push: exit status 1\nremote: error: GH006: Protected branch update failed for refs/heads/main.        \nremote: \nremote: - Changes must be made through a pull request.        \nremote: \nremote: - Required status check \"validate\" is expected.        \nTo https://github.com/pilot-protocol/app-template.git\n ! [remote rejected] HEAD -\u003e main (protected branch hook declined)\nerror: failed to push some refs to 'https://github.com/pilot-protocol/app-template.git'\n"
+    }
+  ],
+  "created_at": "2026-06-20T22:10:00Z",
+  "updated_at": "2026-06-20T22:10:20Z"
+}
