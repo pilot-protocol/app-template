@@ -296,13 +296,13 @@ func (s *server) adminApprove(w http.ResponseWriter, r *http.Request) {
 	// So a transient publish failure can't leave an approved app unusable.
 	s.registerManaged(c.Submission)
 
-	sha, perr := publish.TriggerPublish(s.cases.Dir(id), c.Submission.ID, s.pubToken)
+	prURL, perr := publish.TriggerPublish(s.cases.Dir(id), c.Submission.ID, s.pubToken)
 	if perr != nil {
-		s.cases.SetStatus(id, publish.StatusPending, "broker-registered; catalog publish failed (retry): "+perr.Error())
+		s.cases.SetStatus(id, publish.StatusPending, "broker-registered; catalog PR failed (retry): "+perr.Error())
 		s.redirectAdmin(w, r)
 		return
 	}
-	s.cases.SetStatus(id, publish.StatusApproved, "published via workflow (commit "+sha+")")
+	s.cases.SetStatus(id, publish.StatusApproved, "approved + broker-registered; catalog PR opened: "+prURL)
 
 	subject, htmlBody, text := publish.AcceptEmail(c.Submission, guide)
 	if err := s.mailer.Send(c.Submission.Email, subject, htmlBody, text); err != nil {
