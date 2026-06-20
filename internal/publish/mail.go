@@ -5,22 +5,19 @@ import (
 	"html"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 )
 
-// Mailer sends transactional email via SendGrid. With no SENDGRID_API_KEY it
-// runs in dev mode: it logs instead of sending (so the flow is testable locally).
+// Mailer sends transactional email via SendGrid. With no SENDGRID_API_KEY set
+// (local dev) it logs instead of sending, so the flow never hard-fails offline.
 type Mailer struct {
 	key      string
 	from     string
 	fromName string
 	region   string // "eu" for EU data residency, else global
-	outbox   string // MAIL_OUTBOX: placeholder transport — write emails to this dir instead of sending
 }
 
 func NewMailer() *Mailer {
@@ -29,7 +26,6 @@ func NewMailer() *Mailer {
 		from:     orenv("MAIL_FROM", "apps@pilotprotocol.network"),
 		fromName: orenv("MAIL_FROM_NAME", "Pilot App Store"),
 		region:   strings.ToLower(os.Getenv("MAIL_REGION")),
-		outbox:   os.Getenv("MAIL_OUTBOX"),
 	}
 }
 
@@ -43,17 +39,9 @@ func orenv(k, d string) string {
 // Enabled reports whether a SendGrid key is configured.
 func (m *Mailer) Enabled() bool { return m.key != "" }
 
-// RealDelivery reports whether Send actually hands mail to SendGrid (vs the
-// file-outbox placeholder or dev log). When false, handlers may surface the
-// verification code directly so the flow is testable without an inbox.
-func (m *Mailer) RealDelivery() bool { return m.key != "" && m.outbox == "" }
-
-// Send delivers one HTML email (text is a plain fallback). Transport precedence:
-// file-outbox placeholder (MAIL_OUTBOX) → SendGrid (SENDGRID_API_KEY) → dev log.
+// Send delivers one HTML email via SendGrid (text is a plain fallback). With no
+// key configured (local dev) it logs instead of sending.
 func (m *Mailer) Send(toEmail, subject, htmlBody, text string) error {
-	if m.outbox != "" {
-		return m.writeOutbox(toEmail, subject, htmlBody)
-	}
 	if !m.Enabled() {
 		log.Printf("[mail:dev] to=%s subject=%q (SENDGRID_API_KEY unset — not sent)", toEmail, subject)
 		return nil
@@ -72,27 +60,6 @@ func (m *Mailer) Send(toEmail, subject, htmlBody, text string) error {
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("sendgrid status %d: %s", resp.StatusCode, strings.TrimSpace(resp.Body))
 	}
-	return nil
-}
-
-// writeOutbox is the placeholder transport: instead of sending, it writes the
-// email (with a From/To/Subject banner) to MAIL_OUTBOX as an HTML file you can
-// open in a browser. Lets the whole flow be exercised locally with no provider.
-func (m *Mailer) writeOutbox(toEmail, subject, htmlBody string) error {
-	if err := os.MkdirAll(m.outbox, 0o755); err != nil {
-		return fmt.Errorf("outbox mkdir: %w", err)
-	}
-	stamp := time.Now().Format("20060102-150405.000")
-	name := fmt.Sprintf("%s-%s.html", stamp, safeKey(toEmail))
-	banner := `<div style="max-width:560px;margin:18px auto 0;font-family:ui-monospace,monospace;font-size:12px;color:#5d5d54;background:#fffbe6;border:1px solid #e8e2b0;border-radius:8px;padding:10px 14px">` +
-		`<b>PLACEHOLDER OUTBOX</b> — not actually sent.<br>From: ` + html.EscapeString(m.fromName+" <"+m.from+">") +
-		`<br>To: ` + html.EscapeString(toEmail) + `<br>Subject: ` + html.EscapeString(subject) + `</div>`
-	page := "<!doctype html><meta charset=utf-8><title>" + html.EscapeString(subject) + "</title>" + banner + htmlBody
-	p := filepath.Join(m.outbox, name)
-	if err := os.WriteFile(p, []byte(page), 0o644); err != nil {
-		return fmt.Errorf("outbox write: %w", err)
-	}
-	log.Printf("[mail:outbox] wrote %s (to=%s subject=%q)", p, toEmail, subject)
 	return nil
 }
 
