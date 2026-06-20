@@ -22,7 +22,9 @@ if ! /usr/local/go/bin/go version 2>/dev/null | grep -q "go${GO_VERSION}"; then
 fi
 export PATH=$PATH:/usr/local/go/bin
 
-meta() { curl -s -H 'Metadata-Flavor: Google' "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1" || true; }
+# -f so a MISSING attribute returns empty (not a 404 HTML body that would
+# otherwise pollute env files like broker.env).
+meta() { curl -sf -H 'Metadata-Flavor: Google' "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1" || true; }
 PUBLISH_TOKEN="$(meta pilot-publish-token)"
 ADMIN_TOKEN="$(meta admin-token)"
 ALLOWED_ORIGINS="$(meta allowed-origins)"       # empty -> server defaults to the prod website origins
@@ -90,9 +92,11 @@ Wants=network-online.target
 [Service]
 User=pilot
 EnvironmentFile=/opt/pilot/broker.env
-Environment=BROKER_DB=/opt/pilot/broker/usage.db
+# NOTE: the broker binary is /opt/pilot/broker (a file), so the durable store
+# lives in a SEPARATE dir to avoid a path collision.
+Environment=BROKER_DB=/opt/pilot/broker-data/usage.db
 WorkingDirectory=/opt/pilot
-ExecStartPre=/usr/bin/install -d -o pilot -g pilot /opt/pilot/broker
+ExecStartPre=/usr/bin/install -d -o pilot -g pilot /opt/pilot/broker-data
 ExecStart=/opt/pilot/broker -registry /opt/pilot/registry/apps.json -addr :8099
 # Reload the registry on approval without dropping traffic.
 ExecReload=/bin/kill -HUP \$MAINPID
