@@ -115,3 +115,11 @@ systemctl enable pilot-publish pilot-broker
 # An explicit restart loads the freshly-built binary every deploy.
 systemctl restart pilot-publish pilot-broker
 echo "pilot-publish + pilot-broker (re)started on freshly built binaries"
+
+# Expose the broker over HTTPS via nginx + a Let's Encrypt cert (idempotent;
+# no-op once the cert exists). Best-effort: if the broker hostname doesn't
+# resolve to this VM yet, it logs and leaves publish/broker untouched.
+BROKER_HOST="$(meta broker-host)"; BROKER_HOST="${BROKER_HOST:-broker.pilotprotocol.network}"
+CERT_EMAIL="$(meta mail-from)"; CERT_EMAIL="${CERT_EMAIL:-apps@pilotprotocol.network}"
+BROKER_HOST="$BROKER_HOST" CERT_EMAIL="$CERT_EMAIL" \
+  bash /opt/pilot/app-template/deploy/setup-broker-tls.sh || true
