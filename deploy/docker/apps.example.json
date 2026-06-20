@@ -1,0 +1,14 @@
+[
+  {
+    "id": "io.pilot.partner",
+    "upstream": "https://api.example.com",
+    "key_env": "PARTNER_MASTER_KEY",
+    "auth_header": "x-api-key",
+    "allow": ["/enrich", "/find-email"],
+    "quota": 0,
+    "cost_field": "cost_cents",
+    "timeout_ms": 60000,
+    "breaker_threshold": 5,
+    "breaker_cooldown_ms": 30000
+  }
+]

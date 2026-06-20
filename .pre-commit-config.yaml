@@ -1,0 +1,41 @@
+# Pre-commit hooks. Install once:  pip install pre-commit && pre-commit install
+# Run on demand:  pre-commit run --all-files
+#
+# Keeps the same gates as CI close to the commit, plus a secret scan so the
+# broker's master keys (or any token) never land in git.
+repos:
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: bash -c 'u="$(gofmt -l cmd internal)"; if [ -n "$u" ]; then echo "needs gofmt:"; echo "$u"; exit 1; fi'
+        language: system
+        pass_filenames: false
+        types: [go]
+
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        pass_filenames: false
+        types: [go]
+
+      - id: go-test
+        name: go test (short)
+        entry: go test -short ./...
+        language: system
+        pass_filenames: false
+        types: [go]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-added-large-files
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks # blocks secrets/keys/tokens from being committed

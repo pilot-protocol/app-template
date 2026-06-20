@@ -38,8 +38,17 @@ sudo -u pilot HOME=/opt/pilot bash -c '
   export PATH=$PATH:/usr/local/go/bin
   cd /opt/pilot
   if [ -d app-template/.git ]; then (cd app-template && git pull --ff-only); else git clone --depth 1 https://github.com/pilot-protocol/app-template; fi
-  cd app-template && go build -o /opt/pilot/publish-server ./cmd/publish-server
+  cd app-template
+  go build -o /opt/pilot/publish-server ./cmd/publish-server
+  go build -o /opt/pilot/broker         ./cmd/broker
 '
+install -d -o pilot -g pilot /opt/pilot/registry   # shared: publish-server writes apps.json, broker reads it
+
+# Broker master keys (one per managed app, e.g. PARTNER_MASTER_KEY=sk-...),
+# newline-separated KEY=VALUE, from instance metadata -> systemd EnvironmentFile.
+BROKER_ENV="$(meta broker-env)"
+printf '%s\n' "$BROKER_ENV" >/opt/pilot/broker.env
+chown pilot:pilot /opt/pilot/broker.env && chmod 600 /opt/pilot/broker.env
 
 cat >/etc/systemd/system/pilot-publish.service <<UNIT
 [Unit]
@@ -59,6 +68,8 @@ Environment=ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
 Environment=SENDGRID_API_KEY=${SENDGRID_API_KEY}
 Environment=MAIL_FROM=${MAIL_FROM}
 Environment=MAIL_REGION=${MAIL_REGION}
+# Managed-app approval writes this registry; the broker (below) reads it.
+Environment=BROKER_REGISTRY=/opt/pilot/registry/apps.json
 WorkingDirectory=/opt/pilot
 ExecStart=/opt/pilot/publish-server -addr :80 -store /opt/pilot/store -key /opt/pilot/platform.key
 Restart=always
@@ -68,11 +79,35 @@ RestartSec=3
 WantedBy=multi-user.target
 UNIT
 
+# The managed-key broker: holds the partner master keys (from broker.env), reads
+# the registry the publish-server writes, meters per caller to a durable store.
+cat >/etc/systemd/system/pilot-broker.service <<UNIT
+[Unit]
+Description=Pilot managed-key broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pilot
+EnvironmentFile=/opt/pilot/broker.env
+Environment=BROKER_DB=/opt/pilot/broker/usage.db
+WorkingDirectory=/opt/pilot
+ExecStartPre=/usr/bin/install -d -o pilot -g pilot /opt/pilot/broker
+ExecStart=/opt/pilot/broker -registry /opt/pilot/registry/apps.json -addr :8099
+# Reload the registry on approval without dropping traffic.
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 systemctl daemon-reload
-systemctl enable pilot-publish
+systemctl enable pilot-publish pilot-broker
 # RESTART (not just enable --now): on a reboot/reset systemd auto-starts the
 # previously-enabled service with the OLD on-disk binary BEFORE this script
 # rebuilds it. enable --now is then a no-op and the stale binary keeps serving.
 # An explicit restart loads the freshly-built binary every deploy.
-systemctl restart pilot-publish
-echo "pilot-publish (re)started on the freshly built binary"
+systemctl restart pilot-publish pilot-broker
+echo "pilot-publish + pilot-broker (re)started on freshly built binaries"

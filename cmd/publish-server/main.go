@@ -47,6 +47,7 @@ type server struct {
 	pubToken   string
 	adminToken string
 	origins    []string
+	registrar  publish.BrokerRegistrar // registers managed apps with the broker on approval
 }
 
 func main() {
@@ -78,6 +79,12 @@ func main() {
 		// CORS: only the production website may call the API. ALLOWED_ORIGINS
 		// overrides (e.g. add a local origin for testing); default is prod.
 		origins: splitOrigins(allowedOriginsEnv()),
+	}
+	// Managed-app approval registers the app with the broker by writing its
+	// registry file (BROKER_REGISTRY). Unset = managed registration is logged
+	// for manual addition rather than written.
+	if p := os.Getenv("BROKER_REGISTRY"); p != "" {
+		s.registrar = publish.FileRegistrar{Path: p}
 	}
 
 	mux := http.NewServeMux()
@@ -246,6 +253,27 @@ func (s *server) adminCase(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "case.html", map[string]any{"C": c, "Help": help, "Commands": cmds, "Token": r.URL.Query().Get("token")})
 }
 
+// registerManaged registers a managed app with the broker (so it routes +
+// meters). No-op for BYO apps. Ops must set the master key in the env var named
+// by the entry (logged) before the app is callable.
+func (s *server) registerManaged(sub publish.Submission) {
+	if !sub.Backend.Managed() {
+		return
+	}
+	entry := sub.BrokerEntry()
+	if s.registrar == nil {
+		log.Printf("broker: managed app %s approved but BROKER_REGISTRY unset; add manually: upstream=%s key_env=%s allow=%v",
+			entry.ID, entry.Upstream, entry.KeyEnv, entry.Allow)
+		return
+	}
+	if err := s.registrar.Register(entry); err != nil {
+		log.Printf("broker registration for %s failed: %v", entry.ID, err)
+		return
+	}
+	log.Printf("broker: registered managed app %s -> %s (set master key in env %s; HUP the broker to load)",
+		entry.ID, entry.Upstream, entry.KeyEnv)
+}
+
 func (s *server) adminApprove(w http.ResponseWriter, r *http.Request) {
 	if !s.adminOK(r) {
 		http.Error(w, "admin token required", http.StatusUnauthorized)
@@ -262,13 +290,20 @@ func (s *server) adminApprove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown case", 404)
 		return
 	}
+
+	// Managed apps become routable on approval: register with the broker FIRST,
+	// independent of the catalog publish (which only makes the app discoverable).
+	// So a transient publish failure can't leave an approved app unusable.
+	s.registerManaged(c.Submission)
+
 	sha, perr := publish.TriggerPublish(s.cases.Dir(id), c.Submission.ID, s.pubToken)
 	if perr != nil {
-		s.cases.SetStatus(id, publish.StatusPending, "publish trigger failed: "+perr.Error())
+		s.cases.SetStatus(id, publish.StatusPending, "broker-registered; catalog publish failed (retry): "+perr.Error())
 		s.redirectAdmin(w, r)
 		return
 	}
 	s.cases.SetStatus(id, publish.StatusApproved, "published via workflow (commit "+sha+")")
+
 	subject, htmlBody, text := publish.AcceptEmail(c.Submission, guide)
 	if err := s.mailer.Send(c.Submission.Email, subject, htmlBody, text); err != nil {
 		log.Printf("accept email to %s failed: %v", c.Submission.Email, err)

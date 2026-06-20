@@ -21,16 +21,22 @@
 {{- if .Backend.NeedsSecrets}}
     {"cap": "fs.read", "target": "$APP/secrets.json"},
 {{- end}}
+{{- if .Managed}}
+    {"cap": "key.sign", "target": "self"},
+{{- end}}
 {{- if eq .Backend.Type "http"}}
-    {"cap": "net.dial", "target": "{{.BackendHost}}",
+    {"cap": "net.dial", "target": "{{.AdapterBackendHost}}",
      "if": {"kind": "rate", "params": {"per": "min", "limit": {{.Grants.RatePerMin}}}}},
 {{- end}}
     {"cap": "audit.log", "target": "*"}
+{{- if .Backend.X402}},
+    {"cap": "ipc.call", "target": "{{.Backend.X402.Grant}}"}
+{{- end}}
 {{- range .Grants.Extra}},
     {"cap": "{{.Cap}}", "target": "{{.Target}}"}
 {{- end}}
   ],
-  "protection": "shareable",
+  "protection": "{{if .Backend.X402}}guarded{{else}}shareable{{end}}",
   "store": {
     "publisher": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     "signature": "sig:placeholder-store-sig-replaced-at-publish-time"

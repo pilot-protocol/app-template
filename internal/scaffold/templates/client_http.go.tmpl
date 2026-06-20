@@ -17,11 +17,20 @@ import (
 	"time"
 )
 
+// httpDoer is the minimal client surface (satisfied by *http.Client and, when
+// x402 is enabled, by the pay-and-retry wrapper).
+type httpDoer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 // Client talks to one backend over HTTP.
 type Client struct {
 	baseURL string
 	headers map[string]string
-	http    *http.Client
+	http    httpDoer
+{{- if .Managed}}
+	sign    Signer // managed: stamp the verified caller identity on every request
+{{- end}}
 }
 
 // Config configures a Client. BaseURL is required. Headers (if any) are sent on
@@ -30,6 +39,14 @@ type Config struct {
 	BaseURL string
 	Headers map[string]string
 	Timeout time.Duration
+	// DaemonAddr is the pilot daemon broker address (--addr), used by the x402
+	// payment layer to reach the wallet. Empty when x402 is disabled.
+	DaemonAddr string
+{{- if .Managed}}
+	// Sign attaches the caller-identity headers the broker verifies. Required
+	// for this managed (keyless) adapter.
+	Sign Signer
+{{- end}}
 }
 
 // New returns a Client. Per-call deadlines come from the request context (the
@@ -61,7 +78,17 @@ func New(cfg Config) (*Client, error) {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
-	return &Client{baseURL: base, headers: cfg.Headers, http: &http.Client{Timeout: to, Transport: tr}}, nil
+	var doer httpDoer = &http.Client{Timeout: to, Transport: tr}
+{{- if .Backend.X402}}
+	// Paid (x402) backend: wrap the client so a 402 is auto-paid via the wallet.
+	doer = newX402Doer(doer, cfg.DaemonAddr)
+{{- end}}
+{{- if .Managed}}
+	if cfg.Sign == nil {
+		return nil, fmt.Errorf("backend: managed adapter requires a Signer")
+	}
+{{- end}}
+	return &Client{baseURL: base, headers: cfg.Headers, http: doer{{if .Managed}}, sign: cfg.Sign{{end}}}, nil
 }
 
 // Get issues GET <path>?<params> and returns the raw JSON body. Empty-valued
@@ -82,6 +109,9 @@ func (c *Client) Get(ctx context.Context, path string, params map[string]string)
 	if err != nil {
 		return nil, err
 	}
+{{- if .Managed}}
+	c.applySig(req, nil)
+{{- end}}
 	return c.do(req)
 }
 
@@ -97,8 +127,22 @@ func (c *Client) PostRaw(ctx context.Context, path string, payload json.RawMessa
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+{{- if .Managed}}
+	c.applySig(req, body)
+{{- end}}
 	return c.do(req)
 }
+{{- if .Managed}}
+
+// applySig stamps the caller-identity headers the broker verifies. The signed
+// path is req.URL.Path, which already includes the /<app-id> prefix from the
+// broker base URL — matching exactly what the broker verifies server-side.
+func (c *Client) applySig(req *http.Request, body []byte) {
+	for k, v := range c.sign(req.Method, req.URL.Path, body) {
+		req.Header.Set(k, v)
+	}
+}
+{{- end}}
 
 func (c *Client) do(req *http.Request) (json.RawMessage, error) {
 	req.Header.Set("Accept", "application/json")

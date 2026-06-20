@@ -1,0 +1,47 @@
+# Prod-like local stack: the broker + the publish-server, wired exactly as in
+# production. The publish-server writes the broker's registry on managed-app
+# approval (shared `registry` volume); the broker reads it and reloads on HUP.
+#
+#   cd deploy/docker
+#   PARTNER_MASTER_KEY=sk-... ADMIN_TOKEN=dev-admin docker compose up --build
+#
+# After approving a managed app in the publish-server admin, load it into the
+# broker without downtime:
+#   docker compose kill -s HUP broker
+services:
+  broker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/broker.Dockerfile
+    environment:
+      # One master key per managed app, named <NAMESPACE>_MASTER_KEY (matches
+      # what the publish-server prints on approval). Add more as you onboard apps.
+      PARTNER_MASTER_KEY: ${PARTNER_MASTER_KEY:-dev-master-key}
+      BROKER_DB: /data/usage.db
+    volumes:
+      - registry:/registry
+      - brokerdata:/data
+    ports:
+      - "8099:8099"
+    restart: unless-stopped
+
+  publish-server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/publish-server.Dockerfile
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin}
+      BROKER_REGISTRY: /registry/apps.json
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:4321}
+      # SENDGRID_API_KEY omitted → emails log to stdout instead of sending.
+    volumes:
+      - registry:/registry
+      - pubdata:/data
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  registry: {}
+  brokerdata: {}
+  pubdata: {}

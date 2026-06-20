@@ -1,0 +1,87 @@
+# Deploy to the gcloud VM on merge to main. The admin board (publish-server) and
+# the managed-key broker both run on the VM; this pulls the new code, rebuilds
+# both binaries, and restarts the services in place (no reboot).
+#
+# Gated on the GCP_PROJECT repo variable so it lands safely before infra is
+# wired: with it unset the job no-ops. To enable:
+#   vars.GCP_PROJECT       e.g. vulture-vision-cloud
+#   vars.GCP_ZONE          e.g. us-central1-a   (defaults to us-central1-a)
+#   vars.GCP_INSTANCE      e.g. pilot-publish    (defaults to pilot-publish)
+#   secrets.GCP_SA_KEY     service-account JSON with compute.instances.* +
+#                          roles/iap.tunnelResourceAccessor on the instance
+name: deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "deploy/startup.sh"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-vm
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on configured project + credentials
+        id: gate
+        env:
+          SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          # Require BOTH the project var and the SA key, so setting one without
+          # the other can't fail the auth step on every merge.
+          if [ -n "${{ vars.GCP_PROJECT }}" ] && [ -n "$SA_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "VM deploy disabled — needs both vars.GCP_PROJECT and secrets.GCP_SA_KEY."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: google-github-actions/auth@v2
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        if: steps.gate.outputs.enabled == 'true'
+
+      - name: Pull, rebuild, restart on the VM
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT }}
+          ZONE: ${{ vars.GCP_ZONE || 'us-central1-a' }}
+          INSTANCE: ${{ vars.GCP_INSTANCE || 'pilot-publish' }}
+        run: |
+          set -euo pipefail
+          gcloud compute ssh "$INSTANCE" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap --command '
+            set -e
+            sudo -u pilot bash -c "export PATH=\$PATH:/usr/local/go/bin; \
+              cd /opt/pilot/app-template && git pull --ff-only && \
+              go build -o /opt/pilot/publish-server ./cmd/publish-server && \
+              go build -o /opt/pilot/broker ./cmd/broker"
+            sudo systemctl restart pilot-publish
+            # The broker unit is created by startup.sh; tolerate its absence on
+            # the first deploy (reset the VM once to bootstrap it).
+            sudo systemctl restart pilot-broker || echo "pilot-broker unit not installed yet — reset the VM once to bootstrap it"
+            echo "deployed: $(cd /opt/pilot/app-template && git rev-parse --short HEAD)"
+          '
+
+      - name: Smoke-check the services
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT }}
+          ZONE: ${{ vars.GCP_ZONE || 'us-central1-a' }}
+          INSTANCE: ${{ vars.GCP_INSTANCE || 'pilot-publish' }}
+        run: |
+          gcloud compute ssh "$INSTANCE" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap --command '
+            curl -fsS localhost:80/healthz && echo " publish ok"
+            curl -fsS localhost:8099/gw/health && echo " broker ok" || echo " broker not up yet (bootstrap pending)"
+          '

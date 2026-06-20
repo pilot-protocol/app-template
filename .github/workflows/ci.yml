@@ -1,0 +1,91 @@
+# Full CI for the repo: format, vet, lint, race-tested units, a coverage gate on
+# the core packages, and the real-process broker end-to-end. Runs on every PR and
+# on push to main. Mirrors `make ci` / `scripts/e2e-broker.sh` so what passes
+# locally passes here.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: gofmt (must be clean)
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      - name: test (race + coverage)
+        run: go test -race -coverprofile=cover.out -covermode=atomic ./...
+
+      - name: coverage gate (security-critical broker)
+        run: |
+          set -euo pipefail
+          gate() { # pkg minimum
+            pct=$(go test -cover ./internal/$1/ | grep -oE 'coverage: [0-9.]+%' | grep -oE '[0-9.]+')
+            echo "internal/$1: ${pct}% (min $2%)"
+            awk "BEGIN{exit !(${pct} >= $2)}" || { echo "::error::internal/$1 coverage ${pct}% below $2%"; exit 1; }
+          }
+          # The broker holds the master keys and verifies caller identity — gate it hard.
+          gate broker 78
+          gate scaffold 68
+          # Report the rest (pre-existing; being raised in follow-ups).
+          for p in publish catalogue x402; do
+            echo "internal/$p: $(go test -cover ./internal/$p/ | grep -oE 'coverage: [0-9.]+%')"
+          done
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      # staticcheck via `go run @latest` builds with THIS module's Go toolchain,
+      # so it always matches the go.mod version (golangci-lint v1 is built with an
+      # older Go and refuses a go1.25 module; v2 needs a different config).
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+  e2e-broker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: broker end-to-end (real process, multi-user)
+        run: ./scripts/e2e-broker.sh
+
+  e2e-managed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: full publish→build→register→sign→broker→partner→meter+ratelimit
+        run: ./scripts/e2e-managed.sh

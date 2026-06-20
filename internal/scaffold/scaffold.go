@@ -35,6 +35,12 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 	switch cfg.Backend.Type {
 	case "http":
 		files = append(files, file{filepath.Join("internal", "backend", "client.go"), "client_http.go.tmpl"})
+		if cfg.Backend.X402 != nil {
+			files = append(files, file{filepath.Join("internal", "backend", "x402.go"), "x402.go.tmpl"})
+		}
+		if cfg.Managed() {
+			files = append(files, file{filepath.Join("internal", "backend", "signer.go"), "signer.go.tmpl"})
+		}
 	case "cli":
 		files = append(files, file{filepath.Join("internal", "backend", "exec.go"), "client_cli.go.tmpl"})
 	}

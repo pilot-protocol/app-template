@@ -1,9 +1,20 @@
-# built tool binary
+# built binaries (Makefile / `go build` at the repo root)
 /pilot-app
-# generated test output
+/broker
+/broker-sign
+/publish-server
+/maildump
+# coverage + generated test output
+cover.out
 /out/
-# never commit publisher signing keys
+# never commit secrets: publisher/signing keys, broker identities, master keys,
+# per-user secrets, or the metering DB
 *.key
+identity.json
+*.identity.json
+broker.env
+secrets.json
+*.db
 
 # browse-tool artifacts
 .gstack/
