@@ -25,6 +25,19 @@ func OpenSQLiteStore(path string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("sqlite open: %w", err)
 	}
 	db.SetMaxOpenConns(1)
+	// WAL + synchronous=NORMAL: commits don't fsync on every write (only at
+	// checkpoint), turning a fsync-bound few-hundred/sec into thousands/sec on
+	// disk while staying crash-safe. busy_timeout avoids spurious "locked" errors.
+	for _, pragma := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA busy_timeout=5000",
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("sqlite pragma %q: %w", pragma, err)
+		}
+	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS usage (
 		app    TEXT NOT NULL,
 		caller TEXT NOT NULL,
