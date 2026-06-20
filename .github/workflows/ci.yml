@@ -76,3 +76,14 @@ jobs:
           cache: true
       - name: broker end-to-end (real process, multi-user)
         run: ./scripts/e2e-broker.sh
+
+  e2e-managed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: full publish→build→register→sign→broker→partner→meter+ratelimit
+        run: ./scripts/e2e-managed.sh

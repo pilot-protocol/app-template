@@ -5,7 +5,7 @@ their own API key at install (`${TOKEN}` headers, `$APP/secrets.json`). That's
 perfect when the user has their own account with the partner.
 
 But some partners give **Pilot** one big key and expect Pilot to share it across
-all users — Sixtyfour AI is the first. We can't ship that key inside the adapter
+all users — a data or enrichment partner is the typical case. We can't ship that key inside the adapter
 (every install would leak it). The **managed-key broker** solves this: Pilot
 holds the one master key centrally, and every call is metered to the user who
 made it.
@@ -43,10 +43,10 @@ through. That's the whole system.
   ┌─────────────┐   signed request    ┌──────────────────────────┐   master key   ┌────────────┐
   │   adapter   │ ──────────────────► │         broker           │ ─────────────► │  partner   │
   │ (on a user  │  X-Pilot-Caller     │  verify → allow → quota  │  x-api-key     │   API      │
-  │   host,     │  X-Pilot-Timestamp  │  → inject key → meter    │ ◄───────────── │ (sixtyfour)│
+  │   host,     │  X-Pilot-Timestamp  │  → inject key → meter    │ ◄───────────── │ (partner)  │
   │  keyless)   │ ◄────────────────── │                          │   response     └────────────┘
   └─────────────┘   JSON response     └──────────────────────────┘
-       ▲ signs with the per-app                  │ holds SIXTYFOUR_MASTER_KEY,
+       ▲ signs with the per-app                  │ holds PARTNER_MASTER_KEY,
        │ ed25519 identity the daemon             │ one durable usage row per (app, caller)
        │ provisions (--identity)                 ▼
                                           /gw/usage  → per-(app,caller) calls + cents
@@ -121,7 +121,7 @@ req.Header.Set("X-Pilot-Signature", base64(sig))
 3. **On approval**, the publish-server derives a broker registry entry from the
    submission (`internal/publish/broker_register.go`) and writes the broker's
    `apps.json` (`BROKER_REGISTRY`). It logs the env var name for the master key
-   (e.g. `SIXTYFOUR_MASTER_KEY`).
+   (e.g. `PARTNER_MASTER_KEY`).
 4. **Ops** sets that env var on the broker and reloads it (`kill -HUP`). The app
    is now live and metered.
 5. **A user** installs the app like any other. They bring nothing. Every call is
@@ -133,9 +133,9 @@ One entry per managed app — adding an app is config, not code:
 
 ```json
 [{
-  "id": "io.pilot.sixtyfour",
-  "upstream": "https://api.sixtyfour.ai",
-  "key_env": "SIXTYFOUR_MASTER_KEY",
+  "id": "io.pilot.partner",
+  "upstream": "https://api.example.com",
+  "key_env": "PARTNER_MASTER_KEY",
   "auth_header": "x-api-key",
   "allow": ["/enrich", "/find-email"],
   "quota": 0,
@@ -163,7 +163,7 @@ entry's `auth_style` (`internal/broker/inject.go`):
 
 ```bash
 # durable usage store + one master key per app:
-BROKER_DB=/data/usage.db SIXTYFOUR_MASTER_KEY=sk-... \
+BROKER_DB=/data/usage.db PARTNER_MASTER_KEY=sk-... \
   broker -registry /registry/apps.json -addr :8099
 
 curl localhost:8099/gw/health    # liveness
@@ -177,6 +177,6 @@ multi-user end-to-end test.
 
 ## What's deliberately simple (and what's deferred)
 
-See [`CAVEATS.md`](../CAVEATS.md) for the honest list — durable store scaling,
+See [`TODO.md`](../TODO.md) for the follow-up list — durable store scaling,
 rate-limiting vs. quota, the daemon identity-file contract, and per-method (vs.
 per-app) timeouts.

@@ -10,36 +10,40 @@ import (
 
 func managedSub() Submission {
 	return Submission{
-		ID:      "io.pilot.sixtyfour",
+		ID:      "io.pilot.partner",
 		Version: "0.1.0",
 		Backend: SubBackend{
-			BaseURL: "https://api.sixtyfour.ai/",
+			BaseURL: "https://api.example.com/",
 			Auth:    "managed",
+			Quota:   100,
 			Headers: []SubHeader{{Name: "x-api-key", Value: "managed"}},
 		},
 		Methods: []SubMethod{
-			{Name: "sixtyfour.enrich", HTTP: SubRoute{Verb: "POST", Path: "/enrich"}},
-			{Name: "sixtyfour.find-email", HTTP: SubRoute{Verb: "GET", Path: "/find-email"}},
+			{Name: "partner.enrich", HTTP: SubRoute{Verb: "POST", Path: "/enrich"}},
+			{Name: "partner.find-email", HTTP: SubRoute{Verb: "GET", Path: "/find-email"}},
 		},
 	}
 }
 
 func TestBrokerEntryDerivedFromSubmission(t *testing.T) {
 	e := managedSub().BrokerEntry()
-	if e.ID != "io.pilot.sixtyfour" {
+	if e.ID != "io.pilot.partner" {
 		t.Errorf("id = %q", e.ID)
 	}
-	if e.Upstream != "https://api.sixtyfour.ai" { // trailing slash trimmed
+	if e.Upstream != "https://api.example.com" { // trailing slash trimmed
 		t.Errorf("upstream = %q", e.Upstream)
 	}
-	if e.KeyEnv != "SIXTYFOUR_MASTER_KEY" {
-		t.Errorf("key_env = %q, want SIXTYFOUR_MASTER_KEY", e.KeyEnv)
+	if e.KeyEnv != "PARTNER_MASTER_KEY" {
+		t.Errorf("key_env = %q, want PARTNER_MASTER_KEY", e.KeyEnv)
 	}
 	if e.AuthHeader != "x-api-key" {
 		t.Errorf("auth_header = %q, want x-api-key", e.AuthHeader)
 	}
 	if len(e.Allow) != 2 || e.Allow[0] != "/enrich" || e.Allow[1] != "/find-email" {
 		t.Errorf("allow = %v, want [/enrich /find-email]", e.Allow)
+	}
+	if e.Quota != 100 {
+		t.Errorf("quota = %d, want 100 (set at publish time)", e.Quota)
 	}
 }
 
@@ -75,7 +79,7 @@ func TestFileRegistrarUpsertsIdempotently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("broker could not load the written registry: %v", err)
 	}
-	app := entries.Get("io.pilot.sixtyfour")
+	app := entries.Get("io.pilot.partner")
 	if app == nil {
 		t.Fatal("registry missing the app after registration")
 	}

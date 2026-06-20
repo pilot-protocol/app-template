@@ -38,6 +38,9 @@ type SubBackend struct {
 	//   "managed"   — Pilot holds one master key and meters per user; the
 	//                 generated adapter is keyless and points at the broker.
 	Auth string `json:"auth"`
+	// Quota is the per-caller call cap the broker enforces for a managed app
+	// (0 = unlimited). Set at publish time so the rate limit ships with the app.
+	Quota int `json:"quota"`
 }
 
 // Managed reports whether this submission uses Pilot's managed master key.

@@ -3,7 +3,7 @@
 // X-Pilot-* headers for a given method+path+body — feed them straight to curl.
 //
 //	# generate a throwaway identity and sign a call:
-//	broker-sign -gen-key alice.key -method POST -path /io.pilot.sixtyfour/enrich -body '{"q":"acme"}'
+//	broker-sign -gen-key alice.key -method POST -path /io.pilot.partner/enrich -body '{"q":"acme"}'
 //
 //	# emit curl-ready -H args:
 //	broker-sign -key alice.key -method GET -path /io.pilot.x/ping -curl
@@ -12,6 +12,7 @@ package main
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -24,11 +25,22 @@ import (
 func main() {
 	keyPath := flag.String("key", "", "ed25519 identity file (base64 private key)")
 	genKey := flag.String("gen-key", "", "generate a new identity, write it to this path, and use it")
+	genIdentity := flag.String("gen-identity", "", "write a daemon-format identity.json to this path and exit")
 	method := flag.String("method", "POST", "HTTP method")
 	path := flag.String("path", "", "request path the broker verifies, e.g. /io.pilot.x/ping")
 	body := flag.String("body", "", "request body")
 	curl := flag.Bool("curl", false, "print as curl -H arguments")
 	flag.Parse()
+
+	// Write a daemon-format identity.json (what the daemon hands an app via
+	// --identity) and exit — used to test the real generated adapter's signer.
+	if *genIdentity != "" {
+		if err := writeIdentityJSON(*genIdentity); err != nil {
+			fmt.Fprintln(os.Stderr, "broker-sign:", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *path == "" {
 		fmt.Fprintln(os.Stderr, "broker-sign: -path is required")
@@ -54,6 +66,24 @@ func main() {
 	for _, k := range order {
 		fmt.Printf("%s: %s\n", k, headers[k])
 	}
+}
+
+// writeIdentityJSON writes a fresh identity in the daemon's identity.json shape:
+// {"private_key":"<base64>","public_key":"<base64>"} (std base64 of the keys).
+func writeIdentityJSON(path string) error {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		return err
+	}
+	f := struct {
+		PrivateKey string `json:"private_key"`
+		PublicKey  string `json:"public_key"`
+	}{
+		PrivateKey: base64.StdEncoding.EncodeToString(priv),
+		PublicKey:  base64.StdEncoding.EncodeToString(pub),
+	}
+	b, _ := json.MarshalIndent(f, "", "  ")
+	return os.WriteFile(path, append(b, '\n'), 0o600)
 }
 
 func identity(keyPath, genKey string) (ed25519.PrivateKey, error) {

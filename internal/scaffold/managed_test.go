@@ -15,11 +15,11 @@ func TestManagedBackendIsKeylessAndPointsAtBroker(t *testing.T) {
 		t.Fatal("byo app with ${} header must need a secret")
 	}
 
-	managed := &Config{ID: "io.pilot.sixtyfour", Backend: Backend{Type: "http", BaseURL: "https://api.sixtyfour.ai", Auth: "managed"}}
+	managed := &Config{ID: "io.pilot.partner", Backend: Backend{Type: "http", BaseURL: "https://api.example.com", Auth: "managed"}}
 	if !managed.Managed() {
 		t.Fatal("auth: managed not detected")
 	}
-	if got := managed.AdapterBackendURL(); got != "https://broker.pilotprotocol.network/io.pilot.sixtyfour" {
+	if got := managed.AdapterBackendURL(); got != "https://broker.pilotprotocol.network/io.pilot.partner" {
 		t.Fatalf("managed adapter URL = %s, want the broker/<id>", got)
 	}
 	if managed.Backend.NeedsSecrets() {

@@ -1,8 +1,8 @@
 [
   {
-    "id": "io.pilot.sixtyfour",
-    "upstream": "https://api.sixtyfour.ai",
-    "key_env": "SIXTYFOUR_MASTER_KEY",
+    "id": "io.pilot.partner",
+    "upstream": "https://api.example.com",
+    "key_env": "PARTNER_MASTER_KEY",
     "auth_header": "x-api-key",
     "allow": ["/enrich", "/find-email"],
     "quota": 0,

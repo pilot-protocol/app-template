@@ -6,7 +6,7 @@
 // Usage:
 //
 //	BROKER_ADDR=:8099 \
-//	SIXTYFOUR_KEY=sk-... \
+//	PARTNER_KEY=sk-... \
 //	  broker -registry ./apps.json
 package main
 

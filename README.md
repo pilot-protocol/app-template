@@ -111,12 +111,12 @@ params, kind, and latency class.
   request with the per-app identity the daemon provisions, and the broker
   verifies the caller, enforces a per-user quota, injects the master key, and
   forwards to the partner. Use this when the partner gives Pilot one shared key
-  (e.g. Sixtyfour AI).
+  (e.g. an enrichment or data partner).
 
 ```yaml
 backend:
   type: http
-  base_url: https://api.sixtyfour.ai   # registered with the broker, not shipped to users
+  base_url: https://api.example.com   # registered with the broker, not shipped to users
   auth: managed
 ```
 
@@ -133,14 +133,57 @@ cmd/pilot-app         the scaffolder CLI (init / validate / verify / submit)
 cmd/publish-server    submission API + admin dashboard (the VM service)
 cmd/broker            the managed-key gateway (holds master keys, meters per user)
 cmd/broker-sign       dev/ops helper: sign a broker request as a caller
+cmd/ipc-call          dev/ops helper: call a running adapter over its IPC socket
 internal/scaffold     pilot.app.yaml -> adapter project (templates/)
 internal/publish      submission, build, sign, case store, broker registration
 internal/broker       identity verify, registry, auth inject, store, breaker
 internal/catalogue    review-gate checks (SPEC §7.1)
-deploy/               GCE startup script + docker/ (prod-like broker + publish stack)
+deploy/               GCE startup script (publish + broker units) + docker/ stack
 docs/                 publishing spec, managed-key design, adapter archetypes
-scripts/              e2e-broker.sh, install-git-hooks.sh
+scripts/              e2e-broker.sh, e2e-managed.sh, install-git-hooks.sh
 ```
+
+## Architecture
+
+Two flows, one repo. **Publish** (build + sign + register an app) and **runtime**
+(a user calls a managed app). The website form is the only piece outside this
+repo; everything else — scaffold, build, sign, broker — lives here.
+
+```
+ PUBLISH  (the admin board triggers everything)
+ ─────────────────────────────────────────────────────────────────────────────
+   developer          website form           publish-server  (cmd/publish-server)
+   ┌────────┐  POST   ┌──────────┐  /api/submit ┌───────────────────────────────┐
+   │ author │ ──────► │  form    │ ───────────► │ Validate → scaffold.Generate  │
+   └────────┘         └──────────┘              │ → go build → sign → bundle    │
+                                                │            (case: pending)     │
+                       admin clicks Approve     │                                │
+                      ───────────────────────►  │ /admin/approve:                │
+                                                │  1. register managed app  ─────┼──► apps.json
+                                                │     with the broker  (route)   │   (BROKER_REGISTRY)
+                                                │  2. TriggerPublish (catalog) ──┼──► pilot-protocol/catalog
+                                                └───────────────────────────────┘   + catalogue.json PR
+                                                                                      → pilotctl install
+
+ RUNTIME  (managed app: one master key, metered per user)
+ ─────────────────────────────────────────────────────────────────────────────
+   user's pilot daemon        broker  (cmd/broker, internal/broker)        partner
+   ┌───────────────────┐      ┌───────────────────────────────────┐      ┌─────────┐
+   │ keyless adapter   │ sign │ 1 verify caller (ed25519)  → 401   │ key  │  API    │
+   │  (generated)      │ ───► │ 2 known app?               → 404   │ ───► │         │
+   │  signs with the   │ HTTP │ 3 method allow-listed?     → 403   │ ◄─── │         │
+   │  --identity key   │ ◄─── │ 4 breaker + per-caller quota → 429 │ resp └─────────┘
+   └───────────────────┘ JSON │ 5 inject master key, forward, METER│
+        ▲ daemon brokers IPC  └───────────────────────────────────┘
+        │ from the calling app          │ durable per-(app,caller) usage → /gw/usage
+   ┌────┴─────┐
+   │  agent   │  pilotctl appstore call io.pilot.<app> <method> '{...}'
+   └──────────┘
+```
+
+BYO-key apps skip the broker entirely: the adapter calls the partner directly
+with the user's own `${TOKEN}`. Same scaffold, same publish flow — only
+`backend.auth` differs. Deep dive: [docs/MANAGED-KEY.md](docs/MANAGED-KEY.md).
 
 ## Verified end to end
 
@@ -148,3 +191,10 @@ The generated adapter has been installed against the real pilot daemon (via a
 `file://` catalogue), auto-spawned, and called against the **live** cosift
 backend — `help`, `health`, and `search` all return correct results. The
 generated `cli` archetype produces valid, compiling Go (covered by tests).
+
+The **managed-key** path is covered by a real-process end-to-end
+([`scripts/e2e-managed.sh`](scripts/e2e-managed.sh)): it drives the admin board
+to build + register a managed app, runs the actual generated adapter binary
+(signing with a daemon-format `identity.json`), and asserts the call flows
+through the broker to the partner, is metered, and is rate-limited — plus a
+multi-user broker e2e ([`scripts/e2e-broker.sh`](scripts/e2e-broker.sh)).

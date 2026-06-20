@@ -10,19 +10,19 @@ import (
 )
 
 const managedSpec = `
-id: io.pilot.sixtyfour
+id: io.pilot.partner
 app_version: 0.1.0
-description: "Enrichment via the managed Sixtyfour key."
+description: "Enrichment via the managed Partner key."
 backend:
   type: http
-  base_url: https://api.sixtyfour.ai
+  base_url: https://api.example.com
   auth: managed
 methods:
-  - name: sixtyfour.enrich
+  - name: partner.enrich
     summary: "Enrich a person/company."
     duration: slow
     http: {verb: POST, path: /enrich}
-  - name: sixtyfour.find-email
+  - name: partner.find-email
     summary: "Find an email."
     duration: med
     http: {verb: GET, path: /find-email}
@@ -60,18 +60,18 @@ func TestManagedGeneratesKeylessSigningAdapter(t *testing.T) {
 	mustContain(t, "manifest", mf,
 		"broker.pilotprotocol.network", // net.dial targets the broker, not the partner
 		`"key.sign"`,                   // granted to sign caller identity
-		"sixtyfour.enrich",
-		"sixtyfour.help",
+		"partner.enrich",
+		"partner.help",
 	)
 	mustNotContain(t, "manifest", mf,
-		"api.sixtyfour.ai", // partner host must NOT be a dial target on user hosts
-		"secrets.json",     // keyless: no per-user secret
+		"api.example.com", // partner host must NOT be a dial target on user hosts
+		"secrets.json",    // keyless: no per-user secret
 	)
 
 	main := readFile(t, dir, filepath.Join("cmd", cfg.BinaryName, "main.go"))
 	mustContain(t, "main.go", main,
-		"backend.NewSigner", // signer is built from --identity
-		"broker.pilotprotocol.network/io.pilot.sixtyfour", // default backend URL is the broker
+		"backend.NewSigner",                             // signer is built from --identity
+		"broker.pilotprotocol.network/io.pilot.partner", // default backend URL is the broker
 	)
 
 	// The generated signer's canonical string MUST match the broker verifier
@@ -82,6 +82,7 @@ func TestManagedGeneratesKeylessSigningAdapter(t *testing.T) {
 		`method + "\n" + path + "\n" + ts + "\n" + base64.RawStdEncoding.EncodeToString(sum[:])`,
 		"X-Pilot-Caller",
 		"X-Pilot-Signature",
+		`json:"private_key"`, // reads the daemon's identity.json format
 	)
 }
 

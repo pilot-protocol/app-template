@@ -17,7 +17,7 @@ approve → broker routes + meters) before touching a VM.
 
 ```bash
 cd deploy/docker
-SIXTYFOUR_MASTER_KEY=sk-real-key ADMIN_TOKEN=dev-admin docker compose up --build
+PARTNER_MASTER_KEY=sk-real-key ADMIN_TOKEN=dev-admin docker compose up --build
 ```
 
 - Broker:          http://localhost:8099/gw/health

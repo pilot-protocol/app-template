@@ -1,6 +1,6 @@
 # Developer entrypoints. `make ci` mirrors the GitHub `ci` workflow, so what
 # passes locally passes in CI.
-.PHONY: ci build test race e2e fmt fmt-check vet lint cover docker-broker clean
+.PHONY: ci build test race e2e e2e-managed fmt fmt-check vet lint cover docker-broker clean
 
 ci: fmt-check vet build race e2e ## everything CI runs
 
@@ -15,6 +15,9 @@ race: ## run unit tests with the race detector + coverage
 
 e2e: ## real-process broker end-to-end (multi-user, no external services)
 	./scripts/e2e-broker.sh
+
+e2e-managed: ## full publish→build→register→sign→broker→partner→meter+ratelimit e2e
+	./scripts/e2e-managed.sh
 
 fmt: ## format the code
 	gofmt -w cmd internal

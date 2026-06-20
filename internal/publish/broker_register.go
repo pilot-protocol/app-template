@@ -20,7 +20,7 @@ type BrokerRegistrar interface {
 
 // MasterKeyEnv is the env var name the broker reads the master key from for this
 // submission, derived deterministically from the app id so ops knows what to set
-// (e.g. io.pilot.sixtyfour -> SIXTYFOUR_MASTER_KEY).
+// (e.g. io.pilot.partner -> PARTNER_MASTER_KEY).
 func (s Submission) MasterKeyEnv() string {
 	repl := strings.NewReplacer("-", "_", ".", "_")
 	return strings.ToUpper(repl.Replace(s.Namespace())) + "_MASTER_KEY"
@@ -49,7 +49,7 @@ func (s Submission) BrokerEntry() broker.AppEntry {
 		KeyEnv:     s.MasterKeyEnv(),
 		AuthHeader: authHeader,
 		Allow:      allow,
-		Quota:      0, // unlimited until ops sets a per-caller cap
+		Quota:      s.Backend.Quota, // per-caller cap set at publish time (0 = unlimited)
 	}
 }
 

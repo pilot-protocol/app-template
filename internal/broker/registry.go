@@ -12,7 +12,7 @@ import (
 // registry entry + an env var with the master key — no code per app.
 type AppEntry struct {
 	ID         string   `json:"id"`          // io.pilot.<name>
-	Upstream   string   `json:"upstream"`    // partner API base, e.g. https://api.sixtyfour.ai
+	Upstream   string   `json:"upstream"`    // partner API base, e.g. https://api.example.com
 	KeyEnv     string   `json:"key_env"`     // env var holding the master key (never in this file)
 	AuthStyle  string   `json:"auth_style"`  // "" | "header" (default) | "query" | "basic"
 	AuthHeader string   `json:"auth_header"` // header style: header name, e.g. "x-api-key" | "Authorization"

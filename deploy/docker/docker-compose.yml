@@ -3,7 +3,7 @@
 # approval (shared `registry` volume); the broker reads it and reloads on HUP.
 #
 #   cd deploy/docker
-#   SIXTYFOUR_MASTER_KEY=sk-... ADMIN_TOKEN=dev-admin docker compose up --build
+#   PARTNER_MASTER_KEY=sk-... ADMIN_TOKEN=dev-admin docker compose up --build
 #
 # After approving a managed app in the publish-server admin, load it into the
 # broker without downtime:
@@ -16,7 +16,7 @@ services:
     environment:
       # One master key per managed app, named <NAMESPACE>_MASTER_KEY (matches
       # what the publish-server prints on approval). Add more as you onboard apps.
-      SIXTYFOUR_MASTER_KEY: ${SIXTYFOUR_MASTER_KEY:-dev-master-key}
+      PARTNER_MASTER_KEY: ${PARTNER_MASTER_KEY:-dev-master-key}
       BROKER_DB: /data/usage.db
     volumes:
       - registry:/registry
