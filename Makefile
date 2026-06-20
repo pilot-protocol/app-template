@@ -1,6 +1,6 @@
 # Developer entrypoints. `make ci` mirrors the GitHub `ci` workflow, so what
 # passes locally passes in CI.
-.PHONY: ci build test race e2e e2e-managed fmt fmt-check vet lint cover docker-broker clean
+.PHONY: ci build test race e2e e2e-managed fmt fmt-check vet lint cover docker-broker clean expose-broker
 
 ci: fmt-check vet build race e2e ## everything CI runs
 
@@ -39,3 +39,6 @@ docker-broker: ## build the broker image
 
 clean:
 	rm -f cover.out
+
+expose-broker: ## one-time: expose the broker at broker.pilotprotocol.network via the Cloudflare API (needs CLOUDFLARE_API_TOKEN)
+	./deploy/expose-broker.sh
