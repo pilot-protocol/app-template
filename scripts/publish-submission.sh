@@ -45,6 +45,9 @@ gh repo clone "$PLATFORM_REPO" "$WORK/platform" -- --depth 1 >/dev/null 2>&1
 cd "$WORK/platform"
 git config user.name "Alex Godoroja"
 git config user.email "alex@vulturelabs.io"
+# gh sets origin to a plain https URL with no creds, so the raw `git push` below
+# can't authenticate. Embed the token (GH_TOKEN = CATALOG_PUBLISH_TOKEN).
+git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${PLATFORM_REPO}.git"
 BRANCH="catalogue/${ID}-${VERSION}"
 git checkout -b "$BRANCH"
 
