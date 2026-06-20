@@ -63,7 +63,9 @@ jobs:
           go-version: "1.25"
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Pinned to a v1 release: the .golangci.yml is v1-format (golangci-lint
+          # v2 changed the config schema). Bump together if you move to v2.
+          version: v1.64.8
           args: --timeout=5m
 
   e2e-broker:

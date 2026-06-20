@@ -1,24 +1,23 @@
-# Conservative, high-signal linter set. govet + staticcheck catch real bugs;
-# the rest are cheap correctness checks. errcheck is intentionally off for now
-# (the codebase has deliberate fire-and-forget writes); revisit once those are
-# annotated.
+# Conservative, high-signal linter set. The default linters (govet, staticcheck,
+# ineffassign, unused, gosimple) stay on; we add a few cheap correctness checks
+# and turn OFF errcheck — the codebase has deliberate fire-and-forget writes
+# (w.Write on health endpoints, SetStatus's logging path). Pinned to a v1
+# golangci-lint in CI so this v1-format config is accepted.
 run:
   timeout: 5m
 
 linters:
+  disable:
+    - errcheck
   enable:
-    - govet
-    - staticcheck
-    - ineffassign
-    - unused
+    - bodyclose
     - misspell
     - unconvert
-    - bodyclose
 
 issues:
   exclude-rules:
-    # Generated adapter templates are validated by the scaffold tests, not here.
-    - path: internal/scaffold/templates/
-      linters: [staticcheck, govet, unused]
+    # Error-path tests call Do() expecting an error and no response body to close.
+    - path: _test\.go
+      linters: [bodyclose]
   max-issues-per-linter: 0
   max-same-issues: 0
