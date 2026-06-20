@@ -27,8 +27,12 @@ type Broker struct {
 // New returns a Broker with sane defaults.
 func New(reg *Registry, store Store) *Broker {
 	b := &Broker{
-		Store:   store,
-		Client:  &http.Client{Timeout: 150 * time.Second},
+		Store: store,
+		// Generous ceiling for agentic partner APIs that can run for minutes.
+		// The effective per-call deadline is the smaller of this and the app's
+		// timeout_ms (set per app in the registry); this only stops it being the
+		// surprise bottleneck.
+		Client:  &http.Client{Timeout: 300 * time.Second},
 		MaxBody: 8 << 20,
 	}
 	b.reg.Store(reg)

@@ -58,6 +58,7 @@ type SubMethod struct {
 	Name        string     `json:"name"`        // <ns>.<verb>, e.g. weather.current
 	Description string     `json:"description"` // full description, shown in help
 	Latency     string     `json:"latency"`     // fast | med | slow (REQUIRED)
+	Timeout     string     `json:"timeout"`     // optional Go duration (e.g. "280s") overriding the latency-class default
 	HTTP        SubRoute   `json:"http"`
 	Params      []SubParam `json:"params"`
 }
@@ -223,6 +224,7 @@ func (s Submission) ToConfig() *scaffold.Config {
 			Name:     m.Name,
 			Summary:  m.Description, // help "summary" carries the description
 			Duration: m.Latency,
+			Timeout:  m.Timeout, // explicit per-method timeout (overrides the latency-class default)
 			HTTP:     &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path},
 			Params:   params,
 		})
