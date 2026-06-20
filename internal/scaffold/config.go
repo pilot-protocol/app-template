@@ -98,11 +98,94 @@ type Backend struct {
 	// install time and is NEVER baked into the bundle. e.g.
 	//   headers: { x-api-key: "${MYAPP_API_KEY}" }
 	Headers map[string]string `yaml:"headers"`
+
+	// Auth selects how the adapter authenticates to the backend:
+	//   "" / "byo"   — each user supplies their own key (the ${TOKEN} headers above)
+	//   "managed"    — Pilot holds ONE master key and meters per user. The generated
+	//                  adapter is keyless and points at the Pilot broker (which holds
+	//                  the key, identifies the caller, and forwards to base_url). The
+	//                  publisher uploads the master key to Pilot once; users bring nothing.
+	Auth string `yaml:"auth"`
+
+	// X402 enables transparent, capped payment for paid (x402) APIs: on a
+	// backend HTTP 402 the adapter asks the Pilot wallet to satisfy the charge
+	// and retries with X-PAYMENT. Presence enables it; it adds an ipc.call
+	// grant to the payer app. http backends only.
+	X402 *X402 `yaml:"x402"`
+}
+
+// BrokerBaseURL is the Pilot managed-key broker the keyless adapter points at.
+// The broker maps app id -> {master key, real upstream}, identifies the caller,
+// meters per (app, caller), and forwards to the partner API.
+const BrokerBaseURL = "https://broker.pilotprotocol.network"
+
+// Managed reports whether this app uses Pilot's managed (shared) master key.
+func (c *Config) Managed() bool { return c.Backend.Auth == "managed" }
+
+// AdapterBackendURL is what the generated adapter actually dials: the Pilot
+// broker (managed) or the partner API directly (byo). For managed apps the
+// partner base_url is registered with the broker, never baked into user hosts.
+func (c *Config) AdapterBackendURL() string {
+	if c.Managed() {
+		return strings.TrimRight(BrokerBaseURL, "/") + "/" + c.ID
+	}
+	return c.Backend.BaseURL
+}
+
+// AdapterBackendHost is the net.dial grant target for the generated adapter:
+// the broker host (managed) or the partner host (byo). Managed adapters only
+// ever talk to the broker, so that is the only host they may dial.
+func (c *Config) AdapterBackendHost() string {
+	raw := c.Backend.BaseURL
+	if c.Managed() {
+		raw = BrokerBaseURL
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
+// X402 configures the pay-on-402 flow. All fields have sensible defaults
+// (Pilot wallet, Base, USDC); only MaxUSDC is worth setting per app.
+type X402 struct {
+	Payer    string   `yaml:"payer"`    // payer app id; default io.pilot.wallet
+	Method   string   `yaml:"method"`   // payer IPC method; default wallet.evm.satisfy
+	Grant    string   `yaml:"grant"`    // ipc.call grant target; default io.pilot.wallet.evm.satisfy
+	Networks []string `yaml:"networks"` // allowed networks; default [base]
+	Asset    string   `yaml:"asset"`    // required asset symbol; default USDC
+	MaxUSDC  string   `yaml:"max_usdc"` // per-call cap in USDC (e.g. "10"); "" = rely on wallet caps
+}
+
+// MaxAtomic converts MaxUSDC to USDC atomic units (6 decimals). Empty when no
+// cap is set, so generated code can emit a nil cap (wallet caps still apply).
+func (x X402) MaxAtomic() string {
+	s := strings.TrimSpace(x.MaxUSDC)
+	if s == "" {
+		return ""
+	}
+	whole, frac := s, ""
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		whole, frac = s[:i], s[i+1:]
+	}
+	for len(frac) < 6 {
+		frac += "0"
+	}
+	frac = frac[:6]
+	out := strings.TrimLeft(whole+frac, "0")
+	if out == "" {
+		out = "0"
+	}
+	return out
 }
 
 // NeedsSecrets reports whether any header value references a ${...} placeholder,
 // in which case the manifest must grant fs.read on $APP/secrets.json.
 func (b Backend) NeedsSecrets() bool {
+	if b.Auth == "managed" {
+		return false // the broker holds the key; the adapter carries none
+	}
 	for _, v := range b.Headers {
 		if strings.Contains(v, "${") {
 			return true
@@ -206,6 +289,23 @@ func (c *Config) Resolve() {
 	if c.Grants.RatePerMin == 0 {
 		c.Grants.RatePerMin = 120
 	}
+	if x := c.Backend.X402; x != nil {
+		if x.Payer == "" {
+			x.Payer = "io.pilot.wallet"
+		}
+		if x.Method == "" {
+			x.Method = "wallet.evm.satisfy"
+		}
+		if x.Grant == "" {
+			x.Grant = "io.pilot.wallet.evm.satisfy"
+		}
+		if len(x.Networks) == 0 {
+			x.Networks = []string{"base"}
+		}
+		if x.Asset == "" {
+			x.Asset = "USDC"
+		}
+	}
 	for i := range c.Methods {
 		m := &c.Methods[i]
 		if m.Kind == "" {
@@ -249,6 +349,19 @@ func (c *Config) Validate() []error {
 	default:
 		errs = append(errs, fmt.Errorf("backend.type %q must be \"http\" or \"cli\"", c.Backend.Type))
 	}
+	if x := c.Backend.X402; x != nil {
+		if c.Backend.Type != "http" {
+			errs = append(errs, fmt.Errorf("backend.x402 is only valid for an http backend"))
+		}
+		if strings.TrimSpace(x.Grant) == "" {
+			errs = append(errs, fmt.Errorf("backend.x402.grant (ipc.call target) must not be empty"))
+		}
+		if x.MaxUSDC != "" {
+			if m := x.MaxAtomic(); m == "" || m == "0" {
+				errs = append(errs, fmt.Errorf("backend.x402.max_usdc %q is not a positive amount", x.MaxUSDC))
+			}
+		}
+	}
 	if len(c.Methods) == 0 {
 		errs = append(errs, fmt.Errorf("at least one method must be declared"))
 	}
@@ -259,7 +372,7 @@ func (c *Config) Validate() []error {
 			continue
 		}
 		if !strings.HasPrefix(m.Name, c.Namespace+".") {
-			errs = append(errs, fmt.Errorf("methods[%d].name %q must be prefixed %q.", i, m.Name, c.Namespace))
+			errs = append(errs, fmt.Errorf("methods[%d].name %q must be prefixed %q", i, m.Name, c.Namespace+"."))
 		}
 		if m.Name == c.Namespace+".help" {
 			errs = append(errs, fmt.Errorf("methods[%d]: %q is reserved — the generator adds it automatically", i, m.Name))

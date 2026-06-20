@@ -1,8 +1,13 @@
-# built tool binary
+# built binaries (Makefile / `go build` at the repo root)
 /pilot-app
-# generated test output
+/broker
+/broker-sign
+/publish-server
+/maildump
+# coverage + generated test output
+cover.out
 /out/
-# never commit publisher signing keys
+# never commit publisher signing keys or broker identities
 *.key
 
 # browse-tool artifacts

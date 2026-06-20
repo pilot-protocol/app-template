@@ -40,9 +40,17 @@ func main() {
 	// accepted and ignored.
 	socket := flag.String("socket", "", "unix socket path to listen on (provided by the pilot daemon)")
 	manifestPath := flag.String("manifest", "", "path to the pinned manifest.json (its dir is the app root)")
+{{- if .Backend.X402}}
+	addr := flag.String("addr", "", "daemon broker address (used by the x402 payment layer to reach the wallet)")
+{{- else}}
 	_ = flag.String("addr", "", "daemon address (unused by this app)")
+{{- end}}
 	_ = flag.String("db", "", "per-app sqlite path (unused: this app is stateless)")
+{{- if .Managed}}
+	identity := flag.String("identity", "", "per-app ed25519 identity path (used to sign managed-broker requests)")
+{{- else}}
 	_ = flag.String("identity", "", "per-app identity path (unused by this app)")
+{{- end}}
 	_ = flag.String("cap-state", "", "spend-cap state path (unused by this app)")
 	flag.Parse()
 	if *socket == "" {
@@ -51,7 +59,13 @@ func main() {
 
 	cfg := resolveConfig(*manifestPath)
 {{- if eq .Backend.Type "http"}}
-	client, err := backend.New(backend.Config{BaseURL: cfg.BackendURL{{if .Backend.Headers}}, Headers: resolveHeaders(*manifestPath){{end}}})
+{{- if .Managed}}
+	signer, err := backend.NewSigner(*identity)
+	if err != nil {
+		log.Fatalf("{{.BinaryName}}: %v", err)
+	}
+{{- end}}
+	client, err := backend.New(backend.Config{BaseURL: cfg.BackendURL{{if .Backend.Headers}}, Headers: resolveHeaders(*manifestPath){{end}}{{if .Backend.X402}}, DaemonAddr: *addr{{end}}{{if .Managed}}, Sign: signer{{end}}})
 	if err != nil {
 		log.Fatalf("{{.BinaryName}}: backend config: %v", err)
 	}
@@ -289,7 +303,9 @@ type appConfig struct {
 
 // defaultBackendURL ships the app pointing at production, so a freshly-installed
 // app works with NO config — config.json only overrides it (e.g. self-hosted).
-const defaultBackendURL = "{{.Backend.BaseURL}}"
+// For a managed app this is the Pilot broker (which holds the master key and
+// forwards to the partner), never the partner API directly.
+const defaultBackendURL = "{{.AdapterBackendURL}}"
 
 func resolveConfig(manifestPath string) appConfig {
 	cfg := appConfig{BackendURL: defaultBackendURL}

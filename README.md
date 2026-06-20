@@ -99,6 +99,49 @@ params, kind, and latency class.
   [docs/CLI-ADAPTER.md](docs/CLI-ADAPTER.md). Until then, front a CLI with a
   small HTTP shim and publish it as an `http` adapter.
 
+## Authentication: BYO key vs. managed key
+
+`backend.auth` chooses how the adapter authenticates to the API:
+
+- **`byo`** (default) — each user supplies their **own** API key at install via
+  `${TOKEN}` headers (env or `$APP/secrets.json`). The key is never baked into
+  the bundle. Use this when each user has their own account with the partner.
+- **`managed`** — Pilot holds **one master key** and meters it per user. The
+  generated adapter is **keyless**: it points at the Pilot broker, signs each
+  request with the per-app identity the daemon provisions, and the broker
+  verifies the caller, enforces a per-user quota, injects the master key, and
+  forwards to the partner. Use this when the partner gives Pilot one shared key
+  (e.g. Sixtyfour AI).
+
+```yaml
+backend:
+  type: http
+  base_url: https://api.sixtyfour.ai   # registered with the broker, not shipped to users
+  auth: managed
+```
+
+Publishing is **identical** either way — same `pilot.app.yaml`, same one-repo
+flow. The full design (security model + an ELI5) is in
+[docs/MANAGED-KEY.md](docs/MANAGED-KEY.md). The broker lives in this repo
+(`cmd/broker`, `internal/broker`); run the prod-like stack from
+[`deploy/docker`](deploy/docker).
+
+## Repository layout
+
+```
+cmd/pilot-app         the scaffolder CLI (init / validate / verify / submit)
+cmd/publish-server    submission API + admin dashboard (the VM service)
+cmd/broker            the managed-key gateway (holds master keys, meters per user)
+cmd/broker-sign       dev/ops helper: sign a broker request as a caller
+internal/scaffold     pilot.app.yaml -> adapter project (templates/)
+internal/publish      submission, build, sign, case store, broker registration
+internal/broker       identity verify, registry, auth inject, store, breaker
+internal/catalogue    review-gate checks (SPEC §7.1)
+deploy/               GCE startup script + docker/ (prod-like broker + publish stack)
+docs/                 publishing spec, managed-key design, adapter archetypes
+scripts/              e2e-broker.sh, install-git-hooks.sh
+```
+
 ## Verified end to end
 
 The generated adapter has been installed against the real pilot daemon (via a

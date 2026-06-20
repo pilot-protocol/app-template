@@ -47,6 +47,7 @@ type server struct {
 	pubToken   string
 	adminToken string
 	origins    []string
+	registrar  publish.BrokerRegistrar // registers managed apps with the broker on approval
 }
 
 func main() {
@@ -78,6 +79,12 @@ func main() {
 		// CORS: only the production website may call the API. ALLOWED_ORIGINS
 		// overrides (e.g. add a local origin for testing); default is prod.
 		origins: splitOrigins(allowedOriginsEnv()),
+	}
+	// Managed-app approval registers the app with the broker by writing its
+	// registry file (BROKER_REGISTRY). Unset = managed registration is logged
+	// for manual addition rather than written.
+	if p := os.Getenv("BROKER_REGISTRY"); p != "" {
+		s.registrar = publish.FileRegistrar{Path: p}
 	}
 
 	mux := http.NewServeMux()
@@ -269,6 +276,25 @@ func (s *server) adminApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cases.SetStatus(id, publish.StatusApproved, "published via workflow (commit "+sha+")")
+
+	// Managed apps share one master key brokered per user: register the app with
+	// the broker so it can route + meter. Ops must set the master key in the env
+	// var named below before the app is callable.
+	if c.Submission.Backend.Managed() {
+		entry := c.Submission.BrokerEntry()
+		if s.registrar != nil {
+			if err := s.registrar.Register(entry); err != nil {
+				log.Printf("broker registration for %s failed: %v", entry.ID, err)
+			} else {
+				log.Printf("broker: registered managed app %s -> %s (set master key in env %s; HUP the broker to load)",
+					entry.ID, entry.Upstream, entry.KeyEnv)
+			}
+		} else {
+			log.Printf("broker: managed app %s approved but BROKER_REGISTRY unset; add manually: upstream=%s key_env=%s allow=%v",
+				entry.ID, entry.Upstream, entry.KeyEnv, entry.Allow)
+		}
+	}
+
 	subject, htmlBody, text := publish.AcceptEmail(c.Submission, guide)
 	if err := s.mailer.Send(c.Submission.Email, subject, htmlBody, text); err != nil {
 		log.Printf("accept email to %s failed: %v", c.Submission.Email, err)

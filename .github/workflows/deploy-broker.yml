@@ -1,0 +1,59 @@
+# Build and publish the broker container image. Manual (workflow_dispatch) or on
+# push to main that touches broker code. Gated on registry secrets: without them
+# it builds the image (proving the Dockerfile) but does not push — so the
+# workflow is safe to land and test before any real deploy is wired.
+#
+# To enable pushing, set repo variables/secrets:
+#   vars.BROKER_IMAGE      e.g. ghcr.io/pilot-protocol/broker
+#   secrets.REGISTRY_USER  / secrets.REGISTRY_TOKEN
+name: deploy-broker
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "cmd/broker/**"
+      - "internal/broker/**"
+      - "deploy/docker/broker.Dockerfile"
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Always build the image — this is the test that the Dockerfile is valid.
+      - name: Build broker image
+        run: docker build -f deploy/docker/broker.Dockerfile -t broker:ci .
+
+      - name: Smoke-test the image boots
+        run: |
+          set -euo pipefail
+          # Empty registry → boots and serves /gw/health (no master keys needed).
+          cid=$(docker run -d -p 8099:8099 broker:ci)
+          for i in $(seq 1 20); do
+            if curl -fsS localhost:8099/gw/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 0.5
+          done
+          docker logs "$cid" || true
+          docker rm -f "$cid" >/dev/null
+          [ "${ok:-0}" = 1 ] || { echo "broker image failed health check"; exit 1; }
+
+      - name: Push image
+        if: ${{ vars.BROKER_IMAGE != '' }}
+        env:
+          IMAGE: ${{ vars.BROKER_IMAGE }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "$REGISTRY_TOKEN" | docker login "${IMAGE%%/*}" -u "$REGISTRY_USER" --password-stdin
+          docker tag broker:ci "$IMAGE:${GITHUB_SHA::12}"
+          docker tag broker:ci "$IMAGE:latest"
+          docker push "$IMAGE:${GITHUB_SHA::12}"
+          docker push "$IMAGE:latest"
+          echo "pushed $IMAGE:${GITHUB_SHA::12}"

@@ -166,10 +166,6 @@ func submissionTable(s Submission) string {
 		`</table>`
 }
 
-func btnLine(text string) string {
-	return `<div style="margin:18px 0"><span style="display:inline-block;background:` + emailAccent + `;color:#fff;font-size:13px;letter-spacing:.04em;text-transform:uppercase;padding:10px 18px;border-radius:6px">` + text + `</span></div>`
-}
-
 // VerificationEmail returns (subject, html, text) for an email-verification code.
 func VerificationEmail(code string) (string, string, string) {
 	sub := "Your Pilot app store verification code"

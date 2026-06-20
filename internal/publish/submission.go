@@ -33,7 +33,15 @@ type Submission struct {
 type SubBackend struct {
 	BaseURL string      `json:"base_url"`
 	Headers []SubHeader `json:"headers"` // auth/extra headers; values may use ${TOKEN}
+	// Auth selects how the adapter authenticates to the backend:
+	//   "" / "byo"  — each user brings their own key (the ${TOKEN} headers)
+	//   "managed"   — Pilot holds one master key and meters per user; the
+	//                 generated adapter is keyless and points at the broker.
+	Auth string `json:"auth"`
 }
+
+// Managed reports whether this submission uses Pilot's managed master key.
+func (b SubBackend) Managed() bool { return b.Auth == "managed" }
 
 // SubHeader is one request header. Value may contain ${TOKEN} placeholders that
 // the operator supplies at install (env or $APP/secrets.json) — never baked in.
@@ -168,7 +176,7 @@ func (s Submission) ToConfig() *scaffold.Config {
 		ID:          s.ID,
 		AppVersion:  s.Version,
 		Description: s.Description,
-		Backend:     scaffold.Backend{Type: "http", BaseURL: s.Backend.BaseURL},
+		Backend:     scaffold.Backend{Type: "http", BaseURL: s.Backend.BaseURL, Auth: s.Backend.Auth},
 		Listing: scaffold.Listing{
 			DisplayName: s.Listing.DisplayName,
 			Tagline:     s.Listing.Tagline,
@@ -180,14 +188,18 @@ func (s Submission) ToConfig() *scaffold.Config {
 			Vendor:      scaffold.Vendor{Name: s.Vendor.Name, URL: s.Vendor.URL, Contact: s.Vendor.Contact},
 		},
 	}
-	headers := map[string]string{}
-	for _, h := range s.Backend.Headers {
-		if strings.TrimSpace(h.Name) != "" {
-			headers[h.Name] = h.Value
+	// Managed apps are keyless: the partner auth header is the broker's job, not
+	// the adapter's, so it is never baked into the generated bundle.
+	if !s.Backend.Managed() {
+		headers := map[string]string{}
+		for _, h := range s.Backend.Headers {
+			if strings.TrimSpace(h.Name) != "" {
+				headers[h.Name] = h.Value
+			}
 		}
-	}
-	if len(headers) > 0 {
-		cfg.Backend.Headers = headers
+		if len(headers) > 0 {
+			cfg.Backend.Headers = headers
+		}
 	}
 	for _, m := range s.Methods {
 		params := map[string]string{}
