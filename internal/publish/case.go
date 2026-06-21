@@ -67,16 +67,25 @@ func (s *CaseStore) Create(sub Submission, b *Bundle, build BuildInfo) (*Case, e
 		return nil, err
 	}
 	if b != nil {
-		if err := os.WriteFile(filepath.Join(d, b.TarballName), b.Tarball, 0o644); err != nil {
-			return nil, err
+		// Write every platform's tarball into the case dir; the publish workflow
+		// uploads them all and the catalogue maps os/arch → asset.
+		bundles := map[string]map[string]string{}
+		for _, p := range b.Platforms {
+			if err := os.WriteFile(filepath.Join(d, p.TarballName), p.Tarball, 0o644); err != nil {
+				return nil, err
+			}
+			bundles[p.Platform] = map[string]string{"file": p.TarballName, "sha256": p.SHA256}
 		}
 		if err := os.WriteFile(filepath.Join(d, "metadata.json"), b.MetadataJSON, 0o644); err != nil {
 			return nil, err
 		}
 		// submission.json is the payload the publish workflow consumes on approval.
-		sj, _ := json.MarshalIndent(map[string]string{
+		// bundle/bundle_sha256 are the linux/amd64 primary (back-compat); bundles
+		// carries the full os/arch → {file,sha256} map.
+		sj, _ := json.MarshalIndent(map[string]any{
 			"id": sub.ID, "version": sub.Version, "namespace": sub.Namespace(),
 			"description": sub.Description, "bundle": b.TarballName, "bundle_sha256": b.SHA256,
+			"bundles": bundles,
 		}, "", "  ")
 		if err := os.WriteFile(filepath.Join(d, "submission.json"), append(sj, '\n'), 0o644); err != nil {
 			return nil, err
