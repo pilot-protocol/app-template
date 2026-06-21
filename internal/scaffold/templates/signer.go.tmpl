@@ -13,10 +13,12 @@ package backend
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -61,16 +63,22 @@ func NewSigner(path string) (Signer, error) {
 	}, nil
 }
 
-// loadIdentity reads the ed25519 private key from path. The Pilot daemon writes
-// the per-app identity as JSON: {"private_key":"<base64>","public_key":"<base64>"}
-// (std base64 of the 64-byte ed25519 key). For flexibility (tests/ops) a bare
-// base64/hex seed (32 bytes) or full key (64 bytes) is also accepted.
+// loadIdentity reads the ed25519 private key from path, creating it on first
+// start if absent. The daemon points --identity at $APP/identity.json but does
+// NOT create the file — per the app-store contract, a key.sign app provisions
+// its own per-app key on first run. The identity is JSON:
+// {"private_key":"<base64>","public_key":"<base64>"} (std base64 of the 64-byte
+// ed25519 key). For flexibility (tests/ops) a bare base64/hex seed (32 bytes)
+// or full key (64 bytes) is also accepted.
 func loadIdentity(path string) (ed25519.PrivateKey, error) {
 	if path == "" {
 		return nil, fmt.Errorf("managed adapter: --identity is required (the daemon supplies it)")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return createIdentity(path)
+		}
 		return nil, fmt.Errorf("managed adapter: read identity %s: %w", path, err)
 	}
 
@@ -92,6 +100,32 @@ func loadIdentity(path string) (ed25519.PrivateKey, error) {
 		return nil, fmt.Errorf("managed adapter: identity %s: %w", path, derr)
 	}
 	return toPrivateKey(key, path)
+}
+
+// createIdentity generates a fresh ed25519 keypair, persists it at path in the
+// daemon's identity.json shape (0600), and returns the private key. The broker
+// accepts any validly-signed caller and meters per identity, so a first-run
+// self-provisioned key is a new metered caller — no pre-registration needed.
+func createIdentity(path string) (ed25519.PrivateKey, error) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("managed adapter: generate identity: %w", err)
+	}
+	rec := struct {
+		PrivateKey string `json:"private_key"`
+		PublicKey  string `json:"public_key"`
+	}{
+		PrivateKey: base64.StdEncoding.EncodeToString(priv),
+		PublicKey:  base64.StdEncoding.EncodeToString(pub),
+	}
+	b, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+		return nil, fmt.Errorf("managed adapter: persist identity %s: %w", path, err)
+	}
+	return priv, nil
 }
 
 func toPrivateKey(key []byte, path string) (ed25519.PrivateKey, error) {
