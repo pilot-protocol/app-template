@@ -52,7 +52,11 @@ BUNDLES_JSON="$(jq -c --arg base "$REL_BASE" '
   | map({key: .key, value: {bundle_url: ($base + "/" + .value.file), bundle_sha256: .value.sha256}})
   | from_entries
 ' "$META")"
-CATVER=2; [ "$(jq -r 'length' <<<"$BUNDLES_JSON")" -gt 0 ] && CATVER=3
+# `bundles` is a v2-OPTIONAL field, NOT a version bump. pilotctl's loadCatalogue
+# fail-closes on any version != 1 && != 2, so emitting version 3 would make every
+# client reject the whole catalogue. Per the catalogue's own design (optional
+# fields, forward+backward compatible), keep version 2 and add bundles as a field.
+CATVER=2
 
 BUNDLE_BYTES="$(wc -c < "$DIR/$PRIMARY_FILE" | tr -d ' ')"
 MDSRC="$DIR/metadata.json"   # the v2 store-page record, emitted by `pilot-app submit`
