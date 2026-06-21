@@ -65,6 +65,9 @@ server {
 }
 NGINX
   ln -sf /etc/nginx/sites-available/broker.conf /etc/nginx/sites-enabled/broker.conf
+  # Remove nginx's default site — it binds :80, which publish-server owns, so
+  # nginx would fail to start. The broker vhost is :443-only.
+  rm -f /etc/nginx/sites-enabled/default
   # Renewal (HTTP-01) needs :80 briefly; free it from publish-server then restore.
   mkdir -p /etc/letsencrypt/renewal-hooks/pre /etc/letsencrypt/renewal-hooks/post
   echo -e '#!/bin/sh\nsystemctl stop pilot-publish' >/etc/letsencrypt/renewal-hooks/pre/stop-publish.sh
