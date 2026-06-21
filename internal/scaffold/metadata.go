@@ -73,6 +73,14 @@ func BuildMetadata(c *Config) Metadata {
 		changelog = []ChangelogRel{{Version: c.AppVersion, Notes: []string{c.Description}}}
 	}
 
+	// Managed apps require a daemon that provisions a per-app identity (--identity)
+	// and grants key.sign — features that landed in 1.10.0. BYO apps work on older
+	// daemons.
+	minPilot := "1.0.0"
+	if c.Managed() {
+		minPilot = "1.10.0"
+	}
+
 	var links []MetaLink
 	if c.Listing.SourceURL != "" {
 		links = append(links, MetaLink{Label: "Source", URL: c.Listing.SourceURL})
@@ -97,7 +105,7 @@ func BuildMetadata(c *Config) Metadata {
 		License:    c.Listing.License,
 		Categories: c.Listing.Categories,
 		Keywords:   c.Listing.Keywords,
-		Compat:     MetaCompat{MinPilotVersion: "1.0.0", Runtimes: []string{"go"}},
+		Compat:     MetaCompat{MinPilotVersion: minPilot, Runtimes: []string{"go"}},
 		Methods:    methods,
 		Changelog:  changelog,
 		Links:      links,
