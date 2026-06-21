@@ -84,7 +84,12 @@ grep -q '"id": "io.pilot.partner"' "$WORK/apps.json" \
 grep -q '"quota": 1' "$WORK/apps.json" && pass "publish-time rate limit recorded (quota 1)" || fail "quota not registered"
 
 # ── 3. extract the REAL built adapter from the approved bundle ───────────────
-bundle=$(find "$WORK/store" -name '*.tar.gz' | head -1)
+# The build now emits one bundle per platform; this test runs the binary
+# directly, so pick THIS host's tarball (else exec-format-errors on a
+# cross-platform binary). Fall back to any tarball for old single-platform builds.
+EGOOS=$(go env GOOS); EGOARCH=$(go env GOARCH)
+bundle=$(find "$WORK/store" -name "*-${EGOOS}-${EGOARCH}.tar.gz" | head -1)
+[ -n "$bundle" ] || bundle=$(find "$WORK/store" -name '*.tar.gz' | head -1)
 [ -n "$bundle" ] || fail "no bundle produced by the admin board"
 mkdir -p "$WORK/app" && tar -xzf "$bundle" -C "$WORK/app"
 adapter=$(find "$WORK/app" -type f -perm -u+x -name '*-app' | head -1)
