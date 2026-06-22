@@ -79,6 +79,15 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 			return written, fmt.Errorf("write install.json: %w", err)
 		}
 		written = append(written, "install.json")
+
+		script, err := renderInstallScript(cfg)
+		if err != nil {
+			return written, fmt.Errorf("build install.sh: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(outDir, "install.sh"), script, 0o755); err != nil {
+			return written, fmt.Errorf("write install.sh: %w", err)
+		}
+		written = append(written, "install.sh")
 	}
 
 	for _, f := range files {

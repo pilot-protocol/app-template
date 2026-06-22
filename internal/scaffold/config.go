@@ -61,14 +61,25 @@ type Config struct {
 // shas) cannot be tampered with undetected.
 type Asset struct {
 	Role     string   `yaml:"role" json:"role"`           // "binary" (default, chmod +x) | "data"
+	Name     string   `yaml:"name" json:"name"`           // stable id within a platform (default: exec_path basename); referenced by other assets' deps
 	OS       string   `yaml:"os" json:"os"`               // linux | darwin
 	Arch     string   `yaml:"arch" json:"arch"`           // amd64 | arm64
 	URL      string   `yaml:"url" json:"url"`             // https download (R2 public URL)
 	SHA256   string   `yaml:"sha256" json:"sha256"`       // 64-hex of the downloaded object; verified after download
 	Unpack   string   `yaml:"unpack" json:"unpack"`       // "" (single file) | "tar.gz" (extract archive under $APP)
 	ExecPath string   `yaml:"exec_path" json:"exec_path"` // dest under $APP for a single file, or the path INSIDE the extracted tree for an archive (e.g. smolvm-1.2.0-darwin-arm64/smolvm)
-	Order    int      `yaml:"order" json:"order"`         // ascending install sequence
+	Deps     []string `yaml:"deps" json:"deps"`           // names of assets on the same platform that must install first
+	Order    int      `yaml:"order" json:"order"`         // tiebreaker among assets with no dependency relation (ascending)
 	Args     []string `yaml:"args" json:"args"`           // optional post-stage invocation, run as "$APP/<exec_path> args..."
+}
+
+// AssetName is the stable per-platform id used in dependency edges: the explicit
+// name, else the exec_path basename.
+func (a Asset) AssetName() string {
+	if a.Name != "" {
+		return a.Name
+	}
+	return a.ExecPath[strings.LastIndexByte(a.ExecPath, '/')+1:]
 }
 
 // HasAssets reports whether this app delivers native binaries from the registry.
@@ -559,7 +570,87 @@ func (c *Config) validateAssets() []error {
 		}
 		platforms[key] = true
 	}
+	// Per-platform: dependency names must resolve to a sibling and form a DAG.
+	for _, plat := range c.assetPlatforms() {
+		if _, err := c.ResolveAssets(plat[0], plat[1]); err != nil {
+			errs = append(errs, fmt.Errorf("assets for %s/%s: %w", plat[0], plat[1], err))
+		}
+	}
 	return errs
+}
+
+// assetPlatforms lists the distinct (os,arch) tuples present in Assets.
+func (c *Config) assetPlatforms() [][2]string {
+	seen := map[string]bool{}
+	var out [][2]string
+	for _, a := range c.Assets {
+		k := a.OS + "/" + a.Arch
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, [2]string{a.OS, a.Arch})
+		}
+	}
+	return out
+}
+
+// ResolveAssets returns the assets for one host platform in install order: a
+// topological sort over `deps` (an asset installs after everything it depends
+// on), with `order` then name as the deterministic tiebreaker among assets that
+// have no dependency relation. Errors on an unknown dep name or a cycle.
+func (c *Config) ResolveAssets(os, arch string) ([]Asset, error) {
+	var plat []Asset
+	for _, a := range c.Assets {
+		if a.OS == os && a.Arch == arch {
+			plat = append(plat, a)
+		}
+	}
+	byName := map[string]Asset{}
+	for _, a := range plat {
+		byName[a.AssetName()] = a
+	}
+	// Kahn's algorithm with a deterministic ready-set ordering.
+	indeg := map[string]int{}
+	for _, a := range plat {
+		indeg[a.AssetName()] = 0
+	}
+	for _, a := range plat {
+		for _, d := range a.Deps {
+			if _, ok := byName[d]; !ok {
+				return nil, fmt.Errorf("asset %q depends on unknown asset %q", a.AssetName(), d)
+			}
+			indeg[a.AssetName()]++
+		}
+	}
+	less := func(x, y Asset) bool {
+		if x.Order != y.Order {
+			return x.Order < y.Order
+		}
+		return x.AssetName() < y.AssetName()
+	}
+	var out []Asset
+	for len(out) < len(plat) {
+		var ready []Asset
+		for _, a := range plat {
+			if indeg[a.AssetName()] == 0 {
+				ready = append(ready, a)
+			}
+		}
+		if len(ready) == 0 {
+			return nil, fmt.Errorf("dependency cycle among assets")
+		}
+		sort.Slice(ready, func(i, j int) bool { return less(ready[i], ready[j]) })
+		next := ready[0]
+		indeg[next.AssetName()] = -1 // mark consumed
+		out = append(out, next)
+		for _, a := range plat {
+			for _, d := range a.Deps {
+				if d == next.AssetName() {
+					indeg[a.AssetName()]--
+				}
+			}
+		}
+	}
+	return out, nil
 }
 
 // BackendHost returns the net.dial target for the grant block (http only).

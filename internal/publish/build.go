@@ -93,6 +93,12 @@ func BuildBundle(cfg *scaffold.Config, priv ed25519.PrivateKey) (*Bundle, error)
 		if err := os.WriteFile(filepath.Join(tmp, "bundle", "install.json"), spec, 0o644); err != nil {
 			return nil, fmt.Errorf("stage install.json into bundle: %w", err)
 		}
+		// install.sh ships beside it (transparency / direct-install path).
+		if script, err := os.ReadFile(filepath.Join(tmp, "install.sh")); err == nil {
+			if err := os.WriteFile(filepath.Join(tmp, "bundle", "install.sh"), script, 0o755); err != nil {
+				return nil, fmt.Errorf("stage install.sh into bundle: %w", err)
+			}
+		}
 	}
 
 	var (

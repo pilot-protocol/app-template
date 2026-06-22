@@ -42,13 +42,15 @@ type Submission struct {
 // accepted, and again on the host at install. Mirrors scaffold.Asset.
 type SubArtifact struct {
 	Role     string   `json:"role"`      // "binary" (default) | "data"
+	Name     string   `json:"name"`      // per-platform id (default: exec_path basename); referenced by deps
 	OS       string   `json:"os"`        // linux | darwin
 	Arch     string   `json:"arch"`      // amd64 | arm64
 	URL      string   `json:"url"`       // R2 public URL
 	SHA256   string   `json:"sha256"`    // 64-hex of the uploaded object
 	Unpack   string   `json:"unpack"`    // "" (single file) | "tar.gz" (extract under $APP)
 	ExecPath string   `json:"exec_path"` // dest under $APP, or path inside the extracted tree
-	Order    int      `json:"order"`     // ascending install sequence (per platform)
+	Deps     []string `json:"deps"`      // names of same-platform artifacts installed first
+	Order    int      `json:"order"`     // tiebreaker among independent artifacts (per platform)
 	Args     []string `json:"args"`      // optional post-stage install args
 }
 
@@ -368,8 +370,8 @@ func (s Submission) ToConfig() *scaffold.Config {
 	}
 	for _, a := range s.Artifacts {
 		cfg.Assets = append(cfg.Assets, scaffold.Asset{
-			Role: a.Role, OS: a.OS, Arch: a.Arch, URL: a.URL, SHA256: a.SHA256,
-			Unpack: a.Unpack, ExecPath: a.ExecPath, Order: a.Order, Args: a.Args,
+			Role: a.Role, Name: a.Name, OS: a.OS, Arch: a.Arch, URL: a.URL, SHA256: a.SHA256,
+			Unpack: a.Unpack, ExecPath: a.ExecPath, Deps: a.Deps, Order: a.Order, Args: a.Args,
 		})
 	}
 	cfg.Resolve()
