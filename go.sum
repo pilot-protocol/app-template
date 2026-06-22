@@ -12,8 +12,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
-github.com/pilot-protocol/app-store v1.0.1-beta.1.0.20260609061942-8852c785a264 h1:NL9rFdakbVQ0V7xfJbCk8RJZSaQ1AmvdhAJwFIouMsk=
-github.com/pilot-protocol/app-store v1.0.1-beta.1.0.20260609061942-8852c785a264/go.mod h1:zoCxHYoNdj0V44OkG3Yzcye0jnwZDVUcJgAvR5Z1kwc=
+github.com/pilot-protocol/app-store v1.0.1-beta.1.0.20260622180016-07b4170265dc h1:Ze7h3rEPMhFaAyjNH9riySBs8HEeeoB3wODwtoLQ4Eo=
+github.com/pilot-protocol/app-store v1.0.1-beta.1.0.20260622180016-07b4170265dc/go.mod h1:leZPtX43gE2JB7xeljexXri81g6qhdZfYExLtzI+bhg=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=

@@ -57,8 +57,8 @@ func main() {
 		log.Fatal("{{.BinaryName}}: --socket is required (the pilot daemon supplies it)")
 	}
 
-	cfg := resolveConfig(*manifestPath)
 {{- if eq .Backend.Type "http"}}
+	cfg := resolveConfig(*manifestPath)
 {{- if .Managed}}
 	signer, err := backend.NewSigner(*identity)
 	if err != nil {
@@ -70,7 +70,7 @@ func main() {
 		log.Fatalf("{{.BinaryName}}: backend config: %v", err)
 	}
 {{- else}}
-	runner := backend.NewRunner({{printf "%#v" .Backend.Command}})
+	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
 {{- end}}
 
 	d := ipc.NewDispatcher()
@@ -157,23 +157,56 @@ func forwardPost(c *backend.Client, path string, timeout time.Duration) ipc.Hand
 {{- else}}
 func registerHandlers(d *ipc.Dispatcher, r *backend.Runner, version string) {
 {{- range .Methods}}
-	d.Register("{{.Name}}", forwardExec(r, backend.Spec{Args: {{printf "%#v" .CLI.Args}}, ParamsAsFlags: {{.CLI.ParamsAsFlags}}}, dur("{{.TimeoutFor}}"))) // {{.Duration}}
+	d.Register("{{.Name}}", forwardExec(r, backend.Spec{ {{if .CLI.Passthrough}}Passthrough: true{{else}}Args: {{printf "%#v" .CLI.Args}}, ParamsAsFlags: {{.CLI.ParamsAsFlags}}{{end}} }, dur("{{.TimeoutFor}}"))) // {{.Duration}}
 {{- end}}
 	d.Register("{{.Namespace}}.help", helpHandler(version))
 }
 
-// forwardExec runs the backend CLI for one method and returns its stdout as the
-// IPC reply. ${field} placeholders in Args are substituted from the payload.
+// forwardExec runs the backend CLI for one method and returns its output as the
+// IPC reply. Enumerated methods fill ${field} placeholders from the payload;
+// passthrough methods take a verbatim "args" array. Both accept an optional
+// "stdin" string piped to the child.
 func forwardExec(r *backend.Runner, spec backend.Spec, timeout time.Duration) ipc.Handler {
 	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
-		params, err := stringParams(req.Payload)
+		call, err := decodeCall(spec, req.Payload)
 		if err != nil {
 			return nil, err
 		}
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		return r.Run(ctx, spec, params)
+		return r.Run(ctx, spec, call)
 	}
+}
+
+// decodeCall extracts one invocation's dynamic inputs from the IPC payload. A
+// passthrough method reads {"args":[...], "stdin"?:"..."} — the args array is
+// the verbatim argv appended to the base command. An enumerated method reads a
+// flat object of string params; the reserved key "stdin" is piped to the child.
+func decodeCall(spec backend.Spec, raw json.RawMessage) (backend.Call, error) {
+	var call backend.Call
+	if spec.Passthrough {
+		var p struct {
+			Args  []string `json:"args"`
+			Stdin string   `json:"stdin"`
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return call, fmt.Errorf(`passthrough payload must be {"args":[...],"stdin"?:"..."}: %w`, err)
+			}
+		}
+		call.Args, call.Stdin = p.Args, p.Stdin
+		return call, nil
+	}
+	params, err := stringParams(raw)
+	if err != nil {
+		return call, err
+	}
+	if s, ok := params["stdin"]; ok {
+		call.Stdin = s
+		delete(params, "stdin")
+	}
+	call.Params = params
+	return call, nil
 }
 {{- end}}
 

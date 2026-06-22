@@ -16,15 +16,20 @@
     <tr><th>ID</th><td class="mono">{{.C.Submission.ID}}</td></tr>
     <tr><th>Version</th><td class="mono">{{.C.Submission.Version}}</td></tr>
     <tr><th>Description</th><td>{{.C.Submission.Description}}</td></tr>
+    {{if .C.Submission.Backend.IsCLI}}
+    <tr><th>Backend</th><td class="mono">cli: {{join .C.Submission.Backend.Command}}</td></tr>
+    {{if .C.Submission.Backend.EnvPassthrough}}<tr><th>Env passthrough</th><td class="mono">{{join .C.Submission.Backend.EnvPassthrough}}</td></tr>{{end}}
+    {{else}}
     <tr><th>Backend</th><td class="mono">{{.C.Submission.Backend.BaseURL}}</td></tr>
     {{range .C.Submission.Backend.Headers}}<tr><th>Header</th><td class="mono">{{.Name}}: {{.Value}}</td></tr>{{end}}
+    {{end}}
   </table></div>
 
   <div class="card review"><h2>Methods</h2><table class="methods">
-    <tr><th>Method</th><th>Latency</th><th>Path</th><th>Description</th></tr>
+    <tr><th>Method</th><th>Latency</th><th>Route</th><th>Description</th></tr>
     {{range .C.Submission.Methods}}<tr>
       <td class="mono">{{.Name}}</td><td>{{.Latency}}</td>
-      <td class="mono">{{.HTTP.Verb}} {{.HTTP.Path}}</td><td>{{.Description}}</td>
+      <td class="mono">{{if $.C.Submission.Backend.IsCLI}}{{if .CLI.Passthrough}}passthrough {args[]}{{else}}{{join .CLI.Args}}{{if .CLI.ParamsAsFlags}} +flags{{end}}{{end}}{{else}}{{.HTTP.Verb}} {{.HTTP.Path}}{{end}}</td><td>{{.Description}}</td>
     </tr>{{end}}
   </table></div>
 
