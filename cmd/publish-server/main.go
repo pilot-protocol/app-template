@@ -105,6 +105,7 @@ func main() {
 	mux.Handle("GET /static/", http.FileServer(http.FS(assets)))
 	mux.HandleFunc("GET /admin", s.adminList)
 	mux.HandleFunc("GET /admin/case", s.adminCase)
+	mux.HandleFunc("POST /admin/build", s.adminBuild)
 	mux.HandleFunc("POST /admin/approve", s.adminApprove)
 	mux.HandleFunc("POST /admin/reject", s.adminReject)
 
@@ -198,18 +199,54 @@ func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 422, map[string]any{"errors": errs})
 		return
 	}
-	// Record a "building" case and return immediately — the 4-platform build can
-	// outlast the ingress (Cloudflare ~100s) timeout if done inline, which dropped
-	// the form's request (HTTP 524/000). The build runs in the background and the
-	// case flips to "pending" (or "build_failed") when it finishes; the admin
-	// board reflects the live status.
-	c, err := s.cases.CreateBuilding(sub)
+	// Record the submission WITHOUT building — we don't build a bundle for every
+	// submission. An admin triggers the build per case (POST /admin/build, e.g.
+	// the "Build bundles" button on the case page). Returns instantly.
+	c, err := s.cases.CreateSubmitted(sub)
 	if err != nil {
 		writeJSON(w, 409, map[string]any{"errors": []string{err.Error()}})
 		return
 	}
-	go s.buildAsync(c.CaseID, sub)
 	writeJSON(w, 202, map[string]any{"case_id": c.CaseID, "status": c.Status})
+}
+
+// adminBuild kicks off the async bundle build for a submitted (or previously
+// failed) case. Admin-token gated, same as approve/reject. The build runs in a
+// background goroutine; the case flips submitted/build_failed → building →
+// pending (or build_failed). Triggered by the "Build bundles" button on the
+// case page, which injects the admin token from the dashboard URL.
+func (s *server) adminBuild(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(r) {
+		http.Error(w, "admin token required", http.StatusUnauthorized)
+		return
+	}
+	id := r.FormValue("id")
+	c, err := s.cases.Get(id)
+	if err != nil {
+		http.Error(w, "unknown case", 404)
+		return
+	}
+	switch c.Status {
+	case publish.StatusSubmitted, publish.StatusBuildFailed:
+		// ok to (re)build
+	case publish.StatusBuilding:
+		http.Error(w, "already building", http.StatusConflict)
+		return
+	default:
+		http.Error(w, fmt.Sprintf("case is %q — build only applies to submitted or build_failed cases", c.Status), http.StatusConflict)
+		return
+	}
+	if _, err := s.cases.SetStatus(id, publish.StatusBuilding, "build started"); err != nil {
+		http.Error(w, "could not start build: "+err.Error(), 500)
+		return
+	}
+	go s.buildAsync(id, c.Submission)
+	// Back to the case page (preserve the admin token), like approve/reject.
+	u := "/admin/case?id=" + id
+	if t := r.FormValue("token"); t != "" {
+		u += "&token=" + t
+	}
+	http.Redirect(w, r, u, http.StatusSeeOther)
 }
 
 // buildAsync builds the bundle for an already-recorded case and flips it to

@@ -56,6 +56,19 @@
   <div class="card review"><h2>Generated pilotctl</h2><pre>{{range .Commands}}{{.}}
 {{end}}</pre></div>
 
+  {{if or (eq (printf "%s" .C.Status) "submitted") (eq (printf "%s" .C.Status) "build_failed")}}
+  <div class="card review">
+    <h2>Build</h2>
+    <p class="muted" style="margin:0 0 8px">{{if eq (printf "%s" .C.Status) "build_failed"}}The last build failed — see the history below, then re-run it.{{else}}Submitted but not built yet. Build the per-platform bundles (runs in the background, ~a few seconds), then approve.{{end}}</p>
+    <form method="post" action="/admin/build">
+      <input type="hidden" name="id" value="{{.C.CaseID}}"><input type="hidden" name="token" value="{{.Token}}">
+      <button class="primary" type="submit">Build bundles</button>
+    </form>
+  </div>
+  {{else if eq (printf "%s" .C.Status) "building"}}
+  <div class="card review"><h2>Building…</h2><p class="muted">Bundles are building in the background — refresh in a few seconds.</p></div>
+  {{end}}
+
   {{if eq (printf "%s" .C.Status) "pending"}}
   <div class="card review">
     <h2>Approve</h2>

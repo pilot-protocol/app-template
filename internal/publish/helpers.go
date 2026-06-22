@@ -6,7 +6,8 @@ import "strings"
 type Status string
 
 const (
-	StatusBuilding    Status = "building"     // submitted; bundle building asynchronously
+	StatusSubmitted   Status = "submitted"    // received + validated; not built yet (admin triggers the build)
+	StatusBuilding    Status = "building"     // bundle building asynchronously
 	StatusBuildFailed Status = "build_failed" // async build errored; see the case note
 	StatusPending     Status = "pending"      // built + awaiting admin review
 	StatusApproved    Status = "approved"

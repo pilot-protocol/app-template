@@ -73,9 +73,10 @@ resp=$(curl -s -X POST "http://$PUB/api/submit" -H 'Content-Type: application/js
 case_id=$(echo "$resp" | sed -n 's/.*"case_id":"\([^"]*\)".*/\1/p')
 [ -n "$case_id" ] && pass "admin submit accepted (case $case_id)" || fail "submit failed: $resp"
 
-# submit builds the bundle ASYNCHRONOUSLY (returns 202 "building"); wait for the
-# case to reach "pending" before approving (approve guards on pending).
+# submit does NOT build — an admin triggers the build per case. Fire /admin/build,
+# then wait for the async build to reach "pending" before approving.
 CASE_JSON="$WORK/store/cases/${case_id}/case.json"
+curl -s -X POST "http://$PUB/admin/build" --data-urlencode "id=$case_id" --data-urlencode "token=dev-admin" >/dev/null
 st=""
 for _ in $(seq 1 90); do
   st=$(sed -n 's/.*"status": *"\([^"]*\)".*/\1/p' "$CASE_JSON" 2>/dev/null | head -1)
@@ -83,7 +84,7 @@ for _ in $(seq 1 90); do
   [ "$st" = "build_failed" ] && fail "async build failed: $(cat "$CASE_JSON")"
   sleep 1
 done
-[ "$st" = "pending" ] && pass "async build finished → pending" || fail "build did not reach pending (status=$st)"
+[ "$st" = "pending" ] && pass "admin build → pending" || fail "build did not reach pending (status=$st)"
 
 # ── 2. admin board: approve (registers with the broker) ─────────────────────
 # (publish trigger no-ops without a token; registration happens regardless.)
