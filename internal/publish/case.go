@@ -80,11 +80,11 @@ func (s *CaseStore) Create(sub Submission, b *Bundle, build BuildInfo) (*Case, e
 	return c, s.write(c)
 }
 
-// CreateBuilding records a case in the "building" state with NO bundle yet, so
-// the submit HTTP response can return immediately while the bundle builds in a
-// background goroutine (a 4-platform build can outlast an ingress timeout if
-// done synchronously). Refuses to clobber an already-approved id+version.
-func (s *CaseStore) CreateBuilding(sub Submission) (*Case, error) {
+// CreateSubmitted records a validated case in the "submitted" state with NO
+// bundle. Building is a SEPARATE, admin-triggered step (POST /admin/build) — we
+// don't build a bundle for every submission automatically. Refuses to clobber
+// an already-approved id+version.
+func (s *CaseStore) CreateSubmitted(sub Submission) (*Case, error) {
 	id := safeKey(sub.ID + "-" + sub.Version)
 	if existing, err := s.Get(id); err == nil && existing.Status == StatusApproved {
 		return nil, fmt.Errorf("%s v%s is already approved/published; bump the version", sub.ID, sub.Version)
@@ -95,8 +95,8 @@ func (s *CaseStore) CreateBuilding(sub Submission) (*Case, error) {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	c := &Case{
-		CaseID: id, Status: StatusBuilding, Submission: sub,
-		History:   []Event{{At: now, Status: StatusBuilding, Note: "submitted; building bundle"}},
+		CaseID: id, Status: StatusSubmitted, Submission: sub,
+		History:   []Event{{At: now, Status: StatusSubmitted, Note: "submitted; awaiting build"}},
 		CreatedAt: now, UpdatedAt: now,
 	}
 	return c, s.write(c)
