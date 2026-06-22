@@ -27,6 +27,7 @@ import (
 	"embed"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -197,24 +198,48 @@ func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 422, map[string]any{"errors": errs})
 		return
 	}
-	bundle, err := publish.BuildBundle(sub.ToConfig(), s.key)
-	if err != nil {
-		writeJSON(w, 500, map[string]any{"errors": []string{"build failed: " + err.Error()}})
-		return
-	}
-	c, err := s.cases.Create(sub, bundle, publish.BuildInfo{
-		BundleName: bundle.TarballName, BundleSHA256: bundle.SHA256, Publisher: publish.PublisherString(s.key),
-	})
+	// Record a "building" case and return immediately — the 4-platform build can
+	// outlast the ingress (Cloudflare ~100s) timeout if done inline, which dropped
+	// the form's request (HTTP 524/000). The build runs in the background and the
+	// case flips to "pending" (or "build_failed") when it finishes; the admin
+	// board reflects the live status.
+	c, err := s.cases.CreateBuilding(sub)
 	if err != nil {
 		writeJSON(w, 409, map[string]any{"errors": []string{err.Error()}})
 		return
 	}
-	// Confirmation email (best-effort; submission already succeeded).
+	go s.buildAsync(c.CaseID, sub)
+	writeJSON(w, 202, map[string]any{"case_id": c.CaseID, "status": c.Status})
+}
+
+// buildAsync builds the bundle for an already-recorded case and flips it to
+// pending, or marks it build_failed. Runs in its own goroutine so the submit
+// response is instant (no ingress timeout on the synchronous build).
+func (s *server) buildAsync(caseID string, sub publish.Submission) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("build %s panicked: %v", caseID, r)
+			s.cases.SetStatus(caseID, publish.StatusBuildFailed, fmt.Sprintf("build panicked: %v", r))
+		}
+	}()
+	bundle, err := publish.BuildBundle(sub.ToConfig(), s.key)
+	if err != nil {
+		log.Printf("build %s failed: %v", caseID, err)
+		s.cases.SetStatus(caseID, publish.StatusBuildFailed, "build failed: "+err.Error())
+		return
+	}
+	if _, err := s.cases.AttachBundle(caseID, bundle, publish.BuildInfo{
+		BundleName: bundle.TarballName, BundleSHA256: bundle.SHA256, Publisher: publish.PublisherString(s.key),
+	}); err != nil {
+		log.Printf("attach bundle %s failed: %v", caseID, err)
+		s.cases.SetStatus(caseID, publish.StatusBuildFailed, "store bundle failed: "+err.Error())
+		return
+	}
+	// Confirmation email (best-effort; the build already succeeded).
 	subject, htmlBody, text := publish.ConfirmationEmail(sub)
 	if err := s.mailer.Send(sub.Email, subject, htmlBody, text); err != nil {
 		log.Printf("confirmation email to %s failed: %v", sub.Email, err)
 	}
-	writeJSON(w, 200, map[string]any{"case_id": c.CaseID, "status": c.Status})
 }
 
 // ── admin (server-rendered, stays on the VM) ──────────────────────────────────
@@ -288,6 +313,10 @@ func (s *server) adminApprove(w http.ResponseWriter, r *http.Request) {
 	c, err := s.cases.Get(id)
 	if err != nil {
 		http.Error(w, "unknown case", 404)
+		return
+	}
+	if c.Status != publish.StatusPending {
+		http.Error(w, fmt.Sprintf("case is %q, not pending — wait for the build to finish (build_failed ⇒ re-submit)", c.Status), http.StatusConflict)
 		return
 	}
 
