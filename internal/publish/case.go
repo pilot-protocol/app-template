@@ -67,27 +67,7 @@ func (s *CaseStore) Create(sub Submission, b *Bundle, build BuildInfo) (*Case, e
 		return nil, err
 	}
 	if b != nil {
-		// Write every platform's tarball into the case dir; the publish workflow
-		// uploads them all and the catalogue maps os/arch → asset.
-		bundles := map[string]map[string]string{}
-		for _, p := range b.Platforms {
-			if err := os.WriteFile(filepath.Join(d, p.TarballName), p.Tarball, 0o644); err != nil {
-				return nil, err
-			}
-			bundles[p.Platform] = map[string]string{"file": p.TarballName, "sha256": p.SHA256}
-		}
-		if err := os.WriteFile(filepath.Join(d, "metadata.json"), b.MetadataJSON, 0o644); err != nil {
-			return nil, err
-		}
-		// submission.json is the payload the publish workflow consumes on approval.
-		// bundle/bundle_sha256 are the linux/amd64 primary (back-compat); bundles
-		// carries the full os/arch → {file,sha256} map.
-		sj, _ := json.MarshalIndent(map[string]any{
-			"id": sub.ID, "version": sub.Version, "namespace": sub.Namespace(),
-			"description": sub.Description, "bundle": b.TarballName, "bundle_sha256": b.SHA256,
-			"bundles": bundles,
-		}, "", "  ")
-		if err := os.WriteFile(filepath.Join(d, "submission.json"), append(sj, '\n'), 0o644); err != nil {
+		if err := writeBundleArtifacts(d, sub, b); err != nil {
 			return nil, err
 		}
 	}
@@ -98,6 +78,70 @@ func (s *CaseStore) Create(sub Submission, b *Bundle, build BuildInfo) (*Case, e
 		CreatedAt: now, UpdatedAt: now,
 	}
 	return c, s.write(c)
+}
+
+// CreateBuilding records a case in the "building" state with NO bundle yet, so
+// the submit HTTP response can return immediately while the bundle builds in a
+// background goroutine (a 4-platform build can outlast an ingress timeout if
+// done synchronously). Refuses to clobber an already-approved id+version.
+func (s *CaseStore) CreateBuilding(sub Submission) (*Case, error) {
+	id := safeKey(sub.ID + "-" + sub.Version)
+	if existing, err := s.Get(id); err == nil && existing.Status == StatusApproved {
+		return nil, fmt.Errorf("%s v%s is already approved/published; bump the version", sub.ID, sub.Version)
+	}
+	d := s.dir(id)
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	c := &Case{
+		CaseID: id, Status: StatusBuilding, Submission: sub,
+		History:   []Event{{At: now, Status: StatusBuilding, Note: "submitted; building bundle"}},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	return c, s.write(c)
+}
+
+// AttachBundle writes the built artifacts into an existing case and flips it to
+// pending (awaiting review). Called by the async build goroutine on success.
+func (s *CaseStore) AttachBundle(caseID string, b *Bundle, build BuildInfo) (*Case, error) {
+	c, err := s.Get(caseID)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeBundleArtifacts(s.dir(caseID), c.Submission, b); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	c.Build = build
+	c.Status = StatusPending
+	c.UpdatedAt = now
+	c.History = append(c.History, Event{At: now, Status: StatusPending, Note: "bundle built"})
+	return c, s.write(c)
+}
+
+// writeBundleArtifacts writes every platform tarball + metadata.json + the
+// submission.json payload (with the os/arch→{file,sha256} bundles map) the
+// publish workflow consumes on approval.
+func writeBundleArtifacts(d string, sub Submission, b *Bundle) error {
+	bundles := map[string]map[string]string{}
+	for _, p := range b.Platforms {
+		if err := os.WriteFile(filepath.Join(d, p.TarballName), p.Tarball, 0o644); err != nil {
+			return err
+		}
+		bundles[p.Platform] = map[string]string{"file": p.TarballName, "sha256": p.SHA256}
+	}
+	if err := os.WriteFile(filepath.Join(d, "metadata.json"), b.MetadataJSON, 0o644); err != nil {
+		return err
+	}
+	// bundle/bundle_sha256 are the linux/amd64 primary (back-compat); bundles
+	// carries the full os/arch → {file,sha256} map.
+	sj, _ := json.MarshalIndent(map[string]any{
+		"id": sub.ID, "version": sub.Version, "namespace": sub.Namespace(),
+		"description": sub.Description, "bundle": b.TarballName, "bundle_sha256": b.SHA256,
+		"bundles": bundles,
+	}, "", "  ")
+	return os.WriteFile(filepath.Join(d, "submission.json"), append(sj, '\n'), 0o644)
 }
 
 func (s *CaseStore) write(c *Case) error {
