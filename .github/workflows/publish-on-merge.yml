@@ -41,6 +41,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.CATALOG_PUBLISH_TOKEN }}
           PILOT_APP_BIN: /tmp/pilot-app
+          # Hex ed25519 catalogue signing key (matches the embedded catalogtrust
+          # pubkey). Lets publish-submission.sh sign catalogue.json so the PR is
+          # born verifiable — no manual offline re-sign. Absent ⇒ PR needs manual sign.
+          CATALOG_SIGN_KEY: ${{ secrets.CATALOG_SIGN_KEY }}
         run: |
           set -euo pipefail
           changed="$(git diff --name-only HEAD~1 HEAD -- 'submissions/**/submission.json' || true)"
