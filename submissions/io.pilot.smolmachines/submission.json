@@ -1,0 +1,89 @@
+{
+  "id": "io.pilot.smolmachines",
+  "version": "1.2.0",
+  "description": "Smol Machines \u2014 spin up fast, hardware-isolated Linux microVMs on demand (sub-second boot, real hypervisor isolation) to safely run untrusted code, GPU tasks, or headless browser automation in a disposable sandbox.",
+  "email": "alex@vulturelabs.io",
+  "backend": {
+    "type": "cli",
+    "command": [
+      "smolvm"
+    ]
+  },
+  "methods": [
+    {
+      "name": "smolmachines.exec",
+      "description": "Run any smolvm subcommand in a fast, hardware-isolated Linux microVM. Payload is {\"args\":[...]} \u2014 the verbatim smolvm argv. Command surface: `machine run` (ephemeral VM, one-off command), `machine create|start|exec|stop|delete|shell|status|ls|cp|update|monitor|prune` (persistent VMs; `exec` persists filesystem changes), `pack create|run` (portable .smolmachine artifacts), `serve` (HTTP API), `config`. Key flags: `--net` (networking is OFF by default), `--image <oci|./archive.tar|->`, `-v HOST:GUEST`, `-p HOST:GUEST`, `--gpu`, `--ssh-agent`, `--secret-env GUEST=HOST`. Example args: [\"machine\",\"run\",\"--net\",\"--image\",\"alpine\",\"--\",\"sh\",\"-c\",\"echo hi\"]. Not supported over IPC: interactive sessions (-it / `machine shell`) and long-running `serve`.",
+      "latency": "slow",
+      "params": [
+        {
+          "name": "args",
+          "type": "array",
+          "required": true,
+          "description": "verbatim smolvm argv, e.g. [\"machine\",\"run\",\"--net\",\"--image\",\"alpine\",\"--\",\"echo\",\"hi\"]"
+        }
+      ],
+      "cli": {
+        "passthrough": true
+      }
+    }
+  ],
+  "listing": {
+    "display_name": "Smol Machines",
+    "tagline": "Fast, hardware-isolated microVMs on demand",
+    "app_description": "Smol Machines \u2014 the app-store front door for the smolmachines VM engine. It lets an agent spin up fast, hardware-isolated Linux microVMs on demand (sub-second boot, real hypervisor isolation \u2014 not shared-kernel containers), then run workloads in a disposable sandbox. Free to use. Portable .smolmachine artifacts run identically on macOS and Linux, locally or in the cloud.\n\nUse it to:\n- Run untrusted or AI-generated code safely, with networking off by default\n- Give an agent a real Linux shell \u2014 a stateful, isolated execution backend\n- Automate headless browsers (GPU-accelerated) for scraping, screenshots, and web tasks\n- Run GPU/compute jobs via Vulkan with container-like speed\n- Spin up disposable dev sandboxes \u2014 a clean VM per task, torn down after\n- Keep persistent dev VMs \u2014 installed packages survive restarts\n- Run CI-style jobs \u2014 build, test, lint in clean environments\n- Fan out parallel ephemeral workers thanks to sub-second boot\n- Analyze malware / suspicious files in a throwaway environment\n- Build once, run anywhere \u2014 same artifact local, cloud, or self-hosted\n\nDiscover the live method surface at runtime with smolmachines.help, which lists each method's parameters and latency class.",
+    "license": "Apache-2.0",
+    "homepage": "https://smolmachines.com",
+    "source_url": "https://github.com/smol-machines/smolvm",
+    "categories": [
+      "dev",
+      "virtualization",
+      "security"
+    ],
+    "keywords": [
+      "microvm",
+      "sandbox",
+      "vm",
+      "isolation",
+      "gpu",
+      "ci"
+    ]
+  },
+  "vendor": {
+    "name": "smol machines",
+    "url": "https://smolmachines.com",
+    "agent_usage": "Agents call smolmachines.exec with a smolvm argv to boot a disposable Linux microVM and run a command in isolation; output returns as {stdout,stderr,exit}.",
+    "capabilities": "Boot ephemeral/persistent Linux microVMs; run commands in isolation; GPU compute; headless browser; pack/run portable VM artifacts."
+  },
+  "artifacts": [
+    {
+      "os": "darwin",
+      "arch": "arm64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.smolmachines/1.2.0/darwin-arm64/smolvm-1.2.0-darwin-arm64.tar.gz",
+      "sha256": "5f53abad672c57042b68a327b9038a759aefd070143e22658a35d400825b3319",
+      "unpack": "tar.gz",
+      "exec_path": "smolvm-1.2.0-darwin-arm64/smolvm",
+      "order": 1,
+      "role": "binary"
+    },
+    {
+      "os": "linux",
+      "arch": "arm64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.smolmachines/1.2.0/linux-arm64/smolvm-1.2.0-linux-arm64.tar.gz",
+      "sha256": "d5473cc9d5d1dbaafc0ee5bcfc98323d2246c476650e26b038761840b2fdc5a8",
+      "unpack": "tar.gz",
+      "exec_path": "smolvm-1.2.0-linux-arm64/smolvm",
+      "order": 1,
+      "role": "binary"
+    },
+    {
+      "os": "linux",
+      "arch": "amd64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.smolmachines/1.2.0/linux-amd64/smolvm-1.2.0-linux-x86_64.tar.gz",
+      "sha256": "e0e3980d95b26362385767849f5652972378ec6e1e81ce2ec37104405698efe6",
+      "unpack": "tar.gz",
+      "exec_path": "smolvm-1.2.0-linux-x86_64/smolvm",
+      "order": 1,
+      "role": "binary"
+    }
+  ]
+}
