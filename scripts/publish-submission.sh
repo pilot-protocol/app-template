@@ -116,6 +116,49 @@ else
   git add "$CAT"
 fi
 
+# Sign catalogue.json so the PR is born verifiable. pilotctl fail-closes on an
+# unsigned/invalid catalogue, so WITHOUT this the catalogue PR can't merge until
+# someone re-signs offline (the old #289/#306 roadblock). CATALOG_SIGN_KEY is the
+# hex-encoded 64-byte ed25519 catalogue key (must match the embedded catalogtrust
+# pubkey); held as a repo secret and injected by publish-on-merge.yml.
+CATABS="$(pwd)/$CAT"
+if [ -n "${CATALOG_SIGN_KEY:-}" ]; then
+  echo "==> signing $CAT (autonomous — no manual re-sign needed)"
+  cat > /tmp/catsign.go <<'GOSIGN'
+package main
+
+import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/hex"
+	"os"
+)
+
+func main() {
+	key, err := hex.DecodeString(os.Getenv("CATALOG_SIGN_KEY"))
+	if err != nil || len(key) != ed25519.PrivateKeySize {
+		os.Stderr.WriteString("CATALOG_SIGN_KEY must be a hex-encoded 64-byte ed25519 private key\n")
+		os.Exit(1)
+	}
+	data, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		os.Stderr.WriteString(err.Error() + "\n")
+		os.Exit(1)
+	}
+	sig := ed25519.Sign(ed25519.PrivateKey(key), data)
+	if err := os.WriteFile(os.Args[1]+".sig", []byte(base64.StdEncoding.EncodeToString(sig)+"\n"), 0o644); err != nil {
+		os.Stderr.WriteString(err.Error() + "\n")
+		os.Exit(1)
+	}
+}
+GOSIGN
+  # Run outside the pilotprotocol module dir so its go.mod doesn't shadow the helper.
+  ( cd /tmp && go run /tmp/catsign.go "$CATABS" )
+  git add "$CAT.sig"
+else
+  echo "WARNING: CATALOG_SIGN_KEY not set — catalogue PR will need a MANUAL re-sign before it can merge"
+fi
+
 git commit -m "catalogue: ${ID} v${VERSION}"
 git push -u origin "$BRANCH"
 gh pr create -R "$PLATFORM_REPO" --base main --head "$BRANCH" \
