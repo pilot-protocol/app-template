@@ -82,6 +82,18 @@ func BuildBundle(cfg *scaffold.Config, priv ed25519.PrivateKey) (*Bundle, error)
 	if err != nil {
 		return nil, err
 	}
+	// install.json (the registry staging spec, generated for asset-delivering
+	// apps) ships in every platform tarball alongside the manifest. It is the
+	// same across platforms — it carries each platform's asset — so it is staged
+	// into the shared bundle dir once, before the per-platform loop tars it.
+	if spec, err := os.ReadFile(filepath.Join(tmp, "install.json")); err == nil {
+		if err := os.MkdirAll(filepath.Join(tmp, "bundle"), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(filepath.Join(tmp, "bundle", "install.json"), spec, 0o644); err != nil {
+			return nil, fmt.Errorf("stage install.json into bundle: %w", err)
+		}
+	}
 
 	var (
 		platforms       []PlatformBundle

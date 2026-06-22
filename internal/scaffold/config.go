@@ -44,10 +44,68 @@ type Config struct {
 	Grants    Grants    `yaml:"grants"`
 	Listing   Listing   `yaml:"listing"` // store-page metadata (catalogue v2)
 
-	// TODO(native-apps): add `Assets []Asset` (per-OS/arch download url + sha256 +
-	// exec_path) for native/CLI apps that deliver a real binary. The generator
-	// emits manifest `assets`; the daemon fetches/verifies/stages at install.
-	// See docs/NATIVE-APPS.md. Coming soon — http (translation-only) ships first.
+	// Assets is the native-binary delivery set for a cli backend: the
+	// platform-specific binaries the publisher uploaded to the Pilot R2 artifact
+	// registry. At install the generated adapter fetches the asset matching the
+	// host os/arch, verifies its sha256, stages it under $APP/<exec_path>, and (in
+	// `order`) runs any with install `args`. The fronted command then execs the
+	// staged path instead of an assumed-installed binary. Empty for http apps and
+	// for cli apps whose command is already present on the host. See
+	// docs/R2-ARTIFACT-REGISTRY.md.
+	Assets []Asset `yaml:"assets"`
+}
+
+// Asset is one platform-specific file delivered from the R2 artifact registry.
+// Integrity is the sha256 (verified at install); the whole bundle tarball is
+// itself sha-pinned in the catalogue, so install.json (which carries these
+// shas) cannot be tampered with undetected.
+type Asset struct {
+	Role     string   `yaml:"role" json:"role"`           // "binary" (default, chmod +x) | "data"
+	OS       string   `yaml:"os" json:"os"`               // linux | darwin
+	Arch     string   `yaml:"arch" json:"arch"`           // amd64 | arm64
+	URL      string   `yaml:"url" json:"url"`             // https download (R2 public URL)
+	SHA256   string   `yaml:"sha256" json:"sha256"`       // 64-hex of the downloaded object; verified after download
+	Unpack   string   `yaml:"unpack" json:"unpack"`       // "" (single file) | "tar.gz" (extract archive under $APP)
+	ExecPath string   `yaml:"exec_path" json:"exec_path"` // dest under $APP for a single file, or the path INSIDE the extracted tree for an archive (e.g. smolvm-1.2.0-darwin-arm64/smolvm)
+	Order    int      `yaml:"order" json:"order"`         // ascending install sequence
+	Args     []string `yaml:"args" json:"args"`           // optional post-stage invocation, run as "$APP/<exec_path> args..."
+}
+
+// HasAssets reports whether this app delivers native binaries from the registry.
+func (c *Config) HasAssets() bool { return len(c.Assets) > 0 }
+
+// PrimaryExecPath is the staged path the fronted command resolves to: the asset
+// whose exec_path basename matches command[0] (the binary the adapter execs).
+// Empty when there are no assets or no match (the command stays as-is).
+func (c *Config) PrimaryExecPath() string {
+	if len(c.Backend.Command) == 0 {
+		return ""
+	}
+	cmd := c.Backend.Command[0]
+	for _, a := range c.Assets {
+		if a.Role == "data" {
+			continue
+		}
+		if base := a.ExecPath[strings.LastIndexByte(a.ExecPath, '/')+1:]; base == cmd || a.ExecPath == cmd {
+			return a.ExecPath
+		}
+	}
+	return ""
+}
+
+// AssetHosts returns the unique hostnames the adapter must dial to fetch assets,
+// for the manifest net.dial grants. Sorted for deterministic generation.
+func (c *Config) AssetHosts() []string {
+	seen := map[string]bool{}
+	var hosts []string
+	for _, a := range c.Assets {
+		if u, err := url.Parse(a.URL); err == nil && u.Hostname() != "" && !seen[u.Hostname()] {
+			seen[u.Hostname()] = true
+			hosts = append(hosts, u.Hostname())
+		}
+	}
+	sort.Strings(hosts)
+	return hosts
 }
 
 // Listing is the store-page metadata that drives the catalogue v2 rich view
@@ -247,6 +305,15 @@ type RawGrant struct {
 var (
 	idPattern     = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9_-]*[a-z0-9])?)+$`)
 	semverPattern = regexp.MustCompile(`^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
+	sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
+
+// knownOS / knownArch are the host targets the registry + staging understand.
+// These match scaffold/build platform tuples (DefaultPlatforms) and the daemon's
+// runtime.GOOS/GOARCH values.
+var (
+	knownOS   = map[string]bool{"linux": true, "darwin": true}
+	knownArch = map[string]bool{"amd64": true, "arm64": true}
 )
 
 // Parse decodes a pilot.app.yaml document (strict: unknown keys are errors, so
@@ -370,6 +437,7 @@ func (c *Config) Validate() []error {
 			}
 		}
 	}
+	errs = append(errs, c.validateAssets()...)
 	if len(c.Methods) == 0 {
 		errs = append(errs, fmt.Errorf("at least one method must be declared"))
 	}
@@ -430,6 +498,66 @@ func (c *Config) Validate() []error {
 				errs = append(errs, fmt.Errorf("methods[%d] (%s): cli route needs args, params_as_flags, or passthrough", i, m.Name))
 			}
 		}
+	}
+	return errs
+}
+
+// validateAssets enforces the registry-delivery rules: assets are cli-only,
+// each names a known os/arch, an https URL, a 64-hex sha256, and an exec_path
+// that stays under $APP (no absolute path, no "..", no leading slash). Orders
+// must be unique so the install sequence is deterministic, and (os,arch,role)
+// must be unique so the host match is unambiguous.
+func (c *Config) validateAssets() []error {
+	if len(c.Assets) == 0 {
+		return nil
+	}
+	var errs []error
+	if c.Backend.Type != "cli" {
+		errs = append(errs, fmt.Errorf("assets are only valid for a cli backend (an http app delivers no binary)"))
+	}
+	// Orders and binary roles are scoped per host platform: each host installs
+	// only its own (os,arch) assets, so two platforms may both use order 1, but
+	// within one platform the order must be unique (deterministic sequence) and a
+	// platform must not ship two binaries for the same exec_path.
+	orders := map[string]bool{}
+	platforms := map[string]bool{}
+	for i, a := range c.Assets {
+		role := a.Role
+		if role == "" {
+			role = "binary"
+		}
+		if role != "binary" && role != "data" {
+			errs = append(errs, fmt.Errorf("assets[%d].role %q must be \"binary\" or \"data\"", i, a.Role))
+		}
+		if a.Unpack != "" && a.Unpack != "tar.gz" {
+			errs = append(errs, fmt.Errorf("assets[%d].unpack %q must be \"\" or \"tar.gz\"", i, a.Unpack))
+		}
+		if !knownOS[a.OS] {
+			errs = append(errs, fmt.Errorf("assets[%d].os %q must be linux or darwin", i, a.OS))
+		}
+		if !knownArch[a.Arch] {
+			errs = append(errs, fmt.Errorf("assets[%d].arch %q must be amd64 or arm64", i, a.Arch))
+		}
+		if u, err := url.Parse(a.URL); err != nil || u.Scheme != "https" || u.Host == "" {
+			errs = append(errs, fmt.Errorf("assets[%d].url %q must be an absolute https URL", i, a.URL))
+		}
+		if !sha256Pattern.MatchString(a.SHA256) {
+			errs = append(errs, fmt.Errorf("assets[%d].sha256 %q must be 64 lowercase hex chars", i, a.SHA256))
+		}
+		if a.ExecPath == "" || strings.HasPrefix(a.ExecPath, "/") || strings.Contains(a.ExecPath, "..") {
+			errs = append(errs, fmt.Errorf("assets[%d].exec_path %q must be a relative path under $APP (no leading / and no \"..\")", i, a.ExecPath))
+		}
+		plat := a.OS + "/" + a.Arch
+		orderKey := fmt.Sprintf("%s#%d", plat, a.Order)
+		if orders[orderKey] {
+			errs = append(errs, fmt.Errorf("assets[%d]: duplicate install order %d for %s — orders must be unique within a platform", i, a.Order, plat))
+		}
+		orders[orderKey] = true
+		key := plat + "/" + a.ExecPath
+		if platforms[key] {
+			errs = append(errs, fmt.Errorf("assets[%d]: duplicate asset for %s at %s", i, plat, a.ExecPath))
+		}
+		platforms[key] = true
 	}
 	return errs
 }

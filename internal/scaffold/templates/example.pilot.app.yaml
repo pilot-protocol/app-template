@@ -88,7 +88,7 @@ listing:
   #     date: "2026-06-16"
   #     notes: ["Initial release"]
 
-# --- a cli backend instead (COMING SOON; see docs/CLI-ADAPTER.md) ---
+# --- a cli backend instead (see docs/CLI-ADAPTER.md) ---
 # backend:
 #   type: cli
 #   command: ["weathercli"]            # base argv; method args appended
@@ -108,3 +108,17 @@ listing:
 #     params: {args: "verbatim argv forwarded to weathercli"}
 #     cli:
 #       passthrough: true
+
+# --- native delivery: ship the binary from the Pilot R2 artifact registry ---
+# For a cli app whose binary is NOT already on the host, list the per-OS/arch
+# artifacts you uploaded in the publish form's Artifacts step. At install the
+# adapter fetches the asset matching the host, verifies its sha256, stages it
+# under $APP, runs any install `args` (in `order`), and execs the staged path.
+# See docs/R2-ARTIFACT-REGISTRY.md.
+# assets:
+#   # a single self-contained binary:
+#   - {os: linux,  arch: amd64, url: "https://artifacts.pilotprotocol.network/io.pilot.weather/0.1.0/linux-amd64/weathercli",
+#      sha256: "<64-hex>", exec_path: bin/weathercli, order: 1}
+#   # an archive that unpacks to a wrapper + libs, with a one-time setup step:
+#   - {os: darwin, arch: arm64, url: "https://artifacts.pilotprotocol.network/io.pilot.weather/0.1.0/darwin-arm64/weathercli.tar.gz",
+#      sha256: "<64-hex>", unpack: tar.gz, exec_path: weathercli-0.1.0-darwin-arm64/weathercli, order: 1, args: ["--accept-license"]}

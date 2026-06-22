@@ -1,6 +1,16 @@
 # Native (binary-delivery) apps — design
 
-> Status: DESIGN + TODO. Native/CLI apps are **Coming soon** — blocked at the
+> **SUPERSEDED (2026-06-22) for the delivery model.** This doc proposed delivering
+> native binaries *by reference* (customer-hosted URL, "we never store the bytes").
+> The shipped implementation instead **hosts the bytes in a Pilot-run Cloudflare
+> R2 artifact registry**: the publisher uploads per-OS/arch binaries in the
+> publish form's Artifacts step, and the generated cli adapter fetches + verifies
+> + stages + execs them at install (with install order + optional args). See
+> **`docs/R2-ARTIFACT-REGISTRY.md`** for the canonical, implemented design. The
+> `assets[]` schema and the daemon-side staging notes below remain useful
+> background, but where they disagree with R2-ARTIFACT-REGISTRY.md, that doc wins.
+
+> Status (original): DESIGN + TODO. Native/CLI apps are **Coming soon** — blocked at the
 > wizard's type step; only HTTP (translation-only) apps ship today. Decision
 > (2026-06-17): native apps deliver the real binary via a **customer-hosted URL +
 > per-OS/arch sha256**, pinned in the signed manifest and **fetched + verified +

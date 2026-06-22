@@ -70,7 +70,26 @@ func main() {
 		log.Fatalf("{{.BinaryName}}: backend config: %v", err)
 	}
 {{- else}}
+{{- if .HasAssets}}
+	// Native delivery: fetch this host's binaries from the Pilot R2 artifact
+	// registry (verify sha → stage under $APP → run ordered install args) and
+	// exec the staged path, not an assumed-installed command. See backend/stage.go.
+	appDir := os.Getenv("APP")
+	if *manifestPath != "" {
+		appDir = filepath.Dir(*manifestPath)
+	}
+	stagedCmd, err := backend.StageAssets(appDir)
+	if err != nil {
+		log.Fatalf("{{.BinaryName}}: install assets: %v", err)
+	}
+	base := {{printf "%#v" .Backend.Command}}
+	if stagedCmd != "" {
+		base[0] = stagedCmd
+	}
+	runner := backend.NewRunner(base{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+{{- else}}
 	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+{{- end}}
 {{- end}}
 
 	d := ipc.NewDispatcher()
