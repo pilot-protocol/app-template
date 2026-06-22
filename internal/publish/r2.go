@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -178,19 +177,4 @@ func rfc3986Escape(s string, encodeSlash bool) string {
 		}
 	}
 	return b.String()
-}
-
-// parsePublicKey extracts the object key from a public/proxy URL, for validating
-// that a submitted artifact url points into our registry.
-func (r *R2) keyFromURL(raw string) (string, bool) {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", false
-	}
-	if r.PublicBase != "" {
-		if pb, err := url.Parse(r.PublicBase); err == nil && u.Host == pb.Host {
-			return strings.TrimPrefix(u.Path, "/"), true
-		}
-	}
-	return "", false
 }
