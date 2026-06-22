@@ -10,7 +10,7 @@ prerequisites surfaced by the end-to-end run.
 
 | Item | Value / action |
 |---|---|
-| Account | `ef9da13de5572ea8482b2921770fa0e3` (S3 endpoint `https://<acct>.r2.cloudflarestorage.com`) |
+| Account | `<ACCOUNT_ID>` (S3 endpoint `https://<acct>.r2.cloudflarestorage.com`) |
 | Buckets | `pilot-artifacts-dev`, `pilot-artifacts-prod` (created) |
 | Object layout | `<app-id>/<version>/<os>-<arch>/<file>` (binaries); `bundles/<app-id>/<version>/<tarball>` (signed bundles) |
 | Public read (dev) | r2.dev managed URL `https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev` |
@@ -27,7 +27,7 @@ CORS config applied (keep the website origins current):
 ## 2. publish-server env (the VM)
 
 ```
-R2_ENDPOINT=https://ef9da13de5572ea8482b2921770fa0e3.r2.cloudflarestorage.com
+R2_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
 R2_BUCKET=pilot-artifacts-prod
 R2_PUBLIC_BASE=https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev   # or the custom domain
 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY   # R2 S3 keys (scoped to the artifacts buckets)

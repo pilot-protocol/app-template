@@ -15,7 +15,7 @@
 set -euo pipefail
 
 SMOLVM_VERSION="${SMOLVM_VERSION:-1.2.0}"
-R2_ENDPOINT="${R2_ENDPOINT:-https://ef9da13de5572ea8482b2921770fa0e3.r2.cloudflarestorage.com}"
+R2_ENDPOINT="${R2_ENDPOINT:?set R2_ENDPOINT to your account S3 endpoint}"
 R2_BUCKET="${R2_BUCKET:-pilot-artifacts-dev}"
 R2_PUBLIC_BASE="${R2_PUBLIC_BASE:-https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev}"
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-auto}"

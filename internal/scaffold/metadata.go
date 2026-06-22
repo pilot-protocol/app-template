@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 // Metadata is the per-app catalogue v2 record (catalogue/apps/<id>/metadata.json)
@@ -94,7 +95,7 @@ func BuildMetadata(c *Config) Metadata {
 		ID:            c.ID,
 		DisplayName:   c.Listing.DisplayName,
 		Tagline:       c.Listing.Tagline,
-		DescriptionMD: c.Description,
+		DescriptionMD: descOr(c.Listing.AppDescription, c.Description),
 		Vendor: MetaVendor{
 			Name:    c.Listing.Vendor.Name,
 			URL:     c.Listing.Vendor.URL,
@@ -119,4 +120,12 @@ func marshalMetadata(m Metadata) ([]byte, error) {
 		return nil, err
 	}
 	return append(b, '\n'), nil
+}
+
+// descOr returns the long app description when set, else the one-line description.
+func descOr(long, short string) string {
+	if strings.TrimSpace(long) != "" {
+		return long
+	}
+	return short
 }
