@@ -88,13 +88,23 @@ listing:
   #     date: "2026-06-16"
   #     notes: ["Initial release"]
 
-# --- a cli backend instead (planned archetype; see docs/CLI-ADAPTER.md) ---
+# --- a cli backend instead (COMING SOON; see docs/CLI-ADAPTER.md) ---
 # backend:
 #   type: cli
-#   command: ["weathercli"]       # base argv; method args appended
+#   command: ["weathercli"]            # base argv; method args appended
+#   env_passthrough: [WEATHER_TOKEN]   # host env vars the CLI may see (else scrubbed)
 # methods:
+#   # enumerated: a curated, named subcommand with ${field} from the payload
 #   - name: weather.current
 #     summary: "Current conditions."
 #     duration: fast
 #     cli:
-#       args: ["current", "--lat", "${lat}", "--lon", "${lon}"]  # ${field} from payload
+#       args: ["current", "--lat", "${lat}", "--lon", "${lon}"]
+#   # passthrough: front the WHOLE CLI — every subcommand reachable via one method
+#   #   pilotctl appstore call io.pilot.weather weather.exec '{"args":["forecast","--days","5"]}'
+#   - name: weather.exec
+#     summary: "Run any weathercli subcommand. Payload {\"args\":[...]}."
+#     duration: med
+#     params: {args: "verbatim argv forwarded to weathercli"}
+#     cli:
+#       passthrough: true

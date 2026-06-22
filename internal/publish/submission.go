@@ -28,9 +28,14 @@ type Submission struct {
 	Vendor  SubVendor   `json:"vendor"`
 }
 
-// SubBackend is the HTTP API the adapter forwards to. (Native/CLI binary
-// delivery is captured in Listing.RequiresBinary for now — see NATIVE-APPS.md.)
+// SubBackend selects and configures the data plane the adapter forwards to:
+// either an HTTP API (Type "http", the default) or a local CLI (Type "cli").
 type SubBackend struct {
+	// Type is "http" (default) or "cli". Empty means http for back-compat with
+	// older form payloads that predate the selector.
+	Type string `json:"type"`
+
+	// --- http fields ---
 	BaseURL string      `json:"base_url"`
 	Headers []SubHeader `json:"headers"` // auth/extra headers; values may use ${TOKEN}
 	// Auth selects how the adapter authenticates to the backend:
@@ -41,10 +46,22 @@ type SubBackend struct {
 	// Quota is the per-caller call cap the broker enforces for a managed app
 	// (0 = unlimited). Set at publish time so the rate limit ships with the app.
 	Quota int `json:"quota"`
+
+	// --- cli fields ---
+	// Command is the base argv the adapter execs (e.g. ["gh"] or ["python","-m","tool"]).
+	Command []string `json:"command"`
+	// EnvPassthrough names host env vars the fronted CLI may see, on top of a
+	// minimal baseline (PATH/HOME/locale/TMPDIR). The child never inherits the
+	// adapter's full environment.
+	EnvPassthrough []string `json:"env_passthrough"`
 }
 
-// Managed reports whether this submission uses Pilot's managed master key.
-func (b SubBackend) Managed() bool { return b.Auth == "managed" }
+// IsCLI reports whether this submission fronts a local CLI rather than an HTTP API.
+func (b SubBackend) IsCLI() bool { return b.Type == "cli" }
+
+// Managed reports whether this submission uses Pilot's managed master key. Only
+// meaningful for http backends (a cli app holds no key).
+func (b SubBackend) Managed() bool { return !b.IsCLI() && b.Auth == "managed" }
 
 // SubHeader is one request header. Value may contain ${TOKEN} placeholders that
 // the operator supplies at install (env or $APP/secrets.json) — never baked in.
@@ -54,19 +71,32 @@ type SubHeader struct {
 }
 
 // SubMethod is one IPC method the agent can call, mapped to a backend route.
+// Exactly one of HTTP / CLI is meaningful, selected by the backend type.
 type SubMethod struct {
-	Name        string     `json:"name"`        // <ns>.<verb>, e.g. weather.current
-	Description string     `json:"description"` // full description, shown in help
-	Latency     string     `json:"latency"`     // fast | med | slow (REQUIRED)
-	Timeout     string     `json:"timeout"`     // optional Go duration (e.g. "280s") overriding the latency-class default
-	HTTP        SubRoute   `json:"http"`
-	Params      []SubParam `json:"params"`
+	Name        string      `json:"name"`        // <ns>.<verb>, e.g. weather.current
+	Description string      `json:"description"` // full description, shown in help
+	Latency     string      `json:"latency"`     // fast | med | slow (REQUIRED)
+	Timeout     string      `json:"timeout"`     // optional Go duration (e.g. "280s") overriding the latency-class default
+	HTTP        SubRoute    `json:"http"`        // http backend route
+	CLI         SubCLIRoute `json:"cli"`         // cli backend route
+	Params      []SubParam  `json:"params"`
 }
 
 // SubRoute is the backend HTTP mapping for a method.
 type SubRoute struct {
 	Verb string `json:"verb"` // GET | POST
 	Path string `json:"path"` // e.g. /current
+}
+
+// SubCLIRoute is the backend CLI mapping for a method. Enumerated methods bake
+// Args (with ${field} placeholders from the payload) and optionally append each
+// payload field as --key value (ParamsAsFlags). Passthrough instead forwards a
+// verbatim "args" array, so every subcommand of the fronted CLI is reachable —
+// the "translate all CLI commands" shape.
+type SubCLIRoute struct {
+	Args          []string `json:"args"`
+	ParamsAsFlags bool     `json:"params_as_flags"`
+	Passthrough   bool     `json:"passthrough"`
 }
 
 // SubParam is one structured input parameter (vs the old free-text field).
@@ -138,7 +168,11 @@ func (s Submission) Validate() []string {
 	if !reEmail.MatchString(strings.TrimSpace(s.Email)) {
 		e = append(e, "A valid email is required")
 	}
-	if !reURL.MatchString(strings.TrimSpace(s.Backend.BaseURL)) {
+	if s.Backend.IsCLI() {
+		if len(s.Backend.Command) == 0 || strings.TrimSpace(s.Backend.Command[0]) == "" {
+			e = append(e, `CLI backend requires a command (the base argv, e.g. ["gh"])`)
+		}
+	} else if !reURL.MatchString(strings.TrimSpace(s.Backend.BaseURL)) {
 		e = append(e, "Backend base URL must be an absolute http(s) URL")
 	}
 	if len(s.Methods) == 0 {
@@ -165,7 +199,16 @@ func (s Submission) Validate() []string {
 		if strings.TrimSpace(m.Description) == "" {
 			e = append(e, fmt.Sprintf("Method %q: description is required", n))
 		}
-		if m.HTTP.Path == "" || !strings.HasPrefix(m.HTTP.Path, "/") {
+		if s.Backend.IsCLI() {
+			switch {
+			case m.CLI.Passthrough:
+				if len(m.CLI.Args) > 0 || m.CLI.ParamsAsFlags {
+					e = append(e, fmt.Sprintf("Method %q: passthrough takes argv from the call — remove args/params_as_flags", n))
+				}
+			case len(m.CLI.Args) == 0 && !m.CLI.ParamsAsFlags:
+				e = append(e, fmt.Sprintf("Method %q: CLI method needs args, params_as_flags, or passthrough", n))
+			}
+		} else if m.HTTP.Path == "" || !strings.HasPrefix(m.HTTP.Path, "/") {
 			e = append(e, fmt.Sprintf("Method %q: path must start with /", n))
 		}
 	}
@@ -176,11 +219,15 @@ func (s Submission) Validate() []string {
 // the generator needs). Review-only fields (vendor free-text, agent-usage,
 // capabilities, binary URL) are intentionally not part of it.
 func (s Submission) ToConfig() *scaffold.Config {
+	backend := scaffold.Backend{Type: "http", BaseURL: s.Backend.BaseURL, Auth: s.Backend.Auth}
+	if s.Backend.IsCLI() {
+		backend = scaffold.Backend{Type: "cli", Command: s.Backend.Command, EnvPassthrough: s.Backend.EnvPassthrough}
+	}
 	cfg := &scaffold.Config{
 		ID:          s.ID,
 		AppVersion:  s.Version,
 		Description: s.Description,
-		Backend:     scaffold.Backend{Type: "http", BaseURL: s.Backend.BaseURL, Auth: s.Backend.Auth},
+		Backend:     backend,
 		Listing: scaffold.Listing{
 			DisplayName: s.Listing.DisplayName,
 			Tagline:     s.Listing.Tagline,
@@ -192,9 +239,9 @@ func (s Submission) ToConfig() *scaffold.Config {
 			Vendor:      scaffold.Vendor{Name: s.Vendor.Name, URL: s.Vendor.URL, Contact: s.Vendor.Contact},
 		},
 	}
-	// Managed apps are keyless: the partner auth header is the broker's job, not
-	// the adapter's, so it is never baked into the generated bundle.
-	if !s.Backend.Managed() {
+	// HTTP byo apps carry auth headers; managed apps are keyless (the broker
+	// holds the key) and cli apps have no HTTP headers at all.
+	if !s.Backend.IsCLI() && !s.Backend.Managed() {
 		headers := map[string]string{}
 		for _, h := range s.Backend.Headers {
 			if strings.TrimSpace(h.Name) != "" {
@@ -220,14 +267,23 @@ func (s Submission) ToConfig() *scaffold.Config {
 			}
 			params[p.Name] = desc
 		}
-		cfg.Methods = append(cfg.Methods, scaffold.Method{
+		method := scaffold.Method{
 			Name:     m.Name,
 			Summary:  m.Description, // help "summary" carries the description
 			Duration: m.Latency,
 			Timeout:  m.Timeout, // explicit per-method timeout (overrides the latency-class default)
-			HTTP:     &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path},
 			Params:   params,
-		})
+		}
+		if s.Backend.IsCLI() {
+			method.CLI = &scaffold.CLIRoute{
+				Args:          m.CLI.Args,
+				ParamsAsFlags: m.CLI.ParamsAsFlags,
+				Passthrough:   m.CLI.Passthrough,
+			}
+		} else {
+			method.HTTP = &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path}
+		}
+		cfg.Methods = append(cfg.Methods, method)
 	}
 	cfg.Resolve()
 	return cfg
@@ -243,31 +299,39 @@ func (s Submission) HelpPreview() (HelpDoc, []string) {
 	ns := s.Namespace()
 	doc := HelpDoc{App: s.ID, Description: s.Description, DurationClasses: LatencyRef}
 	var cmds []string
-	add := func(name, desc, lat string, params []SubParam) {
+	add := func(m SubMethod) {
 		pm := map[string]string{}
-		for _, p := range params {
+		for _, p := range m.Params {
 			if p.Name != "" {
 				pm[p.Name] = p.Type
 			}
 		}
-		doc.Methods = append(doc.Methods, HelpMethod{Method: name, Summary: desc, Duration: lat, Params: pm})
-		// pilotctl call line with a JSON skeleton of the params.
-		var kv []string
-		ks := make([]string, 0, len(pm))
-		for k := range pm {
-			ks = append(ks, k)
+		doc.Methods = append(doc.Methods, HelpMethod{Method: m.Name, Summary: m.Description, Duration: orDefault(m.Latency, "fast"), Params: pm})
+		// pilotctl call line. A cli passthrough method takes a verbatim argv
+		// array, so its payload is {"args":[...]}; everything else shows a JSON
+		// skeleton of the named params.
+		var payload string
+		if s.Backend.IsCLI() && m.CLI.Passthrough {
+			payload = `{"args":["<subcommand>","<arg>"]}`
+		} else {
+			var kv []string
+			ks := make([]string, 0, len(pm))
+			for k := range pm {
+				ks = append(ks, k)
+			}
+			sort.Strings(ks)
+			for _, k := range ks {
+				kv = append(kv, fmt.Sprintf("%q:%q", k, "<"+pm[k]+">"))
+			}
+			payload = "{" + strings.Join(kv, ",") + "}"
 		}
-		sort.Strings(ks)
-		for _, k := range ks {
-			kv = append(kv, fmt.Sprintf("%q:%q", k, "<"+pm[k]+">"))
-		}
-		cmds = append(cmds, fmt.Sprintf("pilotctl appstore call %s %s '{%s}'", s.ID, name, strings.Join(kv, ",")))
+		cmds = append(cmds, fmt.Sprintf("pilotctl appstore call %s %s '%s'", s.ID, m.Name, payload))
 	}
 	for _, m := range s.Methods {
 		if strings.TrimSpace(m.Name) == "" {
 			continue
 		}
-		add(m.Name, m.Description, orDefault(m.Latency, "fast"), m.Params)
+		add(m)
 	}
 	// The always-present discovery method.
 	doc.Methods = append(doc.Methods, HelpMethod{Method: ns + ".help", Summary: "Discovery: every method with params, latency, and description.", Duration: "fast"})

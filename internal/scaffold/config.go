@@ -22,7 +22,7 @@ import (
 // defaultAppStoreModule pins the published app-store module the generated
 // adapter imports for pkg/ipc. Overridable per-spec via app_store_module.
 // Matches the pin the reference app (cosift-app) ships today.
-const defaultAppStoreModule = "github.com/pilot-protocol/app-store v1.0.1-beta.1.0.20260609061942-8852c785a264"
+const defaultAppStoreModule = "github.com/pilot-protocol/app-store v1.0.1-beta.1.0.20260622180016-07b4170265dc"
 
 // Config is the full pilot.app.yaml spec. Only id, app_version, description,
 // backend, and methods are required from the author; everything else is
@@ -91,6 +91,12 @@ type Backend struct {
 	BaseURL   string   `yaml:"base_url"`   // http: production endpoint, baked in as the default
 	Command   []string `yaml:"command"`    // cli: base argv (method args appended)
 	EnvPrefix string   `yaml:"env_prefix"` // override env var prefix; default = NAMESPACE upper
+
+	// EnvPassthrough (cli) names host environment variables the fronted CLI is
+	// allowed to see, on top of a minimal baseline (PATH, HOME, locale, TMPDIR).
+	// The child never inherits the adapter's full environment. e.g.
+	//   env_passthrough: [GITHUB_TOKEN, AWS_PROFILE]
+	EnvPassthrough []string `yaml:"env_passthrough"`
 
 	// Headers are sent on every backend request (http). Values may contain
 	// ${TOKEN} placeholders resolved at runtime from the app's environment or
@@ -214,12 +220,14 @@ type HTTPRoute struct {
 	Path string `yaml:"path"` // e.g. /current
 }
 
-// CLIRoute maps a method to a local subprocess invocation (planned archetype).
-// Args may reference payload fields as {{.field}}; ParamsAsFlags appends each
-// payload key as --key value.
+// CLIRoute maps a method to a local subprocess invocation. Args may reference
+// payload fields as ${field}; ParamsAsFlags appends each payload key as
+// --key value. Passthrough instead forwards a verbatim "args" array from the
+// call payload — every CLI subcommand is reachable without enumerating it.
 type CLIRoute struct {
 	Args          []string `yaml:"args"`
 	ParamsAsFlags bool     `yaml:"params_as_flags"`
+	Passthrough   bool     `yaml:"passthrough"`
 }
 
 // Grants tunes the manifest's declared capabilities. The standard set
@@ -411,6 +419,15 @@ func (c *Config) Validate() []error {
 		case "cli":
 			if m.CLI == nil {
 				errs = append(errs, fmt.Errorf("methods[%d] (%s): cli backend requires a cli: route", i, m.Name))
+			} else if m.CLI.Passthrough {
+				if len(m.CLI.Args) > 0 {
+					errs = append(errs, fmt.Errorf("methods[%d] (%s): cli.passthrough takes argv from the call payload — remove cli.args", i, m.Name))
+				}
+				if m.CLI.ParamsAsFlags {
+					errs = append(errs, fmt.Errorf("methods[%d] (%s): cli.params_as_flags has no effect with passthrough", i, m.Name))
+				}
+			} else if len(m.CLI.Args) == 0 && !m.CLI.ParamsAsFlags {
+				errs = append(errs, fmt.Errorf("methods[%d] (%s): cli route needs args, params_as_flags, or passthrough", i, m.Name))
 			}
 		}
 	}

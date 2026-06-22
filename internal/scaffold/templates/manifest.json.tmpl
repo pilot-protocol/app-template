@@ -28,6 +28,9 @@
     {"cap": "net.dial", "target": "{{.AdapterBackendHost}}",
      "if": {"kind": "rate", "params": {"per": "min", "limit": {{.Grants.RatePerMin}}}}},
 {{- end}}
+{{- if eq .Backend.Type "cli"}}
+    {"cap": "proc.exec", "target": "{{index .Backend.Command 0}}"},
+{{- end}}
     {"cap": "audit.log", "target": "*"}
 {{- if .Backend.X402}},
     {"cap": "ipc.call", "target": "{{.Backend.X402.Grant}}"}
@@ -36,7 +39,7 @@
     {"cap": "{{.Cap}}", "target": "{{.Target}}"}
 {{- end}}
   ],
-  "protection": "{{if .Backend.X402}}guarded{{else}}shareable{{end}}",
+  "protection": "{{if or .Backend.X402 (eq .Backend.Type "cli")}}guarded{{else}}shareable{{end}}",
   "store": {
     "publisher": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     "signature": "sig:placeholder-store-sig-replaced-at-publish-time"
