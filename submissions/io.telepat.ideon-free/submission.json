@@ -1,0 +1,8 @@
+{
+  "id": "io.telepat.ideon-free",
+  "version": "0.3.1",
+  "namespace": "ideon-free",
+  "description": "Free article generation for agents: ideon-free.generate(idea) returns a jobId; ideon-free.poll(jobId) returns the finished markdown article. Thin adapter over Ideon's ideon_write \u2014 no payment.",
+  "bundle": "io.telepat.ideon-free-0.3.1.tar.gz",
+  "bundle_sha256": "dd8e37057f33eadefff6b7ff5fc99130667076ea398c10a154c345fd87dd1ad6"
+}

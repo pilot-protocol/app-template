@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "id": "io.telepat.ideon-free",
+  "display_name": "Ideon",
+  "tagline": "Free long-form article generation for agents",
+  "description_md": "Ideon is the Pilot app-store front door for Telepat's Ideon writing pipeline. An agent sends one idea and gets back a finished, well-structured markdown article \u2014 title, slug, and body \u2014 with no payment step.\n\nGeneration is asynchronous: `ideon-free.generate(idea)` returns a `jobId` immediately, and `ideon-free.poll(jobId)` returns `pending` until the article is ready (typically ~60\u201390s for a real run), then the finished markdown. Every method is discoverable at runtime via `ideon-free.help`, which reports each method's parameters and a latency class.\n\nThe app is a thin, portable adapter: it calls Telepat's hosted Ideon MCP backend at `ideon-mcp.telepat.io` over HTTPS and reads the finished article back over the same authenticated origin, so it runs on any Pilot daemon with no shared filesystem.",
+  "vendor": {
+    "name": "Telepat",
+    "url": "https://telepat.io",
+    "contact": "andrei@telepat.io",
+    "publisher_pubkey": "ed25519:5cqj+zTVecj8r0YRUShpgFi/g7TxDg1lkDKQzfNyDyc="
+  },
+  "homepage": "https://telepat.io",
+  "source_url": "https://github.com/telepat-io/pilot-node-ideon",
+  "license": "Apache-2.0",
+  "categories": [
+    "content",
+    "writing"
+  ],
+  "keywords": [
+    "article",
+    "writing",
+    "content",
+    "generation",
+    "markdown",
+    "ideon"
+  ],
+  "size": {
+    "bundle_bytes": 5069,
+    "installed_bytes": 14656
+  },
+  "compat": {
+    "min_pilot_version": "1.0.0",
+    "runtimes": [
+      "node"
+    ]
+  },
+  "methods": [
+    {
+      "name": "ideon-free.generate",
+      "summary": "Generate an article from an idea; returns a jobId to poll"
+    },
+    {
+      "name": "ideon-free.poll",
+      "summary": "Poll a generate jobId for status and the finished markdown article"
+    },
+    {
+      "name": "ideon-free.help",
+      "summary": "Discovery: methods, params, and latency classes"
+    }
+  ],
+  "changelog": [
+    {
+      "version": "0.3.1",
+      "date": "2026-06-20",
+      "notes": [
+        "Works out of the box \u2014 no configuration needed once installed",
+        "Portable read-back: the article body is fetched over HTTPS from the backend, so the app runs on any daemon with no shared filesystem",
+        "App-store IPC dispatcher (ideon-free.generate / poll / help) over the supervisor socket"
+      ]
+    }
+  ],
+  "links": [
+    {
+      "label": "Source",
+      "url": "https://github.com/telepat-io/pilot-node-ideon"
+    },
+    {
+      "label": "Website",
+      "url": "https://telepat.io"
+    }
+  ]
+}
