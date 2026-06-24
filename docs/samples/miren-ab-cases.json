@@ -1,0 +1,10 @@
+[
+  {"label": "Version", "note": "passthrough method → `miren version`",
+   "vanilla": ["version"], "method": "miren.exec", "payload": {"args": ["version"]}},
+  {"label": "Doctor (environment + connectivity check)", "note": "curated method → `miren doctor`",
+   "vanilla": ["doctor"], "method": "miren.doctor", "payload": {}},
+  {"label": "List applications", "note": "curated method → `miren apps` (alias for `app list`)",
+   "vanilla": ["apps"], "method": "miren.apps", "payload": {}},
+  {"label": "Whoami (current user/cluster)", "note": "curated method → `miren whoami` (no cluster ⇒ structured error)",
+   "vanilla": ["whoami"], "method": "miren.whoami", "payload": {}}
+]
