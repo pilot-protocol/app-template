@@ -59,6 +59,14 @@ BUNDLES_JSON="$(jq -c --arg base "$REL_BASE" '
 CATVER=2
 
 BUNDLE_BYTES="$(wc -c < "$DIR/$PRIMARY_FILE" | tr -d ' ')"
+
+# Pin the publisher into the catalogue entry. v1.12.3's catalogue anchor
+# fail-closes any entry without a `publisher` pin, so every published app MUST
+# carry it. Source of truth is the bundle's signed manifest (store.publisher) —
+# NOT metadata.json, whose publisher_pubkey can be a placeholder/stale.
+PUBLISHER="$(tar -xzOf "$DIR/$PRIMARY_FILE" ./manifest.json 2>/dev/null | jq -r '.store.publisher // empty')"
+[ -n "$PUBLISHER" ] || echo "WARNING: no store.publisher in $PRIMARY_FILE manifest — catalogue entry will be UNPINNED (refused on v1.12.3+ hosts)"
+
 MDSRC="$DIR/metadata.json"   # the v2 store-page record, emitted by `pilot-app submit`
 
 echo "==> updating catalogue (v$CATVER) on $PLATFORM_REPO via PR"
@@ -88,7 +96,7 @@ if [ -f "$MDSRC" ]; then
   SOURCE="$(jq -r '.source_url // ""' "$MDSRC")"
   jq --arg id "$ID" --arg v "$VERSION" --arg d "$DESC" --arg u "$BUNDLE_URL" --arg s "$SHA" \
      --argjson sz "$BUNDLE_BYTES" --arg dn "$DISPLAY" --arg ven "$VENDOR" --arg lic "$LICENSE" \
-     --arg src "$SOURCE" --arg mu "$META_URL" --arg ms "$META_SHA" \
+     --arg src "$SOURCE" --arg mu "$META_URL" --arg ms "$META_SHA" --arg pub "$PUBLISHER" \
      --argjson ver "$CATVER" --argjson bundles "$BUNDLES_JSON" \
      --slurpfile md "$MDSRC" '
     (.version = ([(.version // 0), $ver] | max)) |
@@ -100,17 +108,19 @@ if [ -f "$MDSRC" ]; then
         metadata_url: $mu, metadata_sha256: $ms
       }
       + (if ($bundles | length) > 0 then {bundles: $bundles} else {} end)
+      + (if $pub != "" then {publisher: $pub} else {} end)
     )]
   ' "$CAT" > "$CAT.tmp" && mv "$CAT.tmp" "$CAT"
   git add "$CAT" "$APPDIR/metadata.json"
 else
   echo "warning: no metadata.json in submission — writing a basic entry (no rich store page)"
   jq --arg id "$ID" --arg v "$VERSION" --arg d "$DESC" --arg u "$BUNDLE_URL" --arg s "$SHA" \
-     --argjson ver "$CATVER" --argjson bundles "$BUNDLES_JSON" '
+     --argjson ver "$CATVER" --argjson bundles "$BUNDLES_JSON" --arg pub "$PUBLISHER" '
     (.version = ([(.version // 0), $ver] | max)) |
     .apps = ((.apps // []) | map(select(.id != $id))) + [(
       {id: $id, version: $v, description: $d, bundle_url: $u, bundle_sha256: $s}
       + (if ($bundles | length) > 0 then {bundles: $bundles} else {} end)
+      + (if $pub != "" then {publisher: $pub} else {} end)
     )]
   ' "$CAT" > "$CAT.tmp" && mv "$CAT.tmp" "$CAT"
   git add "$CAT"
