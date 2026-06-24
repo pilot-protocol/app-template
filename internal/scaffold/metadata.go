@@ -80,7 +80,9 @@ func BuildMetadata(c *Config) Metadata {
 
 	changelog := c.Listing.Changelog
 	if len(changelog) == 0 {
-		changelog = []ChangelogRel{{Version: c.AppVersion, Notes: []string{c.Description}}}
+		// A neutral default note — do NOT echo the one-line description here, so the
+		// store-page "Description" (description_md) is the only prose a viewer reads.
+		changelog = []ChangelogRel{{Version: c.AppVersion, Notes: []string{"Released v" + c.AppVersion}}}
 	}
 
 	// Managed apps require a daemon that provisions a per-app identity (--identity)
