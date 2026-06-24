@@ -294,7 +294,7 @@ func (s *server) apiArtifactPresign(w http.ResponseWriter, r *http.Request) {
 // installs work off a stable URL even when the bucket has no public domain.
 func (s *server) artifactProxy(w http.ResponseWriter, r *http.Request) {
 	if s.r2 == nil {
-		http.Error(w, "artifact registry not configured", 503)
+		http.Error(w, "artifact registry not configured", http.StatusServiceUnavailable)
 		return
 	}
 	key := strings.TrimPrefix(r.URL.Path, "/artifact/")
