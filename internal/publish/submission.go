@@ -229,14 +229,15 @@ func (s Submission) ToConfig() *scaffold.Config {
 		Description: s.Description,
 		Backend:     backend,
 		Listing: scaffold.Listing{
-			DisplayName: s.Listing.DisplayName,
-			Tagline:     s.Listing.Tagline,
-			Homepage:    s.Listing.Homepage,
-			SourceURL:   s.Listing.SourceURL,
-			License:     s.Listing.License,
-			Categories:  s.Listing.Categories,
-			Keywords:    s.Listing.Keywords,
-			Vendor:      scaffold.Vendor{Name: s.Vendor.Name, URL: s.Vendor.URL, Contact: s.Vendor.Contact},
+			DisplayName:    s.Listing.DisplayName,
+			Tagline:        s.Listing.Tagline,
+			AppDescription: s.Listing.AppDescription,
+			Homepage:       s.Listing.Homepage,
+			SourceURL:      s.Listing.SourceURL,
+			License:        s.Listing.License,
+			Categories:     s.Listing.Categories,
+			Keywords:       s.Listing.Keywords,
+			Vendor:         scaffold.Vendor{Name: s.Vendor.Name, URL: s.Vendor.URL, Contact: s.Vendor.Contact},
 		},
 	}
 	// HTTP byo apps carry auth headers; managed apps are keyless (the broker
