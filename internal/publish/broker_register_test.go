@@ -92,3 +92,32 @@ func TestFileRegistrarUpsertsIdempotently(t *testing.T) {
 		t.Fatalf("expected 1 entry after idempotent upsert, got %d", len(raw))
 	}
 }
+
+// A Bearer API: the header value "Bearer managed" makes BrokerEntry derive
+// auth_scheme "Bearer" (so the broker injects "Authorization: Bearer <key>"),
+// and templated method paths flow through to the allow-list verbatim.
+func TestBrokerEntryBearerScheme(t *testing.T) {
+	sub := Submission{
+		ID:      "io.pilot.agentphone",
+		Version: "0.1.0",
+		Backend: SubBackend{
+			BaseURL: "https://api.agentphone.ai",
+			Auth:    "managed",
+			Headers: []SubHeader{{Name: "Authorization", Value: "Bearer managed"}},
+		},
+		Methods: []SubMethod{
+			{Name: "agentphone.place_call", HTTP: SubRoute{Verb: "POST", Path: "/v1/calls"}},
+			{Name: "agentphone.get_call", HTTP: SubRoute{Verb: "GET", Path: "/v1/calls/{call_id}"}},
+		},
+	}
+	e := sub.BrokerEntry()
+	if e.KeyEnv != "AGENTPHONE_MASTER_KEY" {
+		t.Errorf("key_env = %q, want AGENTPHONE_MASTER_KEY", e.KeyEnv)
+	}
+	if e.AuthHeader != "Authorization" || e.AuthScheme != "Bearer" {
+		t.Errorf("auth = %q/%q, want Authorization/Bearer", e.AuthHeader, e.AuthScheme)
+	}
+	if len(e.Allow) != 2 || e.Allow[1] != "/v1/calls/{call_id}" {
+		t.Errorf("allow = %v, want the templated path preserved", e.Allow)
+	}
+}

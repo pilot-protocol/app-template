@@ -31,9 +31,16 @@ func (s Submission) MasterKeyEnv() string {
 // which header to inject it as (AuthHeader), and which method paths are allowed.
 func (s Submission) BrokerEntry() broker.AppEntry {
 	authHeader := "Authorization" // safe default if the submitter didn't name one
+	authScheme := ""              // e.g. "Bearer" for Authorization: Bearer <key>
 	for _, h := range s.Backend.Headers {
 		if strings.TrimSpace(h.Name) != "" {
 			authHeader = h.Name
+			// A header value like "Bearer managed" carries a scheme prefix; the
+			// trailing "managed" sentinel just marks that the broker injects the
+			// key. A bare "managed" means no scheme (e.g. x-api-key: <key>).
+			if f := strings.Fields(h.Value); len(f) >= 2 {
+				authScheme = f[0]
+			}
 			break
 		}
 	}
@@ -48,6 +55,7 @@ func (s Submission) BrokerEntry() broker.AppEntry {
 		Upstream:   strings.TrimRight(s.Backend.BaseURL, "/"),
 		KeyEnv:     s.MasterKeyEnv(),
 		AuthHeader: authHeader,
+		AuthScheme: authScheme,
 		Allow:      allow,
 		Quota:      s.Backend.Quota, // per-caller cap set at publish time (0 = unlimited)
 	}
