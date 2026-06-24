@@ -1,7 +1,7 @@
 {
   "id": "io.pilot.miren",
   "version": "0.1.0",
-  "description": "Operate the Miren PaaS from an agent: deploy apps, inspect status and logs, run the server, and diagnose connectivity — plus a passthrough exec for any miren subcommand. Structured JSON wherever the CLI offers it.",
+  "description": "Operate the Miren PaaS from an agent: deploy and roll back apps; inspect status, logs, and history; run the server; and diagnose connectivity — plus a passthrough exec for any miren subcommand.",
   "email": "evan@miren.dev",
   "backend": {
     "type": "cli",
@@ -31,7 +31,9 @@
       "description": "List all applications on the cluster (alias for `app list`).",
       "latency": "med",
       "cli": {
-        "args": ["apps"]
+        "args": [
+          "apps"
+        ]
       }
     },
     {
@@ -47,7 +49,11 @@
         }
       ],
       "cli": {
-        "args": ["app", "status", "${name}"]
+        "args": [
+          "app",
+          "status",
+          "${name}"
+        ]
       }
     },
     {
@@ -63,7 +69,11 @@
         }
       ],
       "cli": {
-        "args": ["app", "history", "${name}"]
+        "args": [
+          "app",
+          "history",
+          "${name}"
+        ]
       }
     },
     {
@@ -79,7 +89,12 @@
         }
       ],
       "cli": {
-        "args": ["logs", "--app", "${app}", "--json"]
+        "args": [
+          "logs",
+          "--app",
+          "${app}",
+          "--json"
+        ]
       }
     },
     {
@@ -87,7 +102,10 @@
       "description": "Build and deploy the app in the current directory (non-interactive, --force).",
       "latency": "slow",
       "cli": {
-        "args": ["deploy", "--force"]
+        "args": [
+          "deploy",
+          "--force"
+        ]
       }
     },
     {
@@ -95,7 +113,10 @@
       "description": "Analyze the app's detected stack/services without building or deploying.",
       "latency": "med",
       "cli": {
-        "args": ["deploy", "--analyze"]
+        "args": [
+          "deploy",
+          "--analyze"
+        ]
       }
     },
     {
@@ -103,7 +124,9 @@
       "description": "Roll an application back to its previous deployed version.",
       "latency": "slow",
       "cli": {
-        "args": ["rollback"]
+        "args": [
+          "rollback"
+        ]
       }
     },
     {
@@ -111,7 +134,9 @@
       "description": "Diagnose the miren environment and connectivity.",
       "latency": "med",
       "cli": {
-        "args": ["doctor"]
+        "args": [
+          "doctor"
+        ]
       }
     },
     {
@@ -119,7 +144,9 @@
       "description": "Show the current authenticated user and cluster.",
       "latency": "fast",
       "cli": {
-        "args": ["whoami"]
+        "args": [
+          "whoami"
+        ]
       }
     },
     {
@@ -127,7 +154,10 @@
       "description": "Install the miren server as a systemd service on this host (Linux only).",
       "latency": "slow",
       "cli": {
-        "args": ["server", "install"]
+        "args": [
+          "server",
+          "install"
+        ]
       }
     },
     {
@@ -135,7 +165,10 @@
       "description": "Show miren server service status (Linux only).",
       "latency": "fast",
       "cli": {
-        "args": ["server", "status"]
+        "args": [
+          "server",
+          "status"
+        ]
       }
     },
     {
@@ -143,7 +176,10 @@
       "description": "Test connectivity and authentication with the miren server.",
       "latency": "med",
       "cli": {
-        "args": ["debug", "connection"]
+        "args": [
+          "debug",
+          "connection"
+        ]
       }
     },
     {
@@ -151,14 +187,17 @@
       "description": "Show which addresses the server would advertise and why.",
       "latency": "med",
       "cli": {
-        "args": ["debug", "advertise"]
+        "args": [
+          "debug",
+          "advertise"
+        ]
       }
     }
   ],
   "listing": {
     "display_name": "Miren",
     "tagline": "Operate the Miren PaaS from an agent: deploy apps, run the server, and debug them",
-    "app_description": "Miren is a deployment platform for small teams. This app is the app-store front door for the `miren` CLI, letting an agent drive a Miren PaaS over IPC: deploy and roll back applications, inspect app status, history, and logs, stand up and check the miren server, and diagnose connectivity — with a passthrough `miren.exec` for the full CLI surface (addon, auth, env, route, cluster, disk, sandbox, and more).\n\nUse it to:\n- Deploy an app non-interactively and roll back if needed\n- List and inspect applications, read their logs, and review deploy history\n- Install and check the miren server, and register/connect a cluster\n- Diagnose connectivity and advertised addresses when something is off\n- Reach any other miren subcommand via the passthrough exec\n\nStructured JSON is returned wherever the CLI offers it. Discover the live method surface at runtime with miren.help, which lists each method's parameters and latency class.",
+    "app_description": "Miren is a deployment platform for small teams. This app is the app-store front door for the `miren` CLI, letting an agent drive a Miren PaaS over IPC.\n\nWhat an agent gets:\n- **Deploy lifecycle** — `miren.deploy` (non-interactive build + deploy), `miren.deploy.analyze` (detect the stack/services without building), and `miren.rollback`.\n- **Inspect apps** — `miren.apps`, `miren.app` (status), `miren.app.history`, and `miren.logs` (JSON).\n- **Server & diagnostics** — `miren.server.install`/`miren.server.status`, `miren.doctor`, `miren.whoami`, and `miren.debug.connection`/`miren.debug.advertise`.\n- **Full CLI surface** — `miren.exec` runs any verbatim `miren` argv (addon, auth, env, route, cluster, disk, sandbox, and more).\n\nGood to know:\n- Structured JSON is returned wherever the CLI offers it (e.g. pass `--json`).\n- Discover the live surface at runtime with `miren.help` — every method, its parameters, and its latency class (fast / med / slow).\n- Server-side commands need a configured cluster; without one, calls return a structured error (`{stdout,stderr,exit}`) telling the agent what to do next.\n- Runs on macOS and Linux (arm64 + amd64); the miren CLI is staged and sha-pinned on install.",
     "license": "Proprietary",
     "homepage": "https://miren.dev",
     "source_url": "https://github.com/mirendev",
