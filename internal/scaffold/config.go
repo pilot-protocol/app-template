@@ -213,11 +213,38 @@ type Method struct {
 	Roundtrip string            `yaml:"roundtrip"` // measured warm roundtrip, for help
 }
 
-// HTTPRoute maps a method to one backend HTTP endpoint. GET forwards the flat
-// JSON payload as a query string; POST forwards it as a JSON body.
+// HTTPRoute maps a method to one backend HTTP endpoint. The path may contain
+// {name} placeholders, filled at call time from the payload (REST-style path
+// params, e.g. /v1/calls/{call_id}). Of the remaining payload fields, a
+// body verb (POST/PATCH/PUT) forwards them as a JSON body; a non-body verb
+// (GET/DELETE) forwards them as a query string.
 type HTTPRoute struct {
-	Verb string `yaml:"verb"` // GET (default) | POST
-	Path string `yaml:"path"` // e.g. /current
+	Verb string `yaml:"verb"` // GET (default) | POST | PATCH | PUT | DELETE
+	Path string `yaml:"path"` // e.g. /current or /v1/calls/{call_id}
+
+	// PathParams is derived in Resolve from {name} placeholders in Path; the
+	// generated adapter substitutes each from the payload (URL-escaped) and
+	// drops it from the body/query so it isn't sent twice.
+	PathParams []string `yaml:"-"`
+}
+
+// BodyVerb reports whether this route sends remaining payload fields as a JSON
+// body (POST/PATCH/PUT) rather than a query string (GET/DELETE).
+func (h *HTTPRoute) BodyVerb() bool {
+	return h.Verb == "POST" || h.Verb == "PATCH" || h.Verb == "PUT"
+}
+
+// pathParamPattern matches {name} placeholders in an http path.
+var pathParamPattern = regexp.MustCompile(`\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
+
+// pathParamNames returns the {name} placeholders in a path, in order.
+func pathParamNames(path string) []string {
+	ms := pathParamPattern.FindAllStringSubmatch(path, -1)
+	out := make([]string, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, m[1])
+	}
+	return out
 }
 
 // CLIRoute maps a method to a local subprocess invocation. Args may reference
@@ -327,6 +354,7 @@ func (c *Config) Resolve() {
 		}
 		if m.HTTP != nil {
 			m.HTTP.Verb = strings.ToUpper(m.HTTP.Verb)
+			m.HTTP.PathParams = pathParamNames(m.HTTP.Path)
 		}
 	}
 }
@@ -412,8 +440,17 @@ func (c *Config) Validate() []error {
 				if m.HTTP.Path == "" || !strings.HasPrefix(m.HTTP.Path, "/") {
 					errs = append(errs, fmt.Errorf("methods[%d].http.path must start with /", i))
 				}
-				if m.HTTP.Verb != "GET" && m.HTTP.Verb != "POST" {
-					errs = append(errs, fmt.Errorf("methods[%d].http.verb %q must be GET or POST", i, m.HTTP.Verb))
+				switch m.HTTP.Verb {
+				case "GET", "POST", "PATCH", "PUT", "DELETE":
+				default:
+					errs = append(errs, fmt.Errorf("methods[%d].http.verb %q must be GET|POST|PATCH|PUT|DELETE", i, m.HTTP.Verb))
+				}
+				// Every {name} placeholder in the path must be a declared param,
+				// so the adapter can fill it and <ns>.help documents it.
+				for _, p := range pathParamNames(m.HTTP.Path) {
+					if _, ok := m.Params[p]; !ok {
+						errs = append(errs, fmt.Errorf("methods[%d] (%s): path placeholder {%s} has no matching entry under params:", i, m.Name, p))
+					}
 				}
 			}
 		case "cli":
