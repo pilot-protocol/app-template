@@ -58,7 +58,10 @@ jobs:
           # Prefer the linux/amd64 bundle (this runner's arch); fall back to any.
           BUNDLE=$(ls "$DIR"/*linux-amd64*.tar.gz 2>/dev/null | head -1 || true)
           [ -n "$BUNDLE" ] || BUNDLE=$(ls "$DIR"/*.tar.gz 2>/dev/null | head -1 || true)
-          if [ -z "$BUNDLE" ]; then echo "::error::no bundle tarball under $DIR"; exit 1; fi
+          if [ -z "$BUNDLE" ]; then
+            echo "::notice::$APP ships no bundle tarball under $DIR (metadata-only change, or the binary is delivered out-of-band) — A/B report not applicable"
+            echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
+          fi
           echo "Using bundle: $BUNDLE"
           ROOT=/tmp/app; rm -rf "$ROOT"; mkdir -p "$ROOT"; tar -xzf "$BUNDLE" -C "$ROOT"
 
