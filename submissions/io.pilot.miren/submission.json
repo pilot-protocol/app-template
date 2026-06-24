@@ -1,0 +1,231 @@
+{
+  "id": "io.pilot.miren",
+  "version": "0.1.0",
+  "description": "Operate the Miren PaaS from an agent: deploy apps, inspect status and logs, run the server, and diagnose connectivity — plus a passthrough exec for any miren subcommand. Structured JSON wherever the CLI offers it.",
+  "email": "evan@miren.dev",
+  "backend": {
+    "type": "cli",
+    "command": [
+      "miren"
+    ]
+  },
+  "methods": [
+    {
+      "name": "miren.exec",
+      "description": "Run any miren subcommand. Payload is {\"args\":[...]} — the verbatim miren argv. Use this for the full CLI surface beyond the curated methods below (addon, auth, env, route, cluster, disk, sandbox, etc.). Run `miren help` or `miren <command> --help` for the surface. Example args: [\"app\",\"list\",\"--json\"]. Note: interactive subcommands (e.g. `app run`, `login`) and long-running ones (e.g. `server start`) are not suitable over IPC.",
+      "latency": "med",
+      "params": [
+        {
+          "name": "args",
+          "type": "array",
+          "required": true,
+          "description": "verbatim miren argv, e.g. [\"app\",\"status\",\"--app\",\"web\",\"--json\"]"
+        }
+      ],
+      "cli": {
+        "passthrough": true
+      }
+    },
+    {
+      "name": "miren.apps",
+      "description": "List all applications on the cluster (alias for `app list`).",
+      "latency": "med",
+      "cli": {
+        "args": ["apps"]
+      }
+    },
+    {
+      "name": "miren.app",
+      "description": "Show the current status of one application. Provide the app name.",
+      "latency": "med",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "application name"
+        }
+      ],
+      "cli": {
+        "args": ["app", "status", "${name}"]
+      }
+    },
+    {
+      "name": "miren.app.history",
+      "description": "Show an application's deployment history.",
+      "latency": "med",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "application name"
+        }
+      ],
+      "cli": {
+        "args": ["app", "history", "${name}"]
+      }
+    },
+    {
+      "name": "miren.logs",
+      "description": "Read recent logs for an application as JSON.",
+      "latency": "med",
+      "params": [
+        {
+          "name": "app",
+          "type": "string",
+          "required": true,
+          "description": "application name"
+        }
+      ],
+      "cli": {
+        "args": ["logs", "--app", "${app}", "--json"]
+      }
+    },
+    {
+      "name": "miren.deploy",
+      "description": "Build and deploy the app in the current directory (non-interactive, --force).",
+      "latency": "slow",
+      "cli": {
+        "args": ["deploy", "--force"]
+      }
+    },
+    {
+      "name": "miren.deploy.analyze",
+      "description": "Analyze the app's detected stack/services without building or deploying.",
+      "latency": "med",
+      "cli": {
+        "args": ["deploy", "--analyze"]
+      }
+    },
+    {
+      "name": "miren.rollback",
+      "description": "Roll an application back to its previous deployed version.",
+      "latency": "slow",
+      "cli": {
+        "args": ["rollback"]
+      }
+    },
+    {
+      "name": "miren.doctor",
+      "description": "Diagnose the miren environment and connectivity.",
+      "latency": "med",
+      "cli": {
+        "args": ["doctor"]
+      }
+    },
+    {
+      "name": "miren.whoami",
+      "description": "Show the current authenticated user and cluster.",
+      "latency": "fast",
+      "cli": {
+        "args": ["whoami"]
+      }
+    },
+    {
+      "name": "miren.server.install",
+      "description": "Install the miren server as a systemd service on this host (Linux only).",
+      "latency": "slow",
+      "cli": {
+        "args": ["server", "install"]
+      }
+    },
+    {
+      "name": "miren.server.status",
+      "description": "Show miren server service status (Linux only).",
+      "latency": "fast",
+      "cli": {
+        "args": ["server", "status"]
+      }
+    },
+    {
+      "name": "miren.debug.connection",
+      "description": "Test connectivity and authentication with the miren server.",
+      "latency": "med",
+      "cli": {
+        "args": ["debug", "connection"]
+      }
+    },
+    {
+      "name": "miren.debug.advertise",
+      "description": "Show which addresses the server would advertise and why.",
+      "latency": "med",
+      "cli": {
+        "args": ["debug", "advertise"]
+      }
+    }
+  ],
+  "listing": {
+    "display_name": "Miren",
+    "tagline": "Operate the Miren PaaS from an agent: deploy apps, run the server, and debug them",
+    "app_description": "Miren is a deployment platform for small teams. This app is the app-store front door for the `miren` CLI, letting an agent drive a Miren PaaS over IPC: deploy and roll back applications, inspect app status, history, and logs, stand up and check the miren server, and diagnose connectivity — with a passthrough `miren.exec` for the full CLI surface (addon, auth, env, route, cluster, disk, sandbox, and more).\n\nUse it to:\n- Deploy an app non-interactively and roll back if needed\n- List and inspect applications, read their logs, and review deploy history\n- Install and check the miren server, and register/connect a cluster\n- Diagnose connectivity and advertised addresses when something is off\n- Reach any other miren subcommand via the passthrough exec\n\nStructured JSON is returned wherever the CLI offers it. Discover the live method surface at runtime with miren.help, which lists each method's parameters and latency class.",
+    "license": "Proprietary",
+    "homepage": "https://miren.dev",
+    "source_url": "https://github.com/mirendev",
+    "categories": [
+      "infrastructure",
+      "devops",
+      "platform"
+    ],
+    "keywords": [
+      "miren",
+      "paas",
+      "deploy",
+      "server",
+      "debug",
+      "infrastructure",
+      "devops",
+      "logs",
+      "apps",
+      "cli"
+    ]
+  },
+  "vendor": {
+    "name": "Miren",
+    "url": "https://miren.dev",
+    "agent_usage": "Agents call curated methods (miren.deploy, miren.apps, miren.app, miren.logs, miren.rollback, miren.doctor, ...) or miren.exec with a verbatim miren argv to operate a Miren PaaS; output returns as {stdout,stderr,exit}.",
+    "capabilities": "Deploy/rollback applications; inspect app status, history, and logs; install and check the miren server; diagnose connectivity; reach any miren subcommand via passthrough."
+  },
+  "artifacts": [
+    {
+      "os": "darwin",
+      "arch": "arm64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.miren/0.10.0/darwin-arm64/miren-0.10.0-darwin-arm64.tar.gz",
+      "sha256": "9680a595b8aee0716c9dffc21731c9f4d2e9bd2d02384cf36979353ec2b71d32",
+      "unpack": "tar.gz",
+      "exec_path": "miren-0.10.0-darwin-arm64/miren",
+      "order": 1,
+      "role": "binary"
+    },
+    {
+      "os": "darwin",
+      "arch": "amd64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.miren/0.10.0/darwin-amd64/miren-0.10.0-darwin-amd64.tar.gz",
+      "sha256": "701bba44535b777840338d57e09e8bc3a72c2092527118c7d7b564c5cf9e4f50",
+      "unpack": "tar.gz",
+      "exec_path": "miren-0.10.0-darwin-amd64/miren",
+      "order": 1,
+      "role": "binary"
+    },
+    {
+      "os": "linux",
+      "arch": "arm64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.miren/0.10.0/linux-arm64/miren-0.10.0-linux-arm64.tar.gz",
+      "sha256": "4b909d308592dee490937e18b289bde48d3857942b16f8e5edc73e003d736e14",
+      "unpack": "tar.gz",
+      "exec_path": "miren-0.10.0-linux-arm64/miren",
+      "order": 1,
+      "role": "binary"
+    },
+    {
+      "os": "linux",
+      "arch": "amd64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.miren/0.10.0/linux-amd64/miren-0.10.0-linux-amd64.tar.gz",
+      "sha256": "dc5a4580aa9b8e06a7b3aa784aeba55dc37f5c557cfeed4687a2949def985d5a",
+      "unpack": "tar.gz",
+      "exec_path": "miren-0.10.0-linux-amd64/miren",
+      "order": 1,
+      "role": "binary"
+    }
+  ]
+}
