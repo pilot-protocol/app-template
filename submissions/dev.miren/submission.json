@@ -1,0 +1,8 @@
+{
+  "id": "dev.miren",
+  "version": "0.1.0",
+  "namespace": "miren",
+  "description": "Operate the Miren PaaS from an agent: set up a server (server.install/status/register), run the deploy lifecycle (init, deploy, deploy.analyze, rollback), inspect apps and logs, and debug connectivity and deploy history. Plus a passthrough exec for any miren subcommand. Structured JSON wherever the CLI offers it.",
+  "bundle": "dev.miren-0.1.0.tar.gz",
+  "bundle_sha256": "5eea4552c6aae6a00f03bae7bd8ef16c1726bfd6566e6e5f59becf4d7f43ad1f"
+}

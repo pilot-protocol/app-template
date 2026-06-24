@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "id": "dev.miren",
+  "display_name": "Miren",
+  "tagline": "Operate the Miren PaaS from an agent: set up a server, deploy apps, and debug them",
+  "description_md": "Drive the Miren PaaS from an agent: list and inspect apps, read logs, run diagnostics, and reach any miren subcommand. Structured JSON wherever the CLI offers it.",
+  "vendor": {
+    "name": "Miren",
+    "url": "https://miren.dev",
+    "contact": "evan@miren.dev",
+    "publisher_pubkey": "ed25519:4eXltnx0yJZmUOe3DZnZfgz4tGwaGj/auucNWMq8CSM="
+  },
+  "homepage": "https://miren.dev",
+  "source_url": "https://miren.dev",
+  "license": "Proprietary",
+  "categories": [
+    "infrastructure",
+    "devops",
+    "platform"
+  ],
+  "keywords": [
+    "miren",
+    "paas",
+    "deploy",
+    "server",
+    "debug",
+    "infrastructure",
+    "devops",
+    "logs",
+    "apps",
+    "cli"
+  ],
+  "size": {
+    "bundle_bytes": 2850946,
+    "installed_bytes": 5028550
+  },
+  "compat": {
+    "min_pilot_version": "1.0.0",
+    "runtimes": [
+      "go"
+    ]
+  },
+  "methods": [
+    {
+      "name": "miren.apps",
+      "summary": "List all applications on the cluster as JSON."
+    },
+    {
+      "name": "miren.app",
+      "summary": "Inspect one application (status, config, stats) as JSON."
+    },
+    {
+      "name": "miren.logs",
+      "summary": "Read recent logs for an application as JSON."
+    },
+    {
+      "name": "miren.doctor",
+      "summary": "Diagnose miren environment and connectivity."
+    },
+    {
+      "name": "miren.whoami",
+      "summary": "Show the current authenticated user and cluster."
+    },
+    {
+      "name": "miren.server.install",
+      "summary": "Install the miren server as a systemd service on this host."
+    },
+    {
+      "name": "miren.server.status",
+      "summary": "Show miren server service status (one-shot, no follow)."
+    },
+    {
+      "name": "miren.server.register",
+      "summary": "Register this cluster with miren.cloud."
+    },
+    {
+      "name": "miren.init",
+      "summary": "Initialize a new application in a directory (writes its config)."
+    },
+    {
+      "name": "miren.deploy",
+      "summary": "Build and deploy the app in a directory (non-interactive: --force)."
+    },
+    {
+      "name": "miren.deploy.analyze",
+      "summary": "Analyze an app's detected stack/services without building or deploying."
+    },
+    {
+      "name": "miren.rollback",
+      "summary": "Roll an application back to its previous deployed version."
+    },
+    {
+      "name": "miren.debug.connection",
+      "summary": "Test connectivity and authentication with the miren server."
+    },
+    {
+      "name": "miren.debug.advertise",
+      "summary": "Show which addresses the server would advertise and why."
+    },
+    {
+      "name": "miren.app.history",
+      "summary": "Show an application's deployment history as JSON (debug deploys)."
+    },
+    {
+      "name": "miren.exec",
+      "summary": "Run any miren subcommand. Payload {\"args\":[...],\"stdin\":\"...\"}."
+    },
+    {
+      "name": "miren.help",
+      "summary": "Discovery: every method with params, kind, and latency class."
+    }
+  ],
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-06-24",
+      "notes": [
+        "Initial release: CLI-backed adapter over the local miren binary; structured JSON where the CLI offers it",
+        "Inspect: miren.apps, miren.app, miren.logs, miren.doctor, miren.whoami",
+        "Server setup: miren.server.install / status / register",
+        "Deploy lifecycle: miren.init, miren.deploy (non-interactive), miren.deploy.analyze, miren.rollback",
+        "Debug: miren.debug.connection, miren.debug.advertise, miren.app.history",
+        "Passthrough miren.exec for any other miren subcommand"
+      ]
+    }
+  ],
+  "links": [
+    {
+      "label": "Source",
+      "url": "https://miren.dev"
+    },
+    {
+      "label": "Website",
+      "url": "https://miren.dev"
+    }
+  ]
+}
