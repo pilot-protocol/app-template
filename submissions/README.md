@@ -25,8 +25,19 @@ gh pr create     # against pilot-protocol/app-template
 ## What a submission contains
 
 `submissions/<app-id>/`:
-- `<app-id>-<version>.tar.gz` — the signed bundle (`manifest.json` + `bin/<binary>`).
-- `submission.json` — `{id, version, namespace, description, bundle, bundle_sha256}`.
+- `<app-id>-<version>.tar.gz` — the signed bundle (`manifest.json` + `bin/<binary>`),
+  cross-compiled by `make package` to **every** target (`darwin × linux × arm64 ×
+  amd64`) — never a single-platform build.
+- `submission.json` — a post-build **pointer**:
+  `{id, version, namespace, description, bundle, bundle_sha256}`. The app's full
+  surface is already baked + signed inside the bundle.
+
+This PR path and the website form are **at parity** — same required fields, same
+validation, same generated adapter. The form sends the rich `Submission` JSON and
+our server builds it; here `pilot-app` builds it on your machine and you commit the
+result. The adapter is **scaffolded by the pipeline either way — never
+hand-built**. Field-by-field required-vs-optional reference:
+[`../docs/PUBLISHING.md`](../docs/PUBLISHING.md).
 
 ## What happens next
 

@@ -47,6 +47,36 @@ You only ever touch **one repo** (`app-template`); see
 [`submissions/README.md`](submissions/README.md) and
 [`docs/APP-PUBLISHING-SPEC.md`](docs/APP-PUBLISHING-SPEC.md).
 
+> **New to publishing?** Start with [`docs/PUBLISHING.md`](docs/PUBLISHING.md) —
+> the field-level **required-vs-optional** reference, the two publish paths and
+> why they're at parity, and a `cli`-app worked example.
+
+### Two ways to publish — same required fields, same result
+
+You can publish either way; the inputs and the output are identical:
+
+1. **The website form** at `pilotprotocol.network/publish`, which POSTs the rich
+   `Submission` JSON to the **publish-api** ([`cmd/publish-server`](cmd/publish-server)).
+   The server scaffolds + cross-compiles + signs the adapter for you.
+2. **A PR to this repo** with a `submissions/<id>/` produced by
+   `pilot-app submit --prepare` — `pilot-app` scaffolds + builds the same bundle
+   on your machine, and you commit the signed bundle + a small pointer
+   `submission.json`.
+
+Both run the **same scaffold pipeline** and the **same validation**; the only
+difference is *where* the build runs (our server vs. your laptop). Field-by-field
+parity is in [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
+
+**Two rules that trip people up:**
+
+- **The adapter is scaffolded by the pipeline — never hand-built.** Do not write
+  your own adapter and submit a pre-built binary as the bundle; the pipeline
+  generates the adapter Go, manifest, and binaries from your spec.
+- **Binaries must be the full per-platform set or a true universal binary —
+  never single-platform.** Every app cross-compiles to
+  `darwin × linux × arm64 × amd64` automatically; a lone `linux/amd64` bundle is a
+  build-host accident that refuses to spawn elsewhere.
+
 ## The spec (`pilot.app.yaml`)
 
 ```yaml
@@ -94,10 +124,14 @@ params, kind, and latency class.
 - **`http`** — works on the platform today. Maps each method to a backend HTTP
   endpoint (GET → query string, POST → JSON body). This is what the reference
   app `io.pilot.cosift` does, by hand; `pilot-app` generates the equivalent.
-- **`cli`** — generates a working subprocess adapter, but installing it needs a
-  `proc.exec` capability the platform doesn't ship yet. See
-  [docs/CLI-ADAPTER.md](docs/CLI-ADAPTER.md). Until then, front a CLI with a
-  small HTTP shim and publish it as an `http` adapter.
+- **`cli`** — generates a working subprocess adapter (curated routes and/or a
+  passthrough that fronts the whole tool). Provide `backend.command` + `methods` +
+  the CLI binary as `assets[]`; the pipeline scaffolds and cross-compiles the
+  adapter. Installing it through the catalogue needs a `proc.exec` capability the
+  platform is rolling out — see [docs/CLI-ADAPTER.md](docs/CLI-ADAPTER.md) and the
+  worked example in [docs/PUBLISHING.md](docs/PUBLISHING.md#cli-app-worked-example).
+  Until `proc.exec` lands on your hosts, a CLI can also ship today fronted by a
+  small HTTP shim published as an `http` adapter.
 
 ## Authentication: BYO key vs. managed key
 

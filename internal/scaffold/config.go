@@ -54,15 +54,18 @@ type Config struct {
 // (display_name, vendor, categories, …) and the per-app metadata.json. Optional
 // but strongly recommended — without it a published app renders a bare listing.
 type Listing struct {
-	DisplayName string         `yaml:"display_name"` // default: Title-cased namespace
-	Tagline     string         `yaml:"tagline"`
-	Homepage    string         `yaml:"homepage"`
-	SourceURL   string         `yaml:"source_url"`
-	License     string         `yaml:"license"` // SPDX id, e.g. "MIT", "AGPL-3.0-or-later"
-	Categories  []string       `yaml:"categories"`
-	Keywords    []string       `yaml:"keywords"`
-	Vendor      Vendor         `yaml:"vendor"`
-	Changelog   []ChangelogRel `yaml:"changelog"`
+	DisplayName string `yaml:"display_name"` // default: Title-cased namespace
+	Tagline     string `yaml:"tagline"`
+	// AppDescription is the long-form markdown shown on the store page
+	// (`appstore view`). When empty, the one-line Description is used.
+	AppDescription string         `yaml:"app_description"`
+	Homepage       string         `yaml:"homepage"`
+	SourceURL      string         `yaml:"source_url"`
+	License        string         `yaml:"license"` // SPDX id, e.g. "MIT", "AGPL-3.0-or-later"
+	Categories     []string       `yaml:"categories"`
+	Keywords       []string       `yaml:"keywords"`
+	Vendor         Vendor         `yaml:"vendor"`
+	Changelog      []ChangelogRel `yaml:"changelog"`
 }
 
 // Vendor identifies the publisher on the store page.

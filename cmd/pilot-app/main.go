@@ -8,6 +8,7 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/pilot-protocol/app-template/internal/catalogue"
+	"github.com/pilot-protocol/app-template/internal/publish"
 	"github.com/pilot-protocol/app-template/internal/scaffold"
 )
 
@@ -34,6 +36,8 @@ func main() {
 		cmdValidate(os.Args[2:])
 	case "verify":
 		cmdVerify(os.Args[2:])
+	case "verify-submission":
+		cmdVerifySubmission(os.Args[2:])
 	case "submit":
 		cmdSubmit(os.Args[2:])
 	case "example":
@@ -164,6 +168,75 @@ func cmdVerify(args []string) {
 		os.Exit(1)
 	}
 	fmt.Println("\nVERIFY OK — bundle(s) pass the catalogue review gate.")
+}
+
+// cmdVerifySubmission builds every platform from a rich submission.json via the
+// same pipeline the publish-api uses, then runs the catalogue review gate on
+// each built bundle. This is the PR-flow equivalent of the website/API path:
+// the adapter is scaffolded by us (never hand-built) and every platform is
+// verified, so a single committed tarball is not required.
+func cmdVerifySubmission(args []string) {
+	fs := flag.NewFlagSet("verify-submission", flag.ExitOnError)
+	_ = fs.Parse(args)
+	target := fs.Arg(0)
+	if target == "" {
+		fatalf("usage: pilot-app verify-submission <submission.json>")
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		fatalf("read %s: %v", target, err)
+	}
+	var sub publish.Submission
+	if err := json.Unmarshal(raw, &sub); err != nil {
+		fatalf("parse submission %s: %v", target, err)
+	}
+	if errs := sub.Validate(); len(errs) != 0 {
+		fmt.Fprintln(os.Stderr, "submission validation failed:")
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "  - %v\n", e)
+		}
+		os.Exit(1)
+	}
+	// A successful build self-verifies each platform through the catalogue gate
+	// (SPEC §7.1); we then run the explicit per-bundle checks too.
+	_, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	b, err := publish.BuildBundle(sub.ToConfig(), priv)
+	if err != nil {
+		fatalf("build %s from submission: %v", sub.ID, err)
+	}
+	tmp, err := os.MkdirTemp("", "verify-submission")
+	if err != nil {
+		fatalf("%v", err)
+	}
+	defer os.RemoveAll(tmp)
+	allOK := true
+	for _, p := range b.Platforms {
+		path := filepath.Join(tmp, p.TarballName)
+		if err := os.WriteFile(path, p.Tarball, 0o644); err != nil {
+			fatalf("%v", err)
+		}
+		entry, err := catalogue.EntryForBundle(path)
+		if err != nil {
+			fatalf("read built bundle %s: %v", p.TarballName, err)
+		}
+		r := catalogue.VerifyEntry(entry, nil)
+		fmt.Printf("\n%s [%s]:\n", r.ID, p.TarballName)
+		for _, c := range r.Checks {
+			mark := "✓"
+			if !c.OK {
+				mark, allOK = "✗", false
+			}
+			fmt.Printf("  %s %-34s %s\n", mark, c.Name, c.Msg)
+		}
+	}
+	if !allOK {
+		fmt.Fprintln(os.Stderr, "\nVERIFY FAILED — fix the ✗ items before submitting.")
+		os.Exit(1)
+	}
+	fmt.Printf("\nVERIFY OK — built + verified %d platform(s) from the submission spec.\n", len(b.Platforms))
 }
 
 func cmdSubmit(args []string) {
