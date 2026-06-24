@@ -8,12 +8,16 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -212,6 +216,7 @@ func cmdVerifySubmission(args []string) {
 		fatalf("%v", err)
 	}
 	defer os.RemoveAll(tmp)
+	hasArtifacts := len(sub.Artifacts) > 0
 	allOK := true
 	for _, p := range b.Platforms {
 		path := filepath.Join(tmp, p.TarballName)
@@ -231,12 +236,123 @@ func cmdVerifySubmission(args []string) {
 			}
 			fmt.Printf("  %s %-34s %s\n", mark, c.Name, c.Msg)
 		}
+		// Close the native-delivery gap: a submission that declares `artifacts`
+		// MUST yield a bundle that actually carries install.json AND a manifest
+		// wired for staging (the fs.write $APP grant the asset-aware adapter
+		// needs). Absent either, the published app would have no binary to run —
+		// exactly the silent breakage that slipped through before this check.
+		if hasArtifacts {
+			if msg, ok := checkStaging(p.Tarball); ok {
+				fmt.Printf("  ✓ %-34s %s\n", "native-delivery (install.json)", msg)
+			} else {
+				fmt.Printf("  ✗ %-34s %s\n", "native-delivery (install.json)", msg)
+				allOK = false
+			}
+		}
 	}
 	if !allOK {
 		fmt.Fprintln(os.Stderr, "\nVERIFY FAILED — fix the ✗ items before submitting.")
 		os.Exit(1)
 	}
 	fmt.Printf("\nVERIFY OK — built + verified %d platform(s) from the submission spec.\n", len(b.Platforms))
+}
+
+// checkStaging inspects one built platform tarball and confirms the native
+// asset-delivery wiring is present: install.json (the registry staging spec the
+// adapter reads at startup) AND a manifest whose grants include fs.write $APP
+// (the capability the staging runtime needs to write the fetched binary). It
+// returns a human-readable message and whether the bundle is staging-ready.
+//
+// This is what closes the false-pass: before this, a submission that declared
+// artifacts but whose build dropped them (no install.json, no staging grant)
+// still passed verify-submission, because the catalogue gate only checks the
+// binary sha/signature and is blind to install.json.
+func checkStaging(tarball []byte) (string, bool) {
+	files, err := tarballFiles(tarball)
+	if err != nil {
+		return fmt.Sprintf("read bundle: %v", err), false
+	}
+	spec, hasInstall := files["./install.json"]
+	if !hasInstall {
+		if _, alt := files["install.json"]; alt {
+			spec, hasInstall = files["install.json"], true
+		}
+	}
+	if !hasInstall {
+		return "submission declares artifacts but the built bundle has NO install.json — the adapter would have no binary to stage", false
+	}
+	// install.json must name a command and at least one asset.
+	var is struct {
+		Command string `json:"command"`
+		Assets  []struct {
+			ExecPath string `json:"exec_path"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(spec, &is); err != nil {
+		return fmt.Sprintf("install.json present but unparseable: %v", err), false
+	}
+	if len(is.Assets) == 0 {
+		return "install.json present but lists no assets", false
+	}
+	// The manifest must grant fs.write $APP so the staging runtime can write the
+	// fetched binary under $APP — proof the adapter is wired for delivery, not
+	// just that the spec file rode along.
+	mfRaw, hasMf := files["./manifest.json"]
+	if !hasMf {
+		mfRaw, hasMf = files["manifest.json"]
+	}
+	if !hasMf {
+		return "install.json present but manifest.json missing from bundle", false
+	}
+	var mf struct {
+		Grants []struct {
+			Cap    string `json:"cap"`
+			Target string `json:"target"`
+		} `json:"grants"`
+	}
+	if err := json.Unmarshal(mfRaw, &mf); err != nil {
+		return fmt.Sprintf("manifest.json unparseable: %v", err), false
+	}
+	stagingGrant := false
+	for _, g := range mf.Grants {
+		if g.Cap == "fs.write" && g.Target == "$APP" {
+			stagingGrant = true
+			break
+		}
+	}
+	if !stagingGrant {
+		return "install.json present but manifest lacks the fs.write $APP grant the staging adapter needs", false
+	}
+	return fmt.Sprintf("install.json + staging grant present (%d asset(s))", len(is.Assets)), true
+}
+
+// tarballFiles reads a gzipped tar bundle into a map of header-name → contents.
+func tarballFiles(tarball []byte) (map[string][]byte, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(tarball))
+	if err != nil {
+		return nil, err
+	}
+	defer gz.Close()
+	out := map[string][]byte{}
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		b, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, err
+		}
+		out[hdr.Name] = b
+	}
+	return out, nil
 }
 
 func cmdSubmit(args []string) {
