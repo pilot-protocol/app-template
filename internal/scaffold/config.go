@@ -77,9 +77,9 @@ type Vendor struct {
 
 // ChangelogRel is one release's notes for the store page.
 type ChangelogRel struct {
-	Version string   `yaml:"version"`
-	Date    string   `yaml:"date"`
-	Notes   []string `yaml:"notes"`
+	Version string   `json:"version" yaml:"version"`
+	Date    string   `json:"date,omitempty" yaml:"date"`
+	Notes   []string `json:"notes,omitempty" yaml:"notes"`
 }
 
 // Publisher carries the path to the ed25519 signing key (generated once via
