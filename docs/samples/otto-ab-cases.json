@@ -1,0 +1,4 @@
+[{"label":"Version","note":"enumerated → otto --version","vanilla":["--version"],"method":"otto.exec","payload":{"args":["--version"]}},
+ {"label":"Relay status","note":"otto status --nodes --json (relay not running here)","vanilla":["status","--nodes","--json"],"method":"otto.status","payload":{}},
+ {"label":"Controller client status","note":"otto client status (always JSON)","vanilla":["client","status"],"method":"otto.client.status","payload":{}},
+ {"label":"Discover node commands","note":"otto commands list --json (needs a paired node)","vanilla":["commands","list","--json"],"method":"otto.commands","payload":{}}]

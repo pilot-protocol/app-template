@@ -43,6 +43,11 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 		}
 	case "cli":
 		files = append(files, file{filepath.Join("internal", "backend", "exec.go"), "client_cli.go.tmpl"})
+		// Native-binary delivery: emit the staging runtime only when the app
+		// actually ships assets (an already-installed cli needs no stager).
+		if cfg.HasAssets() {
+			files = append(files, file{filepath.Join("internal", "backend", "stage.go"), "stage.go.tmpl"})
+		}
 	}
 
 	var written []string
@@ -61,6 +66,29 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 		return written, fmt.Errorf("write metadata.json: %w", err)
 	}
 	written = append(written, "metadata.json")
+
+	// install.json (the registry staging spec) ships in the bundle alongside the
+	// manifest. The adapter reads it at startup to fetch/verify/stage each asset.
+	// Built from a Go model (not a text template) so the JSON is assembled safely.
+	if cfg.HasAssets() {
+		spec, err := marshalInstallSpec(cfg)
+		if err != nil {
+			return written, fmt.Errorf("build install.json: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(outDir, "install.json"), spec, 0o644); err != nil {
+			return written, fmt.Errorf("write install.json: %w", err)
+		}
+		written = append(written, "install.json")
+
+		script, err := renderInstallScript(cfg)
+		if err != nil {
+			return written, fmt.Errorf("build install.sh: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(outDir, "install.sh"), script, 0o755); err != nil {
+			return written, fmt.Errorf("write install.sh: %w", err)
+		}
+		written = append(written, "install.sh")
+	}
 
 	for _, f := range files {
 		rendered, err := render(f.tmpl, cfg)

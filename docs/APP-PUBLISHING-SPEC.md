@@ -154,7 +154,11 @@ turning on the allowlist when desired.
 See `pilot-app example`. Required: `id`, `app_version`, `description`,
 `backend.{type,base_url|command}`, `methods[]`. Each method maps to an HTTP
 route (`http: {verb, path}`) or a CLI invocation (`cli: {args}`), with `kind`,
-`duration`, optional `timeout`/`params`/`roundtrip`.
+`duration`, optional `timeout`/`params`/`roundtrip`. The website form collects the
+equivalent rich `Submission` (`internal/publish/submission.go`). For the
+field-level **required-vs-optional** table covering both the YAML and the form —
+and the parity statement between the two publish paths — see
+[`PUBLISHING.md`](PUBLISHING.md).
 
 ### 5.2 `manifest.json`
 Schema is `app-store/pkg/manifest`. Generated, never hand-edited. Key rules:

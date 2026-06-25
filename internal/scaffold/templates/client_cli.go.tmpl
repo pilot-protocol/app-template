@@ -20,12 +20,14 @@
 //   - A non-zero exit is a normal result returned structurally ({stdout, stderr,
 //     exit}); only spawn/timeout failures surface as IPC errors.
 //
-// TODO(native-apps): COMING SOON. The real model delivers the binary via the
-// app store (manifest `assets`: per-OS/arch url+sha256, staged at $APP/<exec_path>),
-// and this runner execs that staged path — not an assumed-installed command.
-// See docs/NATIVE-APPS.md. The command must currently already be installed on the
-// operator's host. Exec is a declared `proc.exec` capability (user-consented at
-// install); it is not yet brokered per-call. See docs/CLI-ADAPTER.md.
+// Native delivery: when the app ships `assets`, the binary is delivered from the
+// Pilot R2 artifact registry (per-OS/arch url+sha256 in install.json, fetched +
+// verified + staged at $APP/<exec_path> by backend/stage.go), and main rewrites
+// this runner's base command to that staged path — so the host need not have the
+// CLI pre-installed. With no assets, the base command is resolved from PATH as
+// before. Exec is the declared `proc.exec` capability (user-consented at
+// install); it is not brokered per-call. See docs/R2-ARTIFACT-REGISTRY.md and
+// docs/CLI-ADAPTER.md.
 package backend
 
 import (

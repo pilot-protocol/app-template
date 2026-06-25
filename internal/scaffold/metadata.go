@@ -2,7 +2,17 @@ package scaffold
 
 import (
 	"encoding/json"
+	"strings"
 )
+
+// descOr returns the long-form app description when set, else the one-line
+// description. This is what the store page (`appstore view`) renders.
+func descOr(long, short string) string {
+	if strings.TrimSpace(long) != "" {
+		return long
+	}
+	return short
+}
 
 // Metadata is the per-app catalogue v2 record (catalogue/apps/<id>/metadata.json)
 // that drives the store rich-view page. Built from the spec at `init`; the
@@ -70,7 +80,9 @@ func BuildMetadata(c *Config) Metadata {
 
 	changelog := c.Listing.Changelog
 	if len(changelog) == 0 {
-		changelog = []ChangelogRel{{Version: c.AppVersion, Notes: []string{c.Description}}}
+		// A neutral default note — do NOT echo the one-line description here, so the
+		// store-page "Description" (description_md) is the only prose a viewer reads.
+		changelog = []ChangelogRel{{Version: c.AppVersion, Notes: []string{"Released v" + c.AppVersion}}}
 	}
 
 	// Managed apps require a daemon that provisions a per-app identity (--identity)
@@ -94,7 +106,7 @@ func BuildMetadata(c *Config) Metadata {
 		ID:            c.ID,
 		DisplayName:   c.Listing.DisplayName,
 		Tagline:       c.Listing.Tagline,
-		DescriptionMD: c.Description,
+		DescriptionMD: descOr(c.Listing.AppDescription, c.Description),
 		Vendor: MetaVendor{
 			Name:    c.Listing.Vendor.Name,
 			URL:     c.Listing.Vendor.URL,

@@ -13,9 +13,6 @@
 {{- end}}
     "{{.Namespace}}.help"
   ],
-{{/* TODO(native-apps): emit an "assets" array (per-OS/arch download url + sha256
-     + exec_path) for native/CLI apps; fold asset shas into the signed payload.
-     See docs/NATIVE-APPS.md. http (translation-only) apps need no assets. */}}
   "grants": [
     {"cap": "fs.read", "target": "$APP/config.json"},
 {{- if .Backend.NeedsSecrets}}
@@ -30,6 +27,14 @@
 {{- end}}
 {{- if eq .Backend.Type "cli"}}
     {"cap": "proc.exec", "target": "{{index .Backend.Command 0}}"},
+{{- end}}
+{{- if .HasAssets}}
+    {"cap": "fs.read", "target": "$APP/install.json"},
+    {"cap": "fs.write", "target": "$APP"},
+{{- range .AssetHosts}}
+    {"cap": "net.dial", "target": "{{.}}",
+     "if": {"kind": "rate", "params": {"per": "min", "limit": {{$.Grants.RatePerMin}}}}},
+{{- end}}
 {{- end}}
     {"cap": "audit.log", "target": "*"}
 {{- if .Backend.X402}},

@@ -1,0 +1,331 @@
+{
+  "id": "io.pilot.otto",
+  "version": "0.20.0",
+  "description": "Drive real Chrome tabs from an agent: extract page content as markdown or HTML, run site commands (Reddit, LinkedIn, Hacker News, Google), screenshot pages, and inspect relay and node status — over a relay to a browser extension, no headless farm. Plus a passthrough exec for any otto subcommand.",
+  "email": "hello@telepat.io",
+  "backend": {
+    "type": "cli",
+    "command": [
+      "otto"
+    ]
+  },
+  "methods": [
+    {
+      "name": "otto.exec",
+      "description": "Run any otto subcommand. Payload is {\"args\":[...]} — the verbatim otto argv. Use this for the full CLI surface beyond the curated methods (config, client register/login/remove, pair, listener unsubscribe, extension update, agent install, site-filtered `commands list --site`, filtered `logs list`, etc.). Add \"--json\" where the command supports it. Example args: [\"commands\",\"list\",\"--site\",\"reddit.com\",\"--json\"]. Note: interactive/streaming subcommands (setup, settings, logs follow, listener subscribe-network, test with stream/wait flags, mcp serve, start --attached) are not suitable over one-shot IPC.",
+      "latency": "med",
+      "params": [
+        {
+          "name": "args",
+          "type": "array",
+          "required": true,
+          "description": "verbatim otto argv, e.g. [\"status\",\"--nodes\",\"--json\"]"
+        }
+      ],
+      "cli": {
+        "passthrough": true
+      }
+    },
+    {
+      "name": "otto.status",
+      "description": "Relay daemon status as JSON: running pid, port, uptime, log path, and the list of currently connected browser node IDs. The right preflight before any page command — an empty node list means no Chrome extension node is paired/online.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "status",
+          "--nodes",
+          "--json"
+        ]
+      }
+    },
+    {
+      "name": "otto.commands",
+      "description": "List the automation commands the connected node(s) expose, as JSON. Use to learn which site commands are available before calling otto.test. For a single site, use otto.exec with [\"commands\",\"list\",\"--site\",\"<domain>\",\"--json\"].",
+      "latency": "med",
+      "cli": {
+        "args": [
+          "commands",
+          "list",
+          "--json"
+        ]
+      }
+    },
+    {
+      "name": "otto.extract",
+      "description": "Extract the readable content of a web page through a live paired browser tab, as JSON markdown. Opens a temporary tab on the node, extracts, and closes it. Requires a running relay and a paired Chrome node.",
+      "latency": "slow",
+      "params": [
+        {
+          "name": "url",
+          "type": "string",
+          "required": true,
+          "description": "page URL to extract from"
+        }
+      ],
+      "cli": {
+        "args": [
+          "extract-content",
+          "${url}",
+          "--format",
+          "markdown",
+          "--json"
+        ]
+      }
+    },
+    {
+      "name": "otto.extract.format",
+      "description": "Extract page content in a chosen format: markdown, distilled_html, clean_html, raw_html, or text. Returns JSON. Like otto.extract but lets you pick the output representation.",
+      "latency": "slow",
+      "params": [
+        {
+          "name": "url",
+          "type": "string",
+          "required": true,
+          "description": "page URL to extract from"
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": true,
+          "description": "markdown | distilled_html | clean_html | raw_html | text"
+        }
+      ],
+      "cli": {
+        "args": [
+          "extract-content",
+          "${url}",
+          "--format",
+          "${format}",
+          "--json"
+        ]
+      }
+    },
+    {
+      "name": "otto.screenshot",
+      "description": "Capture a screenshot of a page through a live browser tab; returns JSON (base64 PNG in the envelope, no local Preview window). Requires a running relay and a paired Chrome node.",
+      "latency": "slow",
+      "params": [
+        {
+          "name": "url",
+          "type": "string",
+          "required": true,
+          "description": "page URL to screenshot"
+        }
+      ],
+      "cli": {
+        "args": [
+          "screenshot",
+          "${url}",
+          "--json"
+        ]
+      }
+    },
+    {
+      "name": "otto.test",
+      "description": "Run a registered site command on a browser node (opens a tab, runs the command, returns JSON). Provide site (e.g. reddit.com), command id (e.g. getPosts), and a JSON payload string (use {} for none, e.g. {\"limit\":10}). One-shot; requires relay + paired node.",
+      "latency": "slow",
+      "params": [
+        {
+          "name": "site",
+          "type": "string",
+          "required": true,
+          "description": "website domain, e.g. reddit.com"
+        },
+        {
+          "name": "command",
+          "type": "string",
+          "required": true,
+          "description": "command id, e.g. getPosts"
+        },
+        {
+          "name": "payload",
+          "type": "string",
+          "required": true,
+          "description": "command input JSON object string; use {} if none"
+        }
+      ],
+      "cli": {
+        "args": [
+          "test",
+          "${site}",
+          "${command}",
+          "--payload",
+          "${payload}",
+          "--json"
+        ]
+      }
+    },
+    {
+      "name": "otto.cmd",
+      "description": "Send a single raw action to the target browser node and return the full JSON envelope. Provide the action name and a JSON payload string (use {} for none). Use for low-level primitives (e.g. primitive.tab.open) not covered by a curated method.",
+      "latency": "med",
+      "params": [
+        {
+          "name": "action",
+          "type": "string",
+          "required": true,
+          "description": "action name, e.g. command.list or primitive.tab.open"
+        },
+        {
+          "name": "payload",
+          "type": "string",
+          "required": true,
+          "description": "JSON object string for the action payload; use {} if none"
+        }
+      ],
+      "cli": {
+        "args": [
+          "cmd",
+          "--action",
+          "${action}",
+          "--payload",
+          "${payload}",
+          "--json"
+        ]
+      }
+    },
+    {
+      "name": "otto.logs",
+      "description": "Read recent relay logs as JSON. For filtered queries (level/source/since/request-id) use otto.exec with [\"logs\",\"list\",...,\"--json\"].",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "logs",
+          "list",
+          "--json"
+        ]
+      }
+    },
+    {
+      "name": "otto.logs.status",
+      "description": "Relay log storage status as JSON (retention, counts, sizes). Check whether logging is healthy and how much history is available.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "logs",
+          "status",
+          "--json"
+        ]
+      }
+    },
+    {
+      "name": "otto.client.status",
+      "description": "Local controller client identity state and where its secret resolves from (env vs keychain), as JSON. Verify the controller is registered and logged in before running page commands.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "client",
+          "status"
+        ]
+      }
+    },
+    {
+      "name": "otto.authcode",
+      "description": "List pending pairing codes from the relay as JSON. See codes awaiting approval when bringing a new Chrome extension node online (approve with `otto pair <code>` via otto.exec).",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "authcode"
+        ]
+      }
+    },
+    {
+      "name": "otto.extension.info",
+      "description": "Installed Chrome extension artifact metadata (version, unpacked path, checksum) and configured relay URLs, as JSON. Confirm which extension build the host has staged for the Load-unpacked handoff.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "extension",
+          "info"
+        ]
+      }
+    },
+    {
+      "name": "otto.agent.status",
+      "description": "Which agent frameworks (claude, codex, cursor, vscode, …) currently have the Otto MCP server registered, as JSON.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "agent",
+          "status",
+          "--json"
+        ]
+      }
+    }
+  ],
+  "listing": {
+    "display_name": "Otto",
+    "tagline": "Drive real Chrome tabs from an agent — extract, automate, screenshot, no headless farm",
+    "app_description": "Otto is secure remote browser automation. A controller CLI sends commands over an authenticated WebSocket to a relay daemon, which routes them to a Chrome extension running on live tabs. Code drives the browser deterministically; the agent decides what to do, not how to click.\n\nWhat an agent gets:\n- **Content extraction** — `otto.extract` / `otto.extract.format` turn a URL into clean markdown, distilled/clean/raw HTML, or text through a real tab.\n- **Site commands** — `otto.test` runs registered actions on real sessions (Reddit/LinkedIn `getPosts`, Hacker News `getFrontPage`, Google `getSearchResults`, …); `otto.commands` lists what a node exposes.\n- **Page & tab control** — `otto.screenshot` (viewport or full page) and `otto.cmd` for low-level primitives (tab open/navigate/query, DOM extract).\n- **Status & diagnostics** — `otto.status` (relay + connected nodes), `otto.client.status`, `otto.authcode`, `otto.extension.info`, `otto.logs`/`otto.logs.status`, `otto.agent.status` — all JSON.\n- **Full CLI surface** — `otto.exec` runs any verbatim otto argv.\n\nGood to know:\n- Returns JSON wherever the CLI offers it; discover the live surface at runtime with `otto.help` — every method, its parameters, and its latency class (fast / med / slow).\n- Real browser tabs, not a headless farm — no Docker, Puppeteer farm, or cloud-browser rental.\n- Prerequisite stack on the host: a running relay (`otto start`), Chrome with the Otto extension loaded and paired as a node, and a logged-in controller. Until that is up, page commands return a structured error (`{stdout,stderr,exit}`); `otto.status` is the right preflight.\n- Runs on macOS and Linux (arm64 + amd64); the otto CLI is staged as a self-contained binary and sha-pinned on install. Free and open source (MIT) — no payment, no per-call limit.",
+    "license": "MIT",
+    "homepage": "https://docs.telepat.io/otto",
+    "source_url": "https://github.com/telepat-io/otto",
+    "categories": [
+      "automation",
+      "browser",
+      "web"
+    ],
+    "keywords": [
+      "otto",
+      "browser",
+      "automation",
+      "chrome",
+      "scraping",
+      "extract",
+      "markdown",
+      "screenshot",
+      "agent",
+      "web",
+      "relay",
+      "extension"
+    ]
+  },
+  "vendor": {
+    "name": "Telepat",
+    "url": "https://telepat.io",
+    "agent_usage": "Agents call curated methods (otto.extract, otto.test, otto.screenshot, otto.status, otto.commands, ...) or otto.exec with a verbatim otto argv to drive a real Chrome tab via the relay; output returns as JSON or {stdout,stderr,exit}.",
+    "capabilities": "Extract page content (markdown/HTML/text); run registered site commands (Reddit/LinkedIn/HN/Google); screenshot pages; send low-level tab/DOM primitives; inspect relay status, connected nodes, logs, client identity, extension, and agent integrations; reach any otto subcommand via passthrough."
+  },
+  "artifacts": [
+    {
+      "os": "darwin",
+      "arch": "arm64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.otto/0.20.0/darwin-arm64/otto-0.20.0-darwin-arm64.tar.gz",
+      "sha256": "b803292b97d36a78116786106ad0b11876be7cd03b1d10bad318c1ab6405a4cd",
+      "unpack": "tar.gz",
+      "exec_path": "otto-0.20.0-darwin-arm64/otto",
+      "order": 1,
+      "role": "binary"
+    },
+    {
+      "os": "darwin",
+      "arch": "amd64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.otto/0.20.0/darwin-amd64/otto-0.20.0-darwin-amd64.tar.gz",
+      "sha256": "ffb446fe7fdd666395776ee4679011103dca288b13a47f08c75dd7884cbcaac6",
+      "unpack": "tar.gz",
+      "exec_path": "otto-0.20.0-darwin-amd64/otto",
+      "order": 1,
+      "role": "binary"
+    },
+    {
+      "os": "linux",
+      "arch": "arm64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.otto/0.20.0/linux-arm64/otto-0.20.0-linux-arm64.tar.gz",
+      "sha256": "a0dfdfc2ea5e361112aa48d8bbf92e65573fe47643e573f535594239cbba1177",
+      "unpack": "tar.gz",
+      "exec_path": "otto-0.20.0-linux-arm64/otto",
+      "order": 1,
+      "role": "binary"
+    },
+    {
+      "os": "linux",
+      "arch": "amd64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.otto/0.20.0/linux-amd64/otto-0.20.0-linux-amd64.tar.gz",
+      "sha256": "8e148e7604a6b4ba639ef50c5215ae198f699cd7f6d544e29131fee59cb1d3af",
+      "unpack": "tar.gz",
+      "exec_path": "otto-0.20.0-linux-amd64/otto",
+      "order": 1,
+      "role": "binary"
+    }
+  ]
+}

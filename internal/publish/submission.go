@@ -2,6 +2,7 @@ package publish
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -26,6 +27,31 @@ type Submission struct {
 	Methods []SubMethod `json:"methods"`
 	Listing SubListing  `json:"listing"`
 	Vendor  SubVendor   `json:"vendor"`
+
+	// Artifacts is the native-binary delivery set for a cli app: the
+	// platform-specific binaries the publisher uploaded to the Pilot R2 artifact
+	// registry in the form's Artifacts step, with the install order and any
+	// optional install args. Empty for http apps and for cli apps whose command
+	// is already present on the host. ToConfig maps these to scaffold.Asset.
+	Artifacts []SubArtifact `json:"artifacts"`
+}
+
+// SubArtifact is one uploaded, platform-specific, signed binary in the publish
+// form's Artifacts step. URL is the R2 location returned by the presign upload;
+// SHA256 is verified server-side against the stored object before the case is
+// accepted, and again on the host at install. Mirrors scaffold.Asset.
+type SubArtifact struct {
+	Role     string   `json:"role"`      // "binary" (default) | "data"
+	Name     string   `json:"name"`      // per-platform id (default: exec_path basename); referenced by deps
+	OS       string   `json:"os"`        // linux | darwin
+	Arch     string   `json:"arch"`      // amd64 | arm64
+	URL      string   `json:"url"`       // R2 public URL
+	SHA256   string   `json:"sha256"`    // 64-hex of the uploaded object
+	Unpack   string   `json:"unpack"`    // "" (single file) | "tar.gz" (extract under $APP)
+	ExecPath string   `json:"exec_path"` // dest under $APP, or path inside the extracted tree
+	Deps     []string `json:"deps"`      // names of same-platform artifacts installed first
+	Order    int      `json:"order"`     // tiebreaker among independent artifacts (per platform)
+	Args     []string `json:"args"`      // optional post-stage install args
 }
 
 // SubBackend selects and configures the data plane the adapter forwards to:
@@ -175,6 +201,7 @@ func (s Submission) Validate() []string {
 	} else if !reURL.MatchString(strings.TrimSpace(s.Backend.BaseURL)) {
 		e = append(e, "Backend base URL must be an absolute http(s) URL")
 	}
+	e = append(e, s.validateArtifacts()...)
 	if len(s.Methods) == 0 {
 		e = append(e, "Add at least one method")
 	}
@@ -215,6 +242,62 @@ func (s Submission) Validate() []string {
 	return e
 }
 
+var (
+	subSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	subOSOK   = map[string]bool{"linux": true, "darwin": true}
+	subArchOK = map[string]bool{"amd64": true, "arm64": true}
+)
+
+// validateArtifacts mirrors the scaffold asset rules at the submission boundary
+// so a publisher gets clear, server-authoritative errors before any build:
+// artifacts are cli-only, each names a known os/arch, an https R2 URL, a 64-hex
+// sha256, and a relative exec_path under $APP; install order is unique per
+// platform. (The sha is additionally re-verified against the stored R2 object on
+// submit, and on the host at install.)
+func (s Submission) validateArtifacts() []string {
+	if len(s.Artifacts) == 0 {
+		return nil
+	}
+	var e []string
+	if !s.Backend.IsCLI() {
+		e = append(e, "Artifacts (binary delivery) are only valid for a cli backend")
+	}
+	orders := map[string]bool{}
+	for i, a := range s.Artifacts {
+		role := a.Role
+		if role == "" {
+			role = "binary"
+		}
+		if role != "binary" && role != "data" {
+			e = append(e, fmt.Sprintf("Artifact %d: role %q must be binary or data", i+1, a.Role))
+		}
+		if a.Unpack != "" && a.Unpack != "tar.gz" {
+			e = append(e, fmt.Sprintf("Artifact %d: unpack %q must be empty or \"tar.gz\"", i+1, a.Unpack))
+		}
+		if !subOSOK[a.OS] {
+			e = append(e, fmt.Sprintf("Artifact %d: os %q must be linux or darwin", i+1, a.OS))
+		}
+		if !subArchOK[a.Arch] {
+			e = append(e, fmt.Sprintf("Artifact %d: arch %q must be amd64 or arm64", i+1, a.Arch))
+		}
+		if u, err := url.Parse(strings.TrimSpace(a.URL)); err != nil || u.Scheme != "https" || u.Host == "" {
+			e = append(e, fmt.Sprintf("Artifact %d: url must be an absolute https URL (the R2 upload location)", i+1))
+		}
+		if !subSHA256.MatchString(a.SHA256) {
+			e = append(e, fmt.Sprintf("Artifact %d: sha256 must be 64 lowercase hex chars", i+1))
+		}
+		if a.ExecPath == "" || strings.HasPrefix(a.ExecPath, "/") || strings.Contains(a.ExecPath, "..") {
+			e = append(e, fmt.Sprintf("Artifact %d: exec_path must be a relative path under $APP (no leading / or \"..\")", i+1))
+		}
+		key := fmt.Sprintf("%s/%s#%d", a.OS, a.Arch, a.Order)
+		if orders[key] {
+			e = append(e, fmt.Sprintf("Artifact %d: duplicate install order %d for %s/%s", i+1, a.Order, a.OS, a.Arch))
+		}
+		orders[key] = true
+	}
+	return e
+}
+
 // ToConfig derives the buildable adapter spec from the submission (the fields
 // the generator needs). Review-only fields (vendor free-text, agent-usage,
 // capabilities, binary URL) are intentionally not part of it.
@@ -229,14 +312,15 @@ func (s Submission) ToConfig() *scaffold.Config {
 		Description: s.Description,
 		Backend:     backend,
 		Listing: scaffold.Listing{
-			DisplayName: s.Listing.DisplayName,
-			Tagline:     s.Listing.Tagline,
-			Homepage:    s.Listing.Homepage,
-			SourceURL:   s.Listing.SourceURL,
-			License:     s.Listing.License,
-			Categories:  s.Listing.Categories,
-			Keywords:    s.Listing.Keywords,
-			Vendor:      scaffold.Vendor{Name: s.Vendor.Name, URL: s.Vendor.URL, Contact: s.Vendor.Contact},
+			DisplayName:    s.Listing.DisplayName,
+			Tagline:        s.Listing.Tagline,
+			AppDescription: s.Listing.AppDescription,
+			Homepage:       s.Listing.Homepage,
+			SourceURL:      s.Listing.SourceURL,
+			License:        s.Listing.License,
+			Categories:     s.Listing.Categories,
+			Keywords:       s.Listing.Keywords,
+			Vendor:         scaffold.Vendor{Name: s.Vendor.Name, URL: s.Vendor.URL, Contact: s.Vendor.Contact},
 		},
 	}
 	// HTTP byo apps carry auth headers; managed apps are keyless (the broker
@@ -284,6 +368,12 @@ func (s Submission) ToConfig() *scaffold.Config {
 			method.HTTP = &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path}
 		}
 		cfg.Methods = append(cfg.Methods, method)
+	}
+	for _, a := range s.Artifacts {
+		cfg.Assets = append(cfg.Assets, scaffold.Asset{
+			Role: a.Role, Name: a.Name, OS: a.OS, Arch: a.Arch, URL: a.URL, SHA256: a.SHA256,
+			Unpack: a.Unpack, ExecPath: a.ExecPath, Deps: a.Deps, Order: a.Order, Args: a.Args,
+		})
 	}
 	cfg.Resolve()
 	return cfg
