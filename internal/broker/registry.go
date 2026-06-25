@@ -27,17 +27,53 @@ type AppEntry struct {
 	BreakerThreshold  int    `json:"breaker_threshold"`   // consecutive failures before opening (0 = disabled)
 	BreakerCooldownMs int    `json:"breaker_cooldown_ms"` // how long the breaker stays open
 
-	master   string       // resolved from KeyEnv at load
-	injector AuthInjector // built from AuthHeader/Scheme
-	allowSet map[string]bool
-	breaker  *Breaker
+	master        string       // resolved from KeyEnv at load
+	injector      AuthInjector // built from AuthHeader/Scheme
+	allowSet      map[string]bool
+	allowPatterns [][]string // templated allow entries split on "/" ("{x}" matches any one segment)
+	breaker       *Breaker
 }
 
+// allowed reports whether a request path is permitted. Exact entries match
+// literally (fast map hit); templated entries (containing a {name} segment, e.g.
+// "/v1/calls/{call_id}") match any single non-empty segment in that position, so
+// REST path params don't each need enumerating. An empty allow-list permits
+// nothing (safe default; prod must declare).
 func (a *AppEntry) allowed(path string) bool {
-	if len(a.allowSet) == 0 {
-		return false // empty allow-list = nothing allowed (safe default; prod must declare)
+	if len(a.allowSet) == 0 && len(a.allowPatterns) == 0 {
+		return false
 	}
-	return a.allowSet[path]
+	if a.allowSet[path] {
+		return true
+	}
+	segs := strings.Split(path, "/")
+	for _, pat := range a.allowPatterns {
+		if segmentsMatch(pat, segs) {
+			return true
+		}
+	}
+	return false
+}
+
+// segmentsMatch reports whether request segments satisfy a templated pattern. A
+// "{name}" pattern segment matches any single non-empty segment; every other
+// segment must match literally. Lengths must be equal (no implicit wildcards).
+func segmentsMatch(pat, segs []string) bool {
+	if len(pat) != len(segs) {
+		return false
+	}
+	for i, p := range pat {
+		if len(p) >= 2 && p[0] == '{' && p[len(p)-1] == '}' {
+			if segs[i] == "" {
+				return false
+			}
+			continue
+		}
+		if p != segs[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Registry holds the managed apps by id.
@@ -87,8 +123,13 @@ func ParseRegistry(raw []byte, getenv func(string) string) (*Registry, error) {
 		}
 		a.injector = injectorFor(a.AuthStyle, a.AuthHeader, a.AuthScheme, a.AuthParam, a.AuthUser)
 		a.allowSet = map[string]bool{}
+		a.allowPatterns = nil
 		for _, p := range a.Allow {
-			a.allowSet[p] = true
+			if strings.Contains(p, "{") {
+				a.allowPatterns = append(a.allowPatterns, strings.Split(p, "/"))
+			} else {
+				a.allowSet[p] = true
+			}
 		}
 		if a.CostField == "" {
 			a.CostField = "cost_cents"
