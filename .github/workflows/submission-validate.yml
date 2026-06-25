@@ -32,10 +32,17 @@ jobs:
           found=0
           for sub in submissions/*/submission.json; do
             dir="$(dirname "$sub")"
-            bundle="$dir/$(jq -r .bundle "$sub")"
             echo "::group::verify $dir"
-            test -f "$bundle" || { echo "missing bundle $bundle"; exit 1; }
-            /tmp/pilot-app verify "$bundle"
+            if jq -e 'has("bundle")' "$sub" >/dev/null 2>&1; then
+              # Pointer shape: a pre-built bundle is committed alongside.
+              bundle="$dir/$(jq -r .bundle "$sub")"
+              test -f "$bundle" || { echo "missing bundle $bundle"; exit 1; }
+              /tmp/pilot-app verify "$bundle"
+            else
+              # Rich Submission (parity with the publish-api): scaffold + build
+              # every platform from the spec and run the catalogue review gate.
+              /tmp/pilot-app verify-submission "$sub"
+            fi
             echo "::endgroup::"
             found=1
           done
