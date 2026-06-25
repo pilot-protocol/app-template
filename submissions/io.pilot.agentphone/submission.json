@@ -1,0 +1,233 @@
+{
+  "id": "io.pilot.agentphone",
+  "version": "0.1.0",
+  "namespace": "agentphone",
+  "description": "Give your agent a real phone number: place and receive voice calls, send and receive SMS/iMessage, and hold threaded conversations — all over REST. Provision a number, create a calling agent, place a call and poll its transcript, send a text and poll for replies.",
+  "email": "alex@vulturelabs.io",
+  "bundle": "io.pilot.agentphone-0.1.0-linux-amd64.tar.gz",
+  "bundle_sha256": "5d1e6dbc301d42a45e4a84fda2a9a75290ac2f6d4368ba97f58f6cb7f979892a",
+  "bundles": {
+    "linux/amd64": {
+      "file": "io.pilot.agentphone-0.1.0-linux-amd64.tar.gz",
+      "sha256": "5d1e6dbc301d42a45e4a84fda2a9a75290ac2f6d4368ba97f58f6cb7f979892a"
+    },
+    "linux/arm64": {
+      "file": "io.pilot.agentphone-0.1.0-linux-arm64.tar.gz",
+      "sha256": "bbfff26f7ffef897773f4947e9539ff3da188cad4ec69aff29e0ed6f93596890"
+    },
+    "darwin/amd64": {
+      "file": "io.pilot.agentphone-0.1.0-darwin-amd64.tar.gz",
+      "sha256": "b5bf81ee5ff440bae870c2c6a8723473475eaa20b9b8db1bc500eaf929d5496b"
+    },
+    "darwin/arm64": {
+      "file": "io.pilot.agentphone-0.1.0-darwin-arm64.tar.gz",
+      "sha256": "412b44726220e7c52af5bd19955bdb6190f353c40f2a76ad0289aadf50ab428a"
+    },
+    "windows/amd64": {
+      "file": "io.pilot.agentphone-0.1.0-windows-amd64.tar.gz",
+      "sha256": "66806810c5ebbe7eeea056d24b249f1440fb6021d7cf968ff43cc74defdfc884"
+    }
+  },
+  "backend": {
+    "base_url": "https://api.agentphone.ai",
+    "auth": "managed",
+    "quota": 0,
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer managed"
+      }
+    ]
+  },
+  "methods": [
+    {
+      "name": "agentphone.usage",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/usage"
+      }
+    },
+    {
+      "name": "agentphone.list_voices",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/agents/voices"
+      }
+    },
+    {
+      "name": "agentphone.list_agents",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/agents"
+      }
+    },
+    {
+      "name": "agentphone.get_agent",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/agents/{agent_id"
+      }
+    },
+    {
+      "name": "agentphone.create_agent",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/agents"
+      }
+    },
+    {
+      "name": "agentphone.update_agent",
+      "http": {
+        "verb": "PATCH",
+        "path": "/v1/agents/{agent_id"
+      }
+    },
+    {
+      "name": "agentphone.delete_agent",
+      "http": {
+        "verb": "DELETE",
+        "path": "/v1/agents/{agent_id"
+      }
+    },
+    {
+      "name": "agentphone.attach_number",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/agents/{agent_id"
+      }
+    },
+    {
+      "name": "agentphone.detach_number",
+      "http": {
+        "verb": "DELETE",
+        "path": "/v1/agents/{agent_id"
+      }
+    },
+    {
+      "name": "agentphone.list_numbers",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/numbers"
+      }
+    },
+    {
+      "name": "agentphone.buy_number",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/numbers"
+      }
+    },
+    {
+      "name": "agentphone.get_number",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/numbers/{number_id"
+      }
+    },
+    {
+      "name": "agentphone.release_number",
+      "http": {
+        "verb": "DELETE",
+        "path": "/v1/numbers/{number_id"
+      }
+    },
+    {
+      "name": "agentphone.list_messages",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/numbers/{number_id"
+      }
+    },
+    {
+      "name": "agentphone.send_message",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/messages"
+      }
+    },
+    {
+      "name": "agentphone.react",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/messages/{message_id"
+      }
+    },
+    {
+      "name": "agentphone.list_conversations",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/conversations"
+      }
+    },
+    {
+      "name": "agentphone.get_conversation",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/conversations/{conversation_id"
+      }
+    },
+    {
+      "name": "agentphone.place_call",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/calls"
+      }
+    },
+    {
+      "name": "agentphone.list_calls",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/calls"
+      }
+    },
+    {
+      "name": "agentphone.get_call",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/calls/{call_id"
+      }
+    },
+    {
+      "name": "agentphone.get_transcript",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/calls/{call_id"
+      }
+    },
+    {
+      "name": "agentphone.end_call",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/calls/{call_id"
+      }
+    },
+    {
+      "name": "agentphone.list_contacts",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/contacts"
+      }
+    },
+    {
+      "name": "agentphone.create_contact",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/contacts"
+      }
+    },
+    {
+      "name": "agentphone.update_contact",
+      "http": {
+        "verb": "PATCH",
+        "path": "/v1/contacts/{contact_id"
+      }
+    },
+    {
+      "name": "agentphone.delete_contact",
+      "http": {
+        "verb": "DELETE",
+        "path": "/v1/contacts/{contact_id"
+      }
+    }
+  ]
+}

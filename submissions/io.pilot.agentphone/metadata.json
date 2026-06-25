@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "id": "io.pilot.agentphone",
+  "display_name": "AgentPhone",
+  "tagline": "A real phone number for your agent — calls, SMS, and conversations over REST",
+  "description_md": "Give your agent a real phone number: place and receive voice calls, send and receive SMS/iMessage, and hold threaded conversations — all over REST. Provision a number, create a calling agent, place a call and poll its transcript, send a text and poll for replies.",
+  "vendor": {
+    "name": "AgentPhone",
+    "url": "https://agentphone.ai",
+    "contact": "founders@agentphone.to",
+    "publisher_pubkey": "ed25519:mvVzYABubZwOTzWWQA/TDbRLYkKzmD/x6k/w0nz+zHc="
+  },
+  "homepage": "https://agentphone.ai",
+  "source_url": "https://github.com/AgentPhone-AI/skills",
+  "license": "Apache-2.0",
+  "categories": [
+    "communication",
+    "phone",
+    "voice",
+    "messaging"
+  ],
+  "keywords": [
+    "phone",
+    "sms",
+    "imessage",
+    "voice",
+    "calls",
+    "telephony",
+    "conversations"
+  ],
+  "size": {
+    "bundle_bytes": 2643572,
+    "installed_bytes": 6346620
+  },
+  "compat": {
+    "min_pilot_version": "1.10.0",
+    "runtimes": [
+      "go"
+    ]
+  },
+  "methods": [
+    {
+      "name": "agentphone.usage",
+      "summary": "Account status: plan, number hold limit, and message/call stats. Call this first to orient."
+    },
+    {
+      "name": "agentphone.list_voices",
+      "summary": "List available text-to-speech voices (voice_id, name, provider, gender, accent) for use when creating an agent."
+    },
+    {
+      "name": "agentphone.list_agents",
+      "summary": "List your calling/texting agents. You get one starter agent on account setup — list before creating more."
+    },
+    {
+      "name": "agentphone.get_agent",
+      "summary": "Get one agent's config and its attached numbers."
+    },
+    {
+      "name": "agentphone.create_agent",
+      "summary": "Create an agent (phone persona): name, voiceMode (pass \"hosted\"), systemPrompt, voice, modelTier."
+    },
+    {
+      "name": "agentphone.update_agent",
+      "summary": "Update an agent's config (only the fields you send change)."
+    },
+    {
+      "name": "agentphone.delete_agent",
+      "summary": "Delete an agent. Irreversible — confirm with your human first."
+    },
+    {
+      "name": "agentphone.attach_number",
+      "summary": "Attach an existing number to an agent."
+    },
+    {
+      "name": "agentphone.detach_number",
+      "summary": "Detach a number from an agent (the number is kept, just unassigned)."
+    },
+    {
+      "name": "agentphone.list_numbers",
+      "summary": "List your active phone numbers."
+    },
+    {
+      "name": "agentphone.buy_number",
+      "summary": "Provision a new US/CA number (pay-as-you-go $3/mo). Optionally attach to an agent and pick an area code."
+    },
+    {
+      "name": "agentphone.get_number",
+      "summary": "Get one phone number (any status, including released)."
+    },
+    {
+      "name": "agentphone.release_number",
+      "summary": "Release a number. Irreversible, no refund for the unused period — confirm with your human first."
+    },
+    {
+      "name": "agentphone.list_messages",
+      "summary": "List messages on a number (inbound + outbound), newest first. Poll with the after cursor to detect SMS replies."
+    },
+    {
+      "name": "agentphone.send_message",
+      "summary": "Send an SMS/iMessage. Auto-delivers over iMessage when both sides support it, else SMS/MMS."
+    },
+    {
+      "name": "agentphone.react",
+      "summary": "Send a tapback reaction to a message (iMessage only). reaction: love|like|dislike|laugh|emphasize|question."
+    },
+    {
+      "name": "agentphone.list_conversations",
+      "summary": "List conversation threads (one per external contact or iMessage group), newest activity first."
+    },
+    {
+      "name": "agentphone.get_conversation",
+      "summary": "Get one conversation with its recent messages."
+    },
+    {
+      "name": "agentphone.place_call",
+      "summary": "Place an outbound call. With systemPrompt the AI runs the call autonomously. Returns a call id immediately — poll agentphone.get_call for status + transcript."
+    },
+    {
+      "name": "agentphone.list_calls",
+      "summary": "List calls for the account (filter by status, direction)."
+    },
+    {
+      "name": "agentphone.get_call",
+      "summary": "Get a call with its embedded transcript. Poll every few seconds until status is completed or failed (the non-websocket way to learn a call outcome)."
+    },
+    {
+      "name": "agentphone.get_transcript",
+      "summary": "Get the full ordered transcript of a call (plain JSON, not a stream)."
+    },
+    {
+      "name": "agentphone.end_call",
+      "summary": "Terminate an in-progress call. Status/endedAt settle shortly after — keep polling agentphone.get_call."
+    },
+    {
+      "name": "agentphone.list_contacts",
+      "summary": "List saved contacts; search filters by name/phone."
+    },
+    {
+      "name": "agentphone.create_contact",
+      "summary": "Save a contact (phone is normalized to E.164; 409 if it already exists)."
+    },
+    {
+      "name": "agentphone.update_contact",
+      "summary": "Update a contact (only the fields you send change)."
+    },
+    {
+      "name": "agentphone.delete_contact",
+      "summary": "Delete a contact. Confirm with your human first."
+    },
+    {
+      "name": "agentphone.help",
+      "summary": "Discovery: every method with params, kind, and latency class."
+    }
+  ],
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-06-24",
+      "notes": [
+        "Initial release — managed-key REST adapter over the AgentPhone API",
+        "Voice calls (place + poll transcript), SMS/iMessage send + poll, agents, numbers, conversations, contacts"
+      ]
+    }
+  ],
+  "links": [
+    {
+      "label": "Source",
+      "url": "https://github.com/AgentPhone-AI/skills"
+    },
+    {
+      "label": "Website",
+      "url": "https://agentphone.ai"
+    }
+  ]
+}
