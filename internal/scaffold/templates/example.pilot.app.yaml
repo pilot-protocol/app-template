@@ -56,6 +56,20 @@ methods:
       verb: POST                  # POST -> payload forwarded as the JSON body
       path: /report
 
+  - name: weather.station
+    summary: "Get one station by id (REST path parameter)."
+    kind: utility
+    duration: fast
+    http:
+      verb: GET                   # GET | POST | PATCH | PUT | DELETE
+      # {placeholder} segments are filled from params at call time (URL-escaped)
+      # and dropped from the body/query. QUOTE any path with braces — an
+      # unquoted {x} is a YAML flow-map. Body verbs (POST/PATCH/PUT) send the
+      # remaining fields as JSON; GET/DELETE send them as the query string.
+      path: "/stations/{station_id}"
+    params:
+      station_id: "string (required) — path param"
+
   - name: weather.health
     summary: "Liveness probe."
     kind: status

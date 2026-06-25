@@ -132,6 +132,42 @@ func (c *Client) PostRaw(ctx context.Context, path string, payload json.RawMessa
 {{- end}}
 	return c.do(req)
 }
+
+// Do issues an arbitrary method on <path> with an optional query string and JSON
+// body, and returns the raw JSON body. Path placeholders are already filled by
+// the caller; query is used for GET/DELETE, body for POST/PATCH/PUT. Empty-valued
+// query keys are dropped; an empty body sends no body (no Content-Type).
+func (c *Client) Do(ctx context.Context, method, path string, query map[string]string, body json.RawMessage) (json.RawMessage, error) {
+	u := c.baseURL + path
+	if len(query) > 0 {
+		q := url.Values{}
+		for k, v := range query {
+			if v != "" {
+				q.Set(k, v)
+			}
+		}
+		if enc := q.Encode(); enc != "" {
+			u += "?" + enc
+		}
+	}
+	var rdr io.Reader
+	var bodyBytes []byte
+	if len(bytes.TrimSpace(body)) > 0 {
+		bodyBytes = []byte(body)
+		rdr = bytes.NewReader(bodyBytes)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, rdr)
+	if err != nil {
+		return nil, err
+	}
+	if bodyBytes != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+{{- if .Managed}}
+	c.applySig(req, bodyBytes)
+{{- end}}
+	return c.do(req)
+}
 {{- if .Managed}}
 
 // applySig stamps the caller-identity headers the broker verifies. The signed

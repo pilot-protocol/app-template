@@ -19,10 +19,13 @@ import (
 	"fmt"
 	"log"
 	"net"
+{{- if eq .Backend.Type "http"}}
+	"net/url"
+{{- end}}
 	"os"
 	"os/signal"
 	"path/filepath"
-{{- if .Backend.Headers}}
+{{- if or .Backend.Headers (eq .Backend.Type "http")}}
 	"strings"
 {{- end}}
 	"syscall"
@@ -147,31 +150,90 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 {{- if eq .Backend.Type "http"}}
 func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL string) {
 {{- range .Methods}}
-	d.Register("{{.Name}}", forward{{if eq .HTTP.Verb "POST"}}Post{{else}}Get{{end}}(c, "{{.HTTP.Path}}", dur("{{.TimeoutFor}}"))) // {{.Duration}}
+	d.Register("{{.Name}}", forward(c, "{{.HTTP.Verb}}", "{{.HTTP.Path}}", []string{ {{- range $p := .HTTP.PathParams}}{{printf "%q" $p}}, {{end -}} }, {{.HTTP.BodyVerb}}, dur("{{.TimeoutFor}}"))) // {{.Duration}}
 {{- end}}
 	d.Register("{{.Namespace}}.help", helpHandler(version, backendURL))
 }
 
-// forwardGet copies the flat JSON payload into the query string of a GET.
-func forwardGet(c *backend.Client, path string, timeout time.Duration) ipc.Handler {
+// forward builds one backend request for a method. It fills {name} placeholders
+// in pathTmpl from the payload (URL-escaped, then dropped from the payload), and
+// sends the REMAINING fields as a JSON body when body is true (POST/PATCH/PUT)
+// or as a query string otherwise (GET/DELETE). One generic forwarder covers
+// every verb + path shape, so adding a method is pure pilot.app.yaml.
+func forward(c *backend.Client, method, pathTmpl string, pathParams []string, body bool, timeout time.Duration) ipc.Handler {
 	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
-		params, err := stringParams(req.Payload)
+		fields, err := objectFields(req.Payload)
+		if err != nil {
+			return nil, err
+		}
+		path, err := fillPath(pathTmpl, pathParams, fields)
 		if err != nil {
 			return nil, err
 		}
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		return c.Get(ctx, path, params)
+		if body {
+			b, err := json.Marshal(fields)
+			if err != nil {
+				return nil, err
+			}
+			return c.Do(ctx, method, path, nil, b)
+		}
+		return c.Do(ctx, method, path, flatten(fields), nil)
 	}
 }
 
-// forwardPost forwards the JSON payload verbatim as the POST body.
-func forwardPost(c *backend.Client, path string, timeout time.Duration) ipc.Handler {
-	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
-		ctx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		return c.PostRaw(ctx, path, req.Payload)
+// objectFields decodes the payload into a field map preserving JSON types, so a
+// POST/PATCH body keeps nested objects/arrays intact (a flat string map would
+// stringify them). Path-param values are read out of this map by fillPath.
+func objectFields(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	out := map[string]json.RawMessage{}
+	if len(raw) == 0 {
+		return out, nil
 	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("payload must be a JSON object: %w", err)
+	}
+	return out, nil
+}
+
+// fillPath substitutes each {name} in tmpl with its payload value (URL-escaped)
+// and removes that key from fields so it isn't also sent in the body/query. A
+// missing or empty path param is an error — the URL would otherwise be malformed.
+func fillPath(tmpl string, pathParams []string, fields map[string]json.RawMessage) (string, error) {
+	out := tmpl
+	for _, k := range pathParams {
+		v, ok := fields[k]
+		if !ok {
+			return "", fmt.Errorf("missing required path parameter %q", k)
+		}
+		s := jsonScalar(v)
+		if s == "" {
+			return "", fmt.Errorf("path parameter %q must not be empty", k)
+		}
+		out = strings.ReplaceAll(out, "{"+k+"}", url.PathEscape(s))
+		delete(fields, k)
+	}
+	return out, nil
+}
+
+// flatten coerces remaining fields to query-string values: a JSON string becomes
+// its unquoted text, anything else its literal JSON text.
+func flatten(fields map[string]json.RawMessage) map[string]string {
+	out := make(map[string]string, len(fields))
+	for k, v := range fields {
+		out[k] = jsonScalar(v)
+	}
+	return out
+}
+
+// jsonScalar returns a JSON string's unquoted value, else the raw JSON text.
+func jsonScalar(v json.RawMessage) string {
+	var s string
+	if json.Unmarshal(v, &s) == nil {
+		return s
+	}
+	return string(v)
 }
 {{- else}}
 func registerHandlers(d *ipc.Dispatcher, r *backend.Runner, version string) {
