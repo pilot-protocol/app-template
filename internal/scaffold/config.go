@@ -449,7 +449,7 @@ func (c *Config) Validate() []error {
 				// so the adapter can fill it and <ns>.help documents it.
 				for _, p := range pathParamNames(m.HTTP.Path) {
 					if _, ok := m.Params[p]; !ok {
-						errs = append(errs, fmt.Errorf("methods[%d] (%s): path placeholder {%s} has no matching entry under params:", i, m.Name, p))
+						errs = append(errs, fmt.Errorf("methods[%d] (%s): path placeholder {%s} has no matching entry under params", i, m.Name, p))
 					}
 				}
 			}
