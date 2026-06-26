@@ -1,0 +1,43 @@
+{
+  "id": "io.pilot.plainweb",
+  "version": "1.0.0",
+  "description": "Plainweb - retrieve any web page in plain text: no HTML or JS returned, simply plain Markdown",
+  "email": "alex@vulturelabs.io",
+  "backend": {
+    "type": "http",
+    "base_url": "https://plainweb-hu4fob755a-uc.a.run.app"
+  },
+  "methods": [
+    {
+      "name": "plainweb.fetch",
+      "description": "Fetch any web page and return it as clean Markdown — no HTML, no JavaScript. Pass the full target URL as `url`; it is placed verbatim in the request path (GET /<url>). Scheme-less hosts (e.g. example.com) are sanitized to https://. The reply is `{\"content_type\":\"text/markdown; charset=utf-8\",\"content\":\"<markdown>\"}`. Open and free — no API key needed.",
+      "latency": "med",
+      "http": { "verb": "GET", "path": "/{url}" },
+      "params": [
+        {
+          "name": "url",
+          "type": "string",
+          "required": true,
+          "in": "path_raw",
+          "description": "the full web URL to fetch (with or without scheme), e.g. https://example.com/article or example.com"
+        }
+      ]
+    }
+  ],
+  "listing": {
+    "display_name": "Plainweb",
+    "tagline": "Any web page as clean Markdown — no HTML, no JS, one call",
+    "app_description": "Plainweb is a Pilot-owned URL→Markdown service: give it any web page and get back clean, accurate Markdown — no HTML, no JavaScript, just plain text structured as Markdown.\n\nWhat an agent gets:\n- **One call** — `plainweb.fetch(url)` fetches the page and returns it as Markdown (GFM tables, fenced code with language, task lists). The target URL goes straight in the path.\n- **Accurate extraction** — a cost-aware static→headless-Chrome fetch ladder (most pages never launch Chrome), go-readability primary (preserves code blocks and tables) with go-trafilatura fallback, converted via html-to-markdown v2.\n- **Scheme-less OK** — bare hosts like `example.com` are sanitized to `https://`.\n\nGood to know:\n- **Free and open — no API key required.** Public endpoints are open to every caller.\n- **Rate limit:** anonymous callers get **1000 requests/second** (burst 2000); a master key only elevates a caller past that limit.\n- The reply is `text/markdown`, returned by the adapter as `{ \"content_type\", \"content\" }` (the Markdown is in `content`).\n- In-house Pilot Protocol tool, deployed on Cloud Run.",
+    "license": "Proprietary",
+    "homepage": "https://pilotprotocol.network",
+    "source_url": "https://github.com/pilot-protocol/plainweb",
+    "categories": ["web", "content", "markdown"],
+    "keywords": ["plainweb", "markdown", "web", "fetch", "scrape", "extract", "readability", "html", "url", "content"]
+  },
+  "vendor": {
+    "name": "Pilot Protocol",
+    "url": "https://pilotprotocol.network",
+    "agent_usage": "Agents call plainweb.fetch with a target URL to retrieve the page as clean Markdown (no HTML/JS) in one call — for reading, summarizing, or extracting content from any public web page.",
+    "capabilities": "Fetch any web page and convert it to clean Markdown (GFM tables, fenced code, task lists); scheme-less URL sanitization; static→headless fetch ladder with readability + trafilatura extraction."
+  }
+}
