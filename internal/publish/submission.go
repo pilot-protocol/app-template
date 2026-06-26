@@ -131,6 +131,12 @@ type SubParam struct {
 	Type        string `json:"type"` // string | int | bool | number
 	Required    bool   `json:"required"`
 	Description string `json:"description"`
+	// In is the param's HTTP request location (http backends only). One of
+	// query | path | path_raw | body | header; empty keeps the verb/path default
+	// (a {name} placeholder → path, otherwise GET→query, POST/PUT/PATCH→body).
+	// path_raw fills a {name} placeholder WITHOUT URL-escaping, for URL-in-path
+	// APIs (e.g. GET base/<rawurl>) where escaping the scheme breaks the backend.
+	In string `json:"in"`
 }
 
 // SubListing is everything needed to display the app in the store, plus the
@@ -237,6 +243,42 @@ func (s Submission) Validate() []string {
 			}
 		} else if m.HTTP.Path == "" || !strings.HasPrefix(m.HTTP.Path, "/") {
 			e = append(e, fmt.Sprintf("Method %q: path must start with /", n))
+		} else {
+			e = append(e, validateParamLocations(n, m)...)
+		}
+	}
+	return e
+}
+
+// subParamIn is the closed set of param request locations (empty = default).
+var subParamIn = map[string]bool{
+	"query": true, "path": true, "path_raw": true, "body": true, "header": true,
+}
+
+// validateParamLocations checks the per-param `in` rules for an http method, so
+// a publisher gets clear, server-authoritative errors before any build: `in`
+// must be one of the five values, and a path/path_raw param MUST correspond to a
+// {name} placeholder in the route path (otherwise it has nowhere to go).
+func validateParamLocations(method string, m SubMethod) []string {
+	var e []string
+	placeholder := map[string]bool{}
+	for _, p := range scaffold.PathPlaceholders(m.HTTP.Path) {
+		placeholder[p] = true
+	}
+	for _, p := range m.Params {
+		name := strings.TrimSpace(p.Name)
+		if name == "" || p.In == "" {
+			continue
+		}
+		if !subParamIn[p.In] {
+			e = append(e, fmt.Sprintf("Method %q, param %q: in %q must be one of query, path, path_raw, body, header", method, name, p.In))
+			continue
+		}
+		if (p.In == "path" || p.In == "path_raw") && !placeholder[name] {
+			e = append(e, fmt.Sprintf("Method %q, param %q: in %q needs a matching {%s} placeholder in path %q", method, name, p.In, name, m.HTTP.Path))
+		}
+		if p.In == "header" && name == "" {
+			e = append(e, fmt.Sprintf("Method %q: a header param needs a non-empty name", method))
 		}
 	}
 	return e
@@ -365,7 +407,20 @@ func (s Submission) ToConfig() *scaffold.Config {
 				Passthrough:   m.CLI.Passthrough,
 			}
 		} else {
-			method.HTTP = &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path}
+			route := &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path}
+			// Carry each param's explicit request location so the generator can
+			// resolve query/path/path_raw/body/header placement. Omitted `in`
+			// keeps the verb/path default (back-compat).
+			for _, p := range m.Params {
+				if p.Name == "" || p.In == "" {
+					continue
+				}
+				if route.ParamIn == nil {
+					route.ParamIn = map[string]string{}
+				}
+				route.ParamIn[p.Name] = p.In
+			}
+			method.HTTP = route
 		}
 		cfg.Methods = append(cfg.Methods, method)
 	}

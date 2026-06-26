@@ -290,14 +290,46 @@ type Method struct {
 // params, e.g. /v1/calls/{call_id}). Of the remaining payload fields, a
 // body verb (POST/PATCH/PUT) forwards them as a JSON body; a non-body verb
 // (GET/DELETE) forwards them as a query string.
+//
+// A method may override per-param placement via ParamIn (name -> location):
+//
+//	query     — ?name=value, URL-encoded (default for a non-body verb's free params)
+//	path      — fills {name} in Path, URL-escaped (default for a {name} placeholder)
+//	path_raw  — fills {name} in Path WITHOUT escaping (URL-in-path APIs, e.g. GET base/{url})
+//	body      — JSON body object field (default for a body verb's free params)
+//	header    — request header "Name: value"
+//
+// Omitting a param's location keeps the historical default, so existing specs
+// build identically.
 type HTTPRoute struct {
 	Verb string `yaml:"verb"` // GET (default) | POST | PATCH | PUT | DELETE
 	Path string `yaml:"path"` // e.g. /current or /v1/calls/{call_id}
 
-	// PathParams is derived in Resolve from {name} placeholders in Path; the
-	// generated adapter substitutes each from the payload (URL-escaped) and
-	// drops it from the body/query so it isn't sent twice.
+	// ParamIn carries each param's explicit location (one of the five values
+	// above); a param absent from the map takes the verb/path default. Set from
+	// the submission in ToConfig (the YAML form uses per-param `in`).
+	ParamIn map[string]string `yaml:"param_in"`
+
+	// PathParams is derived in Resolve from {name} placeholders in Path that
+	// resolve to the URL-escaped `path` location; the generated adapter
+	// substitutes each from the payload (URL-escaped) and drops it from the
+	// body/query so it isn't sent twice.
 	PathParams []string `yaml:"-"`
+
+	// RawPathParams is derived in Resolve: {name} placeholders whose param is
+	// marked `path_raw` — substituted into Path WITHOUT URL-escaping (Go's http
+	// client sends the raw path verbatim), the only way GET base/https://x works.
+	RawPathParams []string `yaml:"-"`
+
+	// HeaderParams / QueryParams / BodyParams are derived in Resolve: the param
+	// names the adapter routes to a request header, the query string, and the
+	// JSON body respectively. A param not bound to the path and not given an
+	// explicit `in` falls into the verb default (query for non-body, body for
+	// body verbs) — represented by the empty residual that the generated forward
+	// handles, so these lists hold only the EXPLICITLY-placed params.
+	HeaderParams []string `yaml:"-"`
+	QueryParams  []string `yaml:"-"`
+	BodyParams   []string `yaml:"-"`
 }
 
 // BodyVerb reports whether this route sends remaining payload fields as a JSON
@@ -308,6 +340,11 @@ func (h *HTTPRoute) BodyVerb() bool {
 
 // pathParamPattern matches {name} placeholders in an http path.
 var pathParamPattern = regexp.MustCompile(`\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
+
+// PathPlaceholders returns the {name} placeholders in an http path, in order.
+// Exported so the submission layer can validate per-param locations against the
+// same placeholder set the generator uses.
+func PathPlaceholders(path string) []string { return pathParamNames(path) }
 
 // pathParamNames returns the {name} placeholders in a path, in order.
 func pathParamNames(path string) []string {
@@ -435,7 +472,63 @@ func (c *Config) Resolve() {
 		}
 		if m.HTTP != nil {
 			m.HTTP.Verb = strings.ToUpper(m.HTTP.Verb)
-			m.HTTP.PathParams = pathParamNames(m.HTTP.Path)
+			m.HTTP.resolveParamLocs()
+		}
+	}
+}
+
+// HTTP location values for a method param's `in` field.
+const (
+	InQuery   = "query"
+	InPath    = "path"
+	InPathRaw = "path_raw"
+	InBody    = "body"
+	InHeader  = "header"
+)
+
+// validParamIn is the closed set of param locations (empty = verb/path default).
+var validParamIn = map[string]bool{
+	InQuery: true, InPath: true, InPathRaw: true, InBody: true, InHeader: true,
+}
+
+// resolveParamLocs derives the per-location param buckets from the path
+// placeholders and the explicit ParamIn map. A {name} placeholder defaults to
+// escaped `path`; ParamIn may upgrade it to `path_raw` (unescaped). A
+// non-placeholder param with an explicit query/body/header location lands in the
+// matching bucket; one with no location is left as the verb-default residual the
+// generated forward routes (query for non-body verbs, body for body verbs).
+func (h *HTTPRoute) resolveParamLocs() {
+	h.PathParams = nil
+	h.RawPathParams = nil
+	h.QueryParams = nil
+	h.BodyParams = nil
+	h.HeaderParams = nil
+	placeholder := map[string]bool{}
+	for _, name := range pathParamNames(h.Path) {
+		placeholder[name] = true
+		if h.ParamIn[name] == InPathRaw {
+			h.RawPathParams = append(h.RawPathParams, name)
+		} else {
+			h.PathParams = append(h.PathParams, name)
+		}
+	}
+	// Explicit non-placeholder locations, in deterministic order.
+	names := make([]string, 0, len(h.ParamIn))
+	for name := range h.ParamIn {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if placeholder[name] {
+			continue // handled above
+		}
+		switch h.ParamIn[name] {
+		case InQuery:
+			h.QueryParams = append(h.QueryParams, name)
+		case InBody:
+			h.BodyParams = append(h.BodyParams, name)
+		case InHeader:
+			h.HeaderParams = append(h.HeaderParams, name)
 		}
 	}
 }
@@ -529,9 +622,31 @@ func (c *Config) Validate() []error {
 				}
 				// Every {name} placeholder in the path must be a declared param,
 				// so the adapter can fill it and <ns>.help documents it.
+				placeholder := map[string]bool{}
 				for _, p := range pathParamNames(m.HTTP.Path) {
+					placeholder[p] = true
 					if _, ok := m.Params[p]; !ok {
 						errs = append(errs, fmt.Errorf("methods[%d] (%s): path placeholder {%s} has no matching entry under params", i, m.Name, p))
+					}
+				}
+				// Per-param locations: each must be one of the five values, a
+				// path/path_raw param must correspond to a {name} placeholder, and
+				// an `in` entry must name a declared param.
+				inNames := make([]string, 0, len(m.HTTP.ParamIn))
+				for name := range m.HTTP.ParamIn {
+					inNames = append(inNames, name)
+				}
+				sort.Strings(inNames)
+				for _, name := range inNames {
+					loc := m.HTTP.ParamIn[name]
+					if !validParamIn[loc] {
+						errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q in %q must be query|path|path_raw|body|header", i, m.Name, name, loc))
+					}
+					if _, ok := m.Params[name]; !ok {
+						errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q has an `in` location but is not declared under params", i, m.Name, name))
+					}
+					if (loc == InPath || loc == InPathRaw) && !placeholder[name] {
+						errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q is in %q but the path %q has no {%s} placeholder", i, m.Name, name, loc, m.HTTP.Path, name))
 					}
 				}
 			}
