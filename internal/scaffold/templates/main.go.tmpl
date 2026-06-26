@@ -150,36 +150,96 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 {{- if eq .Backend.Type "http"}}
 func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL string) {
 {{- range .Methods}}
-	d.Register("{{.Name}}", forward(c, "{{.HTTP.Verb}}", "{{.HTTP.Path}}", []string{ {{- range $p := .HTTP.PathParams}}{{printf "%q" $p}}, {{end -}} }, {{.HTTP.BodyVerb}}, dur("{{.TimeoutFor}}"))) // {{.Duration}}
+	d.Register("{{.Name}}", forward(c, route{
+		method: "{{.HTTP.Verb}}", pathTmpl: "{{.HTTP.Path}}", bodyVerb: {{.HTTP.BodyVerb}},
+		pathParams:    []string{ {{- range $p := .HTTP.PathParams}}{{printf "%q" $p}}, {{end -}} },
+		rawPathParams: []string{ {{- range $p := .HTTP.RawPathParams}}{{printf "%q" $p}}, {{end -}} },
+		queryParams:   []string{ {{- range $p := .HTTP.QueryParams}}{{printf "%q" $p}}, {{end -}} },
+		bodyParams:    []string{ {{- range $p := .HTTP.BodyParams}}{{printf "%q" $p}}, {{end -}} },
+		headerParams:  []string{ {{- range $p := .HTTP.HeaderParams}}{{printf "%q" $p}}, {{end -}} },
+	}, dur("{{.TimeoutFor}}"))) // {{.Duration}}
 {{- end}}
 	d.Register("{{.Namespace}}.help", helpHandler(version, backendURL))
 }
 
+// route is the resolved per-method request shape baked in at generation time:
+// the verb, the path template (with {name} placeholders), and the per-location
+// param buckets. A param named in pathParams/rawPathParams fills a placeholder
+// (escaped / raw); one in queryParams, bodyParams, or headerParams is forced to
+// that location; everything else (the residual) follows the verb default — a
+// JSON body for a body verb (POST/PATCH/PUT), a query string otherwise.
+type route struct {
+	method        string
+	pathTmpl      string
+	bodyVerb      bool
+	pathParams    []string // {name} placeholder, URL-escaped
+	rawPathParams []string // {name} placeholder, substituted verbatim (URL-in-path)
+	queryParams   []string // forced to the query string
+	bodyParams    []string // forced into the JSON body object
+	headerParams  []string // forced to a request header (Name: value)
+}
+
 // forward builds one backend request for a method. It fills {name} placeholders
-// in pathTmpl from the payload (URL-escaped, then dropped from the payload), and
-// sends the REMAINING fields as a JSON body when body is true (POST/PATCH/PUT)
-// or as a query string otherwise (GET/DELETE). One generic forwarder covers
-// every verb + path shape, so adding a method is pure pilot.app.yaml.
-func forward(c *backend.Client, method, pathTmpl string, pathParams []string, body bool, timeout time.Duration) ipc.Handler {
+// in the path from the payload (escaped for pathParams, verbatim for
+// rawPathParams), routes each explicitly-located param to its query/body/header,
+// and sends the REMAINING (residual) fields as a JSON body for a body verb or a
+// query string otherwise. One generic forwarder covers every verb + placement,
+// so adding a method is pure pilot.app.yaml.
+func forward(c *backend.Client, r route, timeout time.Duration) ipc.Handler {
 	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
 		fields, err := objectFields(req.Payload)
 		if err != nil {
 			return nil, err
 		}
-		path, err := fillPath(pathTmpl, pathParams, fields)
+		path, err := fillPath(r.pathTmpl, r.pathParams, r.rawPathParams, fields)
 		if err != nil {
 			return nil, err
 		}
+		// Pull the explicitly-located params out of the residual first, so they
+		// aren't also swept into the verb-default body/query below.
+		headers := map[string]string{}
+		for _, k := range r.headerParams {
+			if v, ok := fields[k]; ok {
+				headers[k] = jsonScalar(v)
+				delete(fields, k)
+			}
+		}
+		query := map[string]string{}
+		for _, k := range r.queryParams {
+			if v, ok := fields[k]; ok {
+				query[k] = jsonScalar(v)
+				delete(fields, k)
+			}
+		}
+		bodyFields := map[string]json.RawMessage{}
+		for _, k := range r.bodyParams {
+			if v, ok := fields[k]; ok {
+				bodyFields[k] = v
+				delete(fields, k)
+			}
+		}
+		// Residual: verb default. A body verb keeps residual + forced body fields
+		// in the JSON body; a non-body verb folds residual into the query string.
+		if r.bodyVerb {
+			for k, v := range fields {
+				bodyFields[k] = v
+			}
+		} else {
+			for k, v := range fields {
+				query[k] = jsonScalar(v)
+			}
+		}
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		if body {
-			b, err := json.Marshal(fields)
+		var body json.RawMessage
+		if r.bodyVerb || len(bodyFields) > 0 {
+			b, err := json.Marshal(bodyFields)
 			if err != nil {
 				return nil, err
 			}
-			return c.Do(ctx, method, path, nil, b)
+			body = b
 		}
-		return c.Do(ctx, method, path, flatten(fields), nil)
+		return c.Do(ctx, r.method, path, query, headers, body)
 	}
 }
 
@@ -197,34 +257,40 @@ func objectFields(raw json.RawMessage) (map[string]json.RawMessage, error) {
 	return out, nil
 }
 
-// fillPath substitutes each {name} in tmpl with its payload value (URL-escaped)
-// and removes that key from fields so it isn't also sent in the body/query. A
-// missing or empty path param is an error — the URL would otherwise be malformed.
-func fillPath(tmpl string, pathParams []string, fields map[string]json.RawMessage) (string, error) {
+// fillPath substitutes each {name} placeholder in tmpl with its payload value —
+// URL-escaped for pathParams, verbatim for rawPathParams (URL-in-path APIs where
+// escaping the scheme/slashes would break the backend) — and removes that key
+// from fields so it isn't also sent in the body/query. A missing or empty path
+// param is an error: the URL would otherwise be malformed.
+func fillPath(tmpl string, pathParams, rawPathParams []string, fields map[string]json.RawMessage) (string, error) {
 	out := tmpl
-	for _, k := range pathParams {
+	sub := func(k string, escape bool) error {
 		v, ok := fields[k]
 		if !ok {
-			return "", fmt.Errorf("missing required path parameter %q", k)
+			return fmt.Errorf("missing required path parameter %q", k)
 		}
 		s := jsonScalar(v)
 		if s == "" {
-			return "", fmt.Errorf("path parameter %q must not be empty", k)
+			return fmt.Errorf("path parameter %q must not be empty", k)
 		}
-		out = strings.ReplaceAll(out, "{"+k+"}", url.PathEscape(s))
+		if escape {
+			s = url.PathEscape(s)
+		}
+		out = strings.ReplaceAll(out, "{"+k+"}", s)
 		delete(fields, k)
+		return nil
+	}
+	for _, k := range pathParams {
+		if err := sub(k, true); err != nil {
+			return "", err
+		}
+	}
+	for _, k := range rawPathParams {
+		if err := sub(k, false); err != nil {
+			return "", err
+		}
 	}
 	return out, nil
-}
-
-// flatten coerces remaining fields to query-string values: a JSON string becomes
-// its unquoted text, anything else its literal JSON text.
-func flatten(fields map[string]json.RawMessage) map[string]string {
-	out := make(map[string]string, len(fields))
-	for k, v := range fields {
-		out[k] = jsonScalar(v)
-	}
-	return out
 }
 
 // jsonScalar returns a JSON string's unquoted value, else the raw JSON text.

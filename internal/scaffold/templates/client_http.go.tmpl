@@ -133,11 +133,14 @@ func (c *Client) PostRaw(ctx context.Context, path string, payload json.RawMessa
 	return c.do(req)
 }
 
-// Do issues an arbitrary method on <path> with an optional query string and JSON
-// body, and returns the raw JSON body. Path placeholders are already filled by
-// the caller; query is used for GET/DELETE, body for POST/PATCH/PUT. Empty-valued
-// query keys are dropped; an empty body sends no body (no Content-Type).
-func (c *Client) Do(ctx context.Context, method, path string, query map[string]string, body json.RawMessage) (json.RawMessage, error) {
+// Do issues an arbitrary method on <path> with an optional query string, extra
+// per-call headers, and JSON body, and returns the raw JSON body. Path
+// placeholders are already filled by the caller; query carries the query-located
+// params, headers the header-located params, body the body-located + residual
+// fields for a body verb. Empty-valued query/header keys are dropped; an empty
+// body sends no body (no Content-Type). The path is used verbatim — a raw
+// path param (URL-in-path) reaches the backend unescaped.
+func (c *Client) Do(ctx context.Context, method, path string, query, headers map[string]string, body json.RawMessage) (json.RawMessage, error) {
 	u := c.baseURL + path
 	if len(query) > 0 {
 		q := url.Values{}
@@ -162,6 +165,11 @@ func (c *Client) Do(ctx context.Context, method, path string, query map[string]s
 	}
 	if bodyBytes != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range headers {
+		if v != "" {
+			req.Header.Set(k, v)
+		}
 	}
 {{- if .Managed}}
 	c.applySig(req, bodyBytes)
@@ -203,5 +211,18 @@ func (c *Client) do(req *http.Request) (json.RawMessage, error) {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return json.RawMessage(`{}`), nil
 	}
-	return json.RawMessage(body), nil
+	if json.Valid(body) {
+		return json.RawMessage(body), nil
+	}
+	// A 2xx body that isn't JSON (e.g. text/markdown, HTML, plain text) would be
+	// an invalid IPC reply. Wrap it into a valid JSON envelope so the agent gets
+	// the content plus the backend's declared Content-Type intact.
+	wrapped, err := json.Marshal(struct {
+		ContentType string `json:"content_type"`
+		Content     string `json:"content"`
+	}{ContentType: resp.Header.Get("Content-Type"), Content: string(body)})
+	if err != nil {
+		return nil, fmt.Errorf("backend: wrap non-JSON body: %w", err)
+	}
+	return json.RawMessage(wrapped), nil
 }

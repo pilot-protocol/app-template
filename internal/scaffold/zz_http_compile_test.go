@@ -74,10 +74,10 @@ func TestGeneratedHTTPPathParamProjectCompiles(t *testing.T) {
 		t.Fatalf("read main.go: %v", err)
 	}
 	for _, want := range []string{
-		`forward(c, "GET", "/v1/things/{id}", []string{`,
-		`forward(c, "PATCH", "/v1/things/{id}", []string{`,
-		`forward(c, "DELETE", "/v1/things/{id}", []string{`,
-		`forward(c, "GET", "/v1/things/{id}/items/{item_id}", []string{`,
+		`method: "GET", pathTmpl: "/v1/things/{id}"`,
+		`method: "PATCH", pathTmpl: "/v1/things/{id}"`,
+		`method: "DELETE", pathTmpl: "/v1/things/{id}"`,
+		`method: "GET", pathTmpl: "/v1/things/{id}/items/{item_id}"`,
 	} {
 		if !strings.Contains(string(mainSrc), want) {
 			t.Errorf("generated main.go missing dispatcher wiring: %s", want)
