@@ -1,0 +1,2 @@
+[{"label":"Fetch example.com","note":"GET base/<url> → markdown","vanilla":["-s","https://plainweb-hu4fob755a-uc.a.run.app/https://example.com"],"method":"plainweb.fetch","payload":{"url":"https://example.com"}},
+ {"label":"Fetch a docs page","note":"scheme-less host","vanilla":["-s","https://plainweb-hu4fob755a-uc.a.run.app/example.com"],"method":"plainweb.fetch","payload":{"url":"example.com"}}]
