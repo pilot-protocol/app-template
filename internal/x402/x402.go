@@ -105,7 +105,12 @@ func (c Config) Select(ch *Challenge) (*Accepts, error) {
 		if !c.networkOK(a) {
 			continue
 		}
-		if c.Asset != "" && a.Asset != "" && !strings.EqualFold(c.Asset, a.Asset) {
+		// When a cap asset is configured, the option MUST declare a matching
+		// asset. An option with an empty/unknown asset is skipped (fail closed):
+		// its price string can't be trusted to be denominated in the capped
+		// asset, so honoring it would defeat MaxAtomic. Mirrors networkOK, which
+		// also fails closed.
+		if c.Asset != "" && !strings.EqualFold(c.Asset, a.Asset) {
 			continue
 		}
 		sawEligible = true

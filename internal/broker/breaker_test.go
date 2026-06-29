@@ -39,6 +39,42 @@ func TestBreaker_OpensAfterThresholdAndRecovers(t *testing.T) {
 	}
 }
 
+// TestBreaker_HalfOpenAllowsExactlyOneTrial guards the half-open state: after
+// the cooldown only ONE probe may pass; concurrent callers stay denied until the
+// probe's outcome is recorded, so a flapping upstream isn't hit by a herd.
+func TestBreaker_HalfOpenAllowsExactlyOneTrial(t *testing.T) {
+	clock := time.Unix(1_800_000_000, 0)
+	b := &Breaker{Threshold: 1, Cooldown: time.Minute, Now: func() time.Time { return clock }}
+
+	b.Record(false) // opens immediately (threshold 1)
+	if b.Allow() {
+		t.Fatal("breaker should be open")
+	}
+
+	clock = clock.Add(2 * time.Minute) // cooldown elapsed
+	if !b.Allow() {
+		t.Fatal("first post-cooldown call should be the half-open probe")
+	}
+	if b.Allow() {
+		t.Fatal("second concurrent call must be denied while the probe is in flight")
+	}
+
+	// The probe fails → re-open for another full cooldown (no immediate retry).
+	b.Record(false)
+	if b.Allow() {
+		t.Fatal("a failed probe must re-open the breaker")
+	}
+	clock = clock.Add(2 * time.Minute)
+	if !b.Allow() {
+		t.Fatal("a fresh probe is allowed after the next cooldown")
+	}
+	// This probe succeeds → fully closed.
+	b.Record(true)
+	if !b.Allow() || !b.Allow() {
+		t.Fatal("breaker should be fully closed after a successful probe")
+	}
+}
+
 func TestBreaker_DisabledWhenThresholdZero(t *testing.T) {
 	var b *Breaker // nil breaker must be safe
 	if !b.Allow() {

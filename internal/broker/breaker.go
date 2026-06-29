@@ -20,6 +20,7 @@ type Breaker struct {
 	failures int
 	openedAt time.Time
 	open     bool
+	probing  bool // a single half-open trial call is in flight
 }
 
 func (b *Breaker) now() time.Time {
@@ -40,8 +41,12 @@ func (b *Breaker) Allow() bool {
 	if !b.open {
 		return true
 	}
-	if b.now().Sub(b.openedAt) >= b.Cooldown {
-		return true // half-open: allow one trial
+	// Half-open: once the cooldown elapses permit exactly ONE trial call (the
+	// probe). Concurrent callers are still denied until Record reports the
+	// probe's outcome, so a flapping upstream isn't hit by a thundering herd.
+	if b.now().Sub(b.openedAt) >= b.Cooldown && !b.probing {
+		b.probing = true
+		return true
 	}
 	return false
 }
@@ -56,9 +61,17 @@ func (b *Breaker) Record(success bool) {
 	if success {
 		b.failures = 0
 		b.open = false
+		b.probing = false
 		return
 	}
 	b.failures++
+	if b.open {
+		// A half-open probe failed — stay open and restart the cooldown so the
+		// next probe waits a full Cooldown again.
+		b.probing = false
+		b.openedAt = b.now()
+		return
+	}
 	if b.failures >= b.Threshold {
 		b.open = true
 		b.openedAt = b.now()

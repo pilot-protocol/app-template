@@ -1,5 +1,8 @@
 # pilot-app — publish an existing API or CLI on the Pilot app store
 
+[![coverage](https://img.shields.io/badge/coverage-79%25-brightgreen)](#testing)
+[![go](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](go.mod)
+
 `pilot-app` turns a declarative `pilot.app.yaml` into a complete, signed,
 publishable Pilot Protocol app-store adapter — the same shape as the
 hand-written reference app `io.pilot.cosift`, generated in seconds.
@@ -232,3 +235,26 @@ to build + register a managed app, runs the actual generated adapter binary
 (signing with a daemon-format `identity.json`), and asserts the call flows
 through the broker to the partner, is metered, and is rate-limited — plus a
 multi-user broker e2e ([`scripts/e2e-broker.sh`](scripts/e2e-broker.sh)).
+
+## Testing
+
+```bash
+make test          # unit tests
+make race          # race detector + coverage profile (writes cover.out)
+make cover         # total statement coverage (one line)
+make e2e           # real-process broker end-to-end
+make e2e-managed   # full submit → build → register → broker → meter e2e
+```
+
+The badge above reports total statement coverage across the `internal/` core
+packages. CI hard-gates the security-critical and high-traffic packages so
+coverage can't silently regress:
+
+| package | role | floor |
+|---|---|---|
+| `internal/broker` | holds master keys, verifies caller identity | 78% |
+| `internal/catalogue` | the objective review gate (`VerifyEntry`) | 80% |
+| `internal/publish` | build → sign → submit pipeline | 72% |
+| `internal/scaffold` | `pilot.app.yaml` → adapter generator | 68% |
+
+Reproduce the number behind the badge with `make cover`.
