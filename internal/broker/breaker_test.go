@@ -68,9 +68,10 @@ func TestBreaker_HalfOpenAllowsExactlyOneTrial(t *testing.T) {
 	if !b.Allow() {
 		t.Fatal("a fresh probe is allowed after the next cooldown")
 	}
-	// This probe succeeds → fully closed.
+	// This probe succeeds → fully closed: every subsequent call is allowed.
 	b.Record(true)
-	if !b.Allow() || !b.Allow() {
+	first, second := b.Allow(), b.Allow()
+	if !first || !second {
 		t.Fatal("breaker should be fully closed after a successful probe")
 	}
 }

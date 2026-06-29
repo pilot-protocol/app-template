@@ -208,14 +208,12 @@ func TestVerifyEntry_RejectsBinaryShaMismatch(t *testing.T) {
 }
 
 func TestVerifyEntry_RejectsForgedSignature(t *testing.T) {
-	raw, m := buildBundle(t, bundleOpts{mutate: func(m *manifest.Manifest) {
-		// nothing here; we corrupt the signature post-build below
-	}})
+	_, m := buildBundle(t, bundleOpts{})
 	// Re-pack with a corrupted signature.
 	m.Store.Signature = base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
 	mfRaw, _ := json.Marshal(m)
 	bin := []byte("\x7fELF fake-binary-bytes-for-example-app")
-	raw = tarGz(t, map[string][]byte{"manifest.json": mfRaw, "bin/example-app": bin})
+	raw := tarGz(t, map[string][]byte{"manifest.json": mfRaw, "bin/example-app": bin})
 	e := entryFor(t, raw, m)
 
 	r := VerifyEntry(e, nil)
