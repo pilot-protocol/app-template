@@ -51,7 +51,14 @@ set install order + args              fold into the bundle tarball          fetc
 s3://pilot-artifacts-{dev,prod}/<app-id>/<app-version>/<os>-<arch>/<filename>
   io.pilot.smolvm/1.2.0/darwin-arm64/smolvm-1.2.0-darwin-arm64.tar.gz
 ```
-Write-once (a new app version = a new prefix). Buckets `pilot-artifacts-dev` and
+Write-once (a new app version = a new prefix). **Single source of truth:** in
+`pilot.app.yaml` an asset gives only `file:` (the filename) and the URL is
+*derived* as `<artifact_base>/<id>/<app_version>/<os>-<arch>/<file>`, so the
+artifact path's version always tracks `app_version` — bump it once (or
+`pilot-app update --bump`) and every asset URL follows. An explicit registry
+`url:` whose version segment disagrees with `app_version` is rejected by the gate
+(`scaffold.Validate` and `catalogue.VerifyEntry`, which reads install.json). See
+[`UPDATING.md`](UPDATING.md). Buckets `pilot-artifacts-dev` and
 `pilot-artifacts-prod` exist on the Pilot R2 account. **Public read** is served by
 an r2.dev managed URL (dev: `https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev`);
 production should attach a custom domain (e.g. `artifacts.pilotprotocol.network`).
