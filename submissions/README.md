@@ -54,3 +54,18 @@ hand-built**. Field-by-field required-vs-optional reference:
    ```
 
 See `../docs/APP-PUBLISHING-SPEC.md` for the full standard flow.
+
+## Updating an already-published app
+
+Shipping a new version is the same PR flow, with one command to bump the single
+source of truth:
+
+```
+pilot-app update -c pilot.app.yaml --bump patch -o ./my-app
+cd ./my-app && make package && pilot-app submit -C . --prepare <fork>
+# commit + PR as above
+```
+
+The required `verify-update` check enforces that the version increased and that
+the bundle is signed by the **same publisher key** that owns the app — so only you
+can update your app, with no stored secret. Full guide: [`../docs/UPDATING.md`](../docs/UPDATING.md).

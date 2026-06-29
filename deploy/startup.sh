@@ -31,6 +31,17 @@ ALLOWED_ORIGINS="$(meta allowed-origins)"       # empty -> server defaults to th
 SENDGRID_API_KEY="$(meta sendgrid-api-key)"     # empty -> emails fall back to dev log (no real send)
 MAIL_FROM="$(meta mail-from)"                    # empty -> apps@pilotprotocol.network
 MAIL_REGION="$(meta mail-region)"                # "eu" for EU data residency
+# Key rotation (POST /admin/rotate-key): a token with write to the platform repo
+# + the hex catalogue signing key. Empty -> the admin rotation endpoint returns 503.
+CATALOG_PUBLISH_TOKEN="$(meta catalog-publish-token)"
+CATALOG_SIGN_KEY="$(meta catalog-sign-key)"
+# Artifact registry (POST /api/artifact/presign): R2 S3 creds + public base.
+# Empty -> the presign endpoint returns 503 (uploads disabled).
+R2_ACCOUNT_ID="$(meta r2-account-id)"
+R2_BUCKET="$(meta r2-bucket)"
+R2_ACCESS_KEY_ID="$(meta r2-access-key-id)"
+R2_SECRET_ACCESS_KEY="$(meta r2-secret-access-key)"
+R2_PUBLIC_BASE="$(meta r2-public-base)"
 
 id -u pilot >/dev/null 2>&1 || useradd -r -m -d /opt/pilot pilot
 install -d -o pilot -g pilot /opt/pilot
@@ -72,6 +83,15 @@ Environment=MAIL_FROM=${MAIL_FROM}
 Environment=MAIL_REGION=${MAIL_REGION}
 # Managed-app approval writes this registry; the broker (below) reads it.
 Environment=BROKER_REGISTRY=/opt/pilot/registry/apps.json
+# Key rotation (admin) — write to the platform repo + re-sign the catalogue.
+Environment=CATALOG_PUBLISH_TOKEN=${CATALOG_PUBLISH_TOKEN}
+Environment=CATALOG_SIGN_KEY=${CATALOG_SIGN_KEY}
+# Artifact registry presign uploads (R2 S3-compatible).
+Environment=R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+Environment=R2_BUCKET=${R2_BUCKET}
+Environment=R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+Environment=R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+Environment=R2_PUBLIC_BASE=${R2_PUBLIC_BASE}
 WorkingDirectory=/opt/pilot
 ExecStart=/opt/pilot/publish-server -addr :80 -store /opt/pilot/store -key /opt/pilot/platform.key
 Restart=always

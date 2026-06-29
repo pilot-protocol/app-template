@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/pilot-protocol/app-template/internal/catalogue"
@@ -42,8 +43,12 @@ func main() {
 		cmdVerify(os.Args[2:])
 	case "verify-submission":
 		cmdVerifySubmission(os.Args[2:])
+	case "verify-update":
+		cmdVerifyUpdate(os.Args[2:])
 	case "submit":
 		cmdSubmit(os.Args[2:])
+	case "update":
+		cmdUpdate(os.Args[2:])
 	case "example":
 		fmt.Print(scaffold.ExampleSpec)
 	case "-h", "--help", "help":
@@ -63,6 +68,10 @@ Usage:
   pilot-app validate -c pilot.app.yaml            validate a spec, no output
   pilot-app verify   <bundle.tar.gz | catalogue.json>
                                                   run the catalogue review-gate checks (SPEC §7.1)
+  pilot-app update   -c pilot.app.yaml --bump patch|minor|major [-o <project-dir>]
+                                                  bump app_version (single source of truth) + re-scaffold
+  pilot-app verify-update <submissions/<id>/submission.json>
+                                                  enforce the update gate: same publisher key + higher version
   pilot-app submit   -C <project-dir> --prepare <app-template-fork>
                                                   write a submission PR payload (the single front door)
   pilot-app example                               print a starter pilot.app.yaml
@@ -122,6 +131,121 @@ func runGoModTidy(dir string) (string, error) {
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// cmdUpdate ships a new version of an existing app the easy way: it bumps
+// app_version — the SINGLE source of truth — in pilot.app.yaml, so every derived
+// artifact (asset URLs, install.json, the catalogue entry) tracks it
+// automatically; then, given -o, it RE-SCAFFOLDS the adapter project so any
+// changed entrypoints/methods/backend are regenerated. The publisher never edits
+// a version in two places. Re-sign with the SAME publisher key (key_file is
+// unchanged) via `make package`, then `submit --prepare`.
+func cmdUpdate(args []string) {
+	fs := flag.NewFlagSet("update", flag.ExitOnError)
+	cfgPath := fs.String("c", "pilot.app.yaml", "path to the spec file")
+	bump := fs.String("bump", "", "semver part to increment: patch | minor | major")
+	setV := fs.String("set-version", "", "set an explicit version (overrides --bump)")
+	outDir := fs.String("o", "", "re-scaffold the adapter project into this dir (--force) so entrypoint changes propagate")
+	_ = fs.Parse(args)
+
+	raw, err := os.ReadFile(*cfgPath)
+	if err != nil {
+		fatalf("read %s: %v", *cfgPath, err)
+	}
+	// Resolve the new version from the current one.
+	cur := loadAndCheck(*cfgPath)
+	var next string
+	switch {
+	case *setV != "":
+		next = *setV
+	case *bump != "":
+		next, err = bumpSemver(cur.AppVersion, *bump)
+		if err != nil {
+			fatalf("%v", err)
+		}
+	default:
+		fatalf("specify --bump patch|minor|major or --set-version x.y.z")
+	}
+	if !scaffold.IsSemver(next) {
+		fatalf("resulting version %q is not semver", next)
+	}
+
+	newRaw, ok := rewriteAppVersion(raw, next)
+	if !ok {
+		fatalf("could not find an `app_version:` line in %s to bump", *cfgPath)
+	}
+	if err := os.WriteFile(*cfgPath, newRaw, 0o644); err != nil {
+		fatalf("write %s: %v", *cfgPath, err)
+	}
+	fmt.Printf("bumped %s: app_version %s → %s\n", cur.ID, cur.AppVersion, next)
+
+	// Re-validate the edited spec (also re-derives asset URLs onto the new version).
+	updated := loadAndCheck(*cfgPath)
+
+	if *outDir != "" {
+		written, err := scaffold.Generate(updated, *outDir)
+		if err != nil {
+			fatalf("re-scaffold: %v", err)
+		}
+		fmt.Printf("re-scaffolded %s into %s (%d files) — entrypoint/spec changes regenerated\n", updated.ID, *outDir, len(written))
+		if out, err := runGoModTidy(*outDir); err != nil {
+			fmt.Printf("note: skipped `go mod tidy` (%v) — run it in %s before building.\n%s", err, *outDir, out)
+		}
+		fmt.Printf("\nnext:\n  cd %s\n  make package          # rebuild every platform, re-sign with your existing key\n  pilot-app submit -C . --prepare <app-template-fork>\n  # then in the fork: git add submissions && git commit && gh pr create\n", *outDir)
+	} else {
+		fmt.Printf("\nnext:\n  pilot-app init -c %s -o <project-dir> --force   # re-scaffold (or pass -o here)\n  cd <project-dir> && make package && pilot-app submit -C . --prepare <fork>\n", *cfgPath)
+	}
+	if updated.HasAssets() {
+		fmt.Printf("\nassets: this app ships native binaries. Upload the new v%s binaries to the\n  registry (pilot-app artifact upload — see docs/R2-ARTIFACT-REGISTRY.md) so the\n  derived URLs resolve. Their version path tracks app_version automatically.\n", next)
+	}
+}
+
+// bumpSemver increments the patch/minor/major part of a MAJOR.MINOR.PATCH version
+// (dropping any prerelease/build suffix), e.g. bump("1.2.3","minor") = "1.3.0".
+func bumpSemver(v, part string) (string, error) {
+	core := v
+	if i := strings.IndexAny(core, "-+"); i >= 0 {
+		core = core[:i]
+	}
+	ps := strings.Split(core, ".")
+	if len(ps) != 3 {
+		return "", fmt.Errorf("version %q is not MAJOR.MINOR.PATCH", v)
+	}
+	maj, mnr, pat := atoiOrZero(ps[0]), atoiOrZero(ps[1]), atoiOrZero(ps[2])
+	switch part {
+	case "major":
+		maj, mnr, pat = maj+1, 0, 0
+	case "minor":
+		mnr, pat = mnr+1, 0
+	case "patch":
+		pat++
+	default:
+		return "", fmt.Errorf("--bump must be patch, minor, or major (got %q)", part)
+	}
+	return fmt.Sprintf("%d.%d.%d", maj, mnr, pat), nil
+}
+
+func atoiOrZero(s string) int {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return n
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
+}
+
+// rewriteAppVersion replaces the value on the first top-level `app_version:` line,
+// preserving indentation, quoting style, and any trailing comment — a surgical
+// edit that keeps the rest of the YAML (comments included) intact.
+func rewriteAppVersion(raw []byte, next string) ([]byte, bool) {
+	re := regexp.MustCompile(`(?m)^(\s*app_version:\s*)("?)[^\s"#]+("?)(.*)$`)
+	if !re.Match(raw) {
+		return raw, false
+	}
+	out := re.ReplaceAll(raw, []byte("${1}${2}"+next+"${3}${4}"))
+	return out, true
 }
 
 func cmdValidate(args []string) {
@@ -255,6 +379,82 @@ func cmdVerifySubmission(args []string) {
 		os.Exit(1)
 	}
 	fmt.Printf("\nVERIFY OK — built + verified %d platform(s) from the submission spec.\n", len(b.Platforms))
+}
+
+// cmdVerifyUpdate enforces the update ownership + monotonicity gate for a
+// submission against the LIVE catalogue: if the app id already exists, the new
+// version must be strictly higher and (for the PR/pointer path, where the bundle
+// is pre-signed) the bundle's publisher key must equal the owning publisher pin.
+// A brand-new id passes (first publish). This is the CI gate that makes "an
+// update needs the same publishing key" enforceable without any stored secret —
+// the publisher proves ownership by signing with the key already pinned.
+//
+// It accepts a submission.json (pointer or rich) or a submissions/<id>/ dir.
+func cmdVerifyUpdate(args []string) {
+	fs := flag.NewFlagSet("verify-update", flag.ExitOnError)
+	_ = fs.Parse(args)
+	target := fs.Arg(0)
+	if target == "" {
+		fatalf("usage: pilot-app verify-update <submissions/<id>/submission.json | submissions/<id>/>")
+	}
+	subPath, subDir := target, filepath.Dir(target)
+	if fi, err := os.Stat(target); err == nil && fi.IsDir() {
+		subPath, subDir = filepath.Join(target, "submission.json"), target
+	}
+
+	raw, err := os.ReadFile(subPath)
+	if err != nil {
+		fatalf("read %s: %v", subPath, err)
+	}
+	// One decode covers both shapes: a pointer carries `bundle`; a rich submission
+	// carries backend/methods. Either way we need id + version, and for a pointer
+	// we additionally recover the signer pubkey from the built bundle's manifest.
+	var ptr struct {
+		ID      string `json:"id"`
+		Version string `json:"version"`
+		Bundle  string `json:"bundle"`
+	}
+	if err := json.Unmarshal(raw, &ptr); err != nil {
+		fatalf("parse %s: %v", subPath, err)
+	}
+	if ptr.ID == "" || ptr.Version == "" {
+		fatalf("submission %s is missing id/version", subPath)
+	}
+
+	newPublisher := ""
+	if ptr.Bundle != "" {
+		// Pointer path: the bundle is pre-built and publisher-signed — recover the
+		// signer from its manifest so we can enforce the same-key rule.
+		facts, err := catalogue.ReadBundleFacts(filepath.Join(subDir, ptr.Bundle))
+		if err != nil {
+			fatalf("read bundle facts for %s: %v", ptr.Bundle, err)
+		}
+		newPublisher = facts.Publisher
+		if facts.Version != ptr.Version {
+			fatalf("submission version %q != bundle manifest version %q", ptr.Version, facts.Version)
+		}
+	}
+
+	owners, err := catalogue.FetchOwners(catalogue.CatalogueURL())
+	if err != nil {
+		fatalf("update gate: %v", err)
+	}
+	r := catalogue.CheckUpdate(owners, ptr.ID, ptr.Version, newPublisher)
+
+	fmt.Printf("update gate for %s v%s:\n", ptr.ID, ptr.Version)
+	allOK := true
+	for _, c := range r.Checks {
+		mark := "✓"
+		if !c.OK {
+			mark, allOK = "✗", false
+		}
+		fmt.Printf("  %s %-34s %s\n", mark, c.Name, c.Msg)
+	}
+	if !allOK {
+		fmt.Fprintln(os.Stderr, "\nUPDATE GATE FAILED — an update must increase the version and be signed by the original publisher key.")
+		os.Exit(1)
+	}
+	fmt.Println("\nUPDATE GATE OK.")
 }
 
 // checkStaging inspects one built platform tarball and confirms the native

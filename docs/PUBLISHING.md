@@ -245,7 +245,9 @@ alongside from your `listing:` block.
 ## Quick checklist
 
 - [ ] `id` is `io.pilot.<name>` (lowercase, reverse-DNS).
-- [ ] `version` is semver; bumped for any new binary.
+- [ ] `version` is semver; bumped for any new binary. (Shipping a **new version**
+      of an already-published app? See [`UPDATING.md`](UPDATING.md) — one command,
+      same key, same PR flow.)
 - [ ] `description` + `email` set.
 - [ ] `backend.type` chosen; `base_url` (http) **or** `command` (cli) provided.
 - [ ] ≥1 `method`, each with `name` (namespace-prefixed), `description`, `latency`,
