@@ -55,10 +55,10 @@ Write-once (a new app version = a new prefix). **Single source of truth:** in
 `pilot.app.yaml` an asset gives only `file:` (the filename) and the URL is
 *derived* as `<artifact_base>/<id>/<app_version>/<os>-<arch>/<file>`, so the
 artifact path's version always tracks `app_version` — bump it once (or
-`pilot-app update --bump`) and every asset URL follows. An explicit registry
-`url:` whose version segment disagrees with `app_version` is rejected by the gate
-(`scaffold.Validate` and `catalogue.VerifyEntry`, which reads install.json). See
-[`UPDATING.md`](UPDATING.md). Buckets `pilot-artifacts-dev` and
+`pilot-app update --bump`) and every asset URL follows. An explicit `url:` is an
+escape hatch — a native tool may carry its own version (e.g. an adapter at `0.1.0`
+delivering a CLI at `0.10.0`) — accepted as-is, with the `sha256` as the integrity
+anchor. See [`UPDATING.md`](UPDATING.md). Buckets `pilot-artifacts-dev` and
 `pilot-artifacts-prod` exist on the Pilot R2 account. **Public read** is served by
 an r2.dev managed URL (dev: `https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev`);
 production should attach a custom domain (e.g. `artifacts.pilotprotocol.network`).

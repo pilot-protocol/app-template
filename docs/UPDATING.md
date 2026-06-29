@@ -61,7 +61,9 @@ requires, with clear errors if not:
    by any other key is rejected:
    > `io.pilot.foo is owned by ed25519:AAA…; this bundle is signed by ed25519:BBB…
    > — updates must be signed by the original publisher key`
-3. **No artifact drift.** Every registry asset URL embeds `app_version`.
+3. **No artifact drift.** If you use `file:`, asset URLs are *derived* from
+   `app_version`, so they can't lag a version bump. (An explicit `url:` is an
+   escape hatch — e.g. a native tool with its own version — pinned by sha256.)
 
 There is **no password or stored secret** for this. Ownership is proven simply by
 signing the bundle with the key whose public half is already pinned in the

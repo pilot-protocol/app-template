@@ -327,17 +327,10 @@ func (s Submission) validateArtifacts() []string {
 		case strings.TrimSpace(a.URL) == "" && strings.TrimSpace(a.File) == "":
 			e = append(e, fmt.Sprintf("Artifact %d: provide file (URL derived from version) or an explicit https url", i+1))
 		case strings.TrimSpace(a.URL) == "":
-			// file-only: URL is derived from the app version at build time; nothing to check here.
+			// file-only: URL is derived from the app version at build time.
 		default:
 			if u, err := url.Parse(strings.TrimSpace(a.URL)); err != nil || u.Scheme != "https" || u.Host == "" {
 				e = append(e, fmt.Sprintf("Artifact %d: url must be an absolute https URL (the R2 upload location)", i+1))
-			} else if scaffold.IsRegistryURL(a.URL) {
-				// Single-source-of-truth gate: a registry URL's version segment must
-				// equal the submission version, so an artifact can't drift from the
-				// adapter version.
-				if v := scaffold.RegistryURLVersion(a.URL, s.ID); v != "" && v != s.Version {
-					e = append(e, fmt.Sprintf("Artifact %d: url version %q != version %q — bump version (single source of truth; prefer file: to derive the URL)", i+1, v, s.Version))
-				}
 			}
 		}
 		if !subSHA256.MatchString(a.SHA256) {

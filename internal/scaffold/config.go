@@ -146,37 +146,6 @@ func (c *Config) DerivedAssetURL(file, os, arch string) string {
 		strings.TrimRight(c.ArtifactBase, "/"), c.ID, c.AppVersion, os, arch, file)
 }
 
-// IsRegistryURL reports whether u points at the Pilot artifact registry (the
-// custom domain or any r2.dev managed bucket). Only registry URLs follow the
-// versioned <id>/<version>/<os>-<arch>/ layout, so only they are drift-checked
-// against app_version; a publisher's own CDN may use any scheme it likes.
-func IsRegistryURL(u string) bool {
-	p, err := url.Parse(u)
-	if err != nil {
-		return false
-	}
-	h := p.Hostname()
-	return h == "artifacts.pilotprotocol.network" || strings.HasSuffix(h, ".r2.dev")
-}
-
-// RegistryURLVersion extracts the <version> path segment from a registry URL
-// laid out as …/<id>/<version>/<os>-<arch>/<file>. The version is the segment
-// immediately after the app id. Returns "" if the id isn't found in the path.
-// Exported for the submission layer's pre-build drift check.
-func RegistryURLVersion(rawURL, id string) string {
-	p, err := url.Parse(rawURL)
-	if err != nil {
-		return ""
-	}
-	segs := strings.Split(strings.Trim(p.Path, "/"), "/")
-	for i, s := range segs {
-		if s == id && i+1 < len(segs) {
-			return segs[i+1]
-		}
-	}
-	return ""
-}
-
 // Listing is the store-page metadata that drives the catalogue v2 rich view
 // (display_name, vendor, categories, …) and the per-app metadata.json. Optional
 // but strongly recommended — without it a published app renders a bare listing.
@@ -781,14 +750,6 @@ func (c *Config) validateAssets() []error {
 		}
 		if u, err := url.Parse(a.URL); err != nil || u.Scheme != "https" || u.Host == "" {
 			errs = append(errs, fmt.Errorf("assets[%d].url %q must be an absolute https URL", i, a.URL))
-		} else if IsRegistryURL(a.URL) {
-			// Single-source-of-truth gate: a registry URL's version segment MUST
-			// equal app_version, so an artifact can never drift from the adapter
-			// version. Derived URLs satisfy this by construction; this catches a
-			// hand-written url: that points at a stale version's prefix.
-			if v := RegistryURLVersion(a.URL, c.ID); v != "" && v != c.AppVersion {
-				errs = append(errs, fmt.Errorf("assets[%d].url version %q != app_version %q — bump app_version (it is the single source of truth; prefer file: to derive the URL)", i, v, c.AppVersion))
-			}
 		}
 		if !sha256Pattern.MatchString(a.SHA256) {
 			errs = append(errs, fmt.Errorf("assets[%d].sha256 %q must be 64 lowercase hex chars", i, a.SHA256))

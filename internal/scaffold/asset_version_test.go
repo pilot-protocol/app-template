@@ -25,59 +25,25 @@ func TestResolveDerivesAssetURLFromVersion(t *testing.T) {
 	}
 }
 
-// An explicit registry URL whose version segment != app_version is rejected.
-func TestValidateRejectsAssetVersionDrift(t *testing.T) {
+// An explicit url: is an escape hatch — a native tool may carry its own version
+// (e.g. an adapter at 0.1.0 delivering a CLI at 0.10.0). It is accepted as-is; the
+// sha256 is the integrity anchor. Only file: opts into version derivation.
+func TestValidateAllowsExplicitURLWithOwnVersion(t *testing.T) {
 	c := &Config{
 		ID:          "io.pilot.toolx",
-		AppVersion:  "1.2.3",
+		AppVersion:  "0.1.0",
 		Description: "test app",
 		Backend:     Backend{Type: "cli", Command: []string{"toolx"}},
 		Methods:     []Method{{Name: "toolx.run", CLI: &CLIRoute{Passthrough: true}}},
 		Assets: []Asset{
-			// stale version 1.2.2 in the path
+			// the delivered tool's own version (0.10.0) differs from the adapter's
 			{OS: "linux", Arch: "amd64", ExecPath: "bin/toolx", SHA256: hex64(), Order: 1,
-				URL: "https://artifacts.pilotprotocol.network/io.pilot.toolx/1.2.2/linux-amd64/toolx"},
-		},
-	}
-	c.Resolve()
-	errs := c.Validate()
-	if !hasErrContaining(errs, "!= app_version") {
-		t.Fatalf("expected an asset-version-drift error, got %v", errs)
-	}
-}
-
-// A non-registry host is not version-checked (publisher's own CDN may use any layout).
-func TestValidateAllowsNonRegistryURL(t *testing.T) {
-	c := &Config{
-		ID:          "io.pilot.toolx",
-		AppVersion:  "1.2.3",
-		Description: "test app",
-		Backend:     Backend{Type: "cli", Command: []string{"toolx"}},
-		Methods:     []Method{{Name: "toolx.run", CLI: &CLIRoute{Passthrough: true}}},
-		Assets: []Asset{
-			{OS: "linux", Arch: "amd64", ExecPath: "bin/toolx", SHA256: hex64(), Order: 1,
-				URL: "https://downloads.example.com/anything/toolx"},
+				URL: "https://pub-abc.r2.dev/io.pilot.toolx/0.10.0/linux-amd64/toolx-0.10.0"},
 		},
 	}
 	c.Resolve()
 	if errs := c.Validate(); len(errs) != 0 {
-		t.Fatalf("non-registry URL should validate, got %v", errs)
-	}
-}
-
-func TestRegistryURLVersion(t *testing.T) {
-	u := "https://artifacts.pilotprotocol.network/io.pilot.toolx/9.9.9/darwin-arm64/toolx.tar.gz"
-	if v := RegistryURLVersion(u, "io.pilot.toolx"); v != "9.9.9" {
-		t.Fatalf("version = %q, want 9.9.9", v)
-	}
-	if !IsRegistryURL(u) {
-		t.Fatal("artifacts.pilotprotocol.network should be a registry host")
-	}
-	if !IsRegistryURL("https://pub-abc.r2.dev/x/1.0.0/linux-amd64/x") {
-		t.Fatal("*.r2.dev should be a registry host")
-	}
-	if IsRegistryURL("https://downloads.example.com/x") {
-		t.Fatal("example.com should not be a registry host")
+		t.Fatalf("explicit url with its own version should validate, got %v", errs)
 	}
 }
 
