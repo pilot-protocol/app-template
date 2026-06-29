@@ -1,0 +1,10 @@
+{
+  "commands": [
+    {"label": "psql --version", "vanilla": ["psql", "--version"], "method": "postgres.version", "payload": {}},
+    {"label": "psql --help", "vanilla": ["psql", "--help"], "method": "postgres.psql_help", "payload": {}},
+    {"label": "initdb --help", "vanilla": ["initdb", "--help"], "method": "postgres.exec", "payload": {"args": ["initdb", "--help"]}},
+    {"label": "pg_ctl --help", "vanilla": ["pg_ctl", "--help"], "method": "postgres.exec", "payload": {"args": ["pg_ctl", "--help"]}},
+    {"label": "createdb --help", "vanilla": ["createdb", "--help"], "method": "postgres.exec", "payload": {"args": ["createdb", "--help"]}},
+    {"label": "pg_dump --help", "vanilla": ["pg_dump", "--help"], "method": "postgres.exec", "payload": {"args": ["pg_dump", "--help"]}}
+  ]
+}
