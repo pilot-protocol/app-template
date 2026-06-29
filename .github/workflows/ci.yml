@@ -49,8 +49,12 @@ jobs:
           # The broker holds the master keys and verifies caller identity — gate it hard.
           gate broker 78
           gate scaffold 68
-          # Report the rest (pre-existing; being raised in follow-ups).
-          for p in publish catalogue x402; do
+          # The catalogue gate (VerifyEntry) is the objective review gate, and
+          # publish is the build→sign→submit pipeline — both gated now.
+          gate catalogue 80
+          gate publish 70
+          # Report the rest.
+          for p in x402; do
             echo "internal/$p: $(go test -cover ./internal/$p/ | grep -oE 'coverage: [0-9.]+%')"
           done
 

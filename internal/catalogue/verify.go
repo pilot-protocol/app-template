@@ -21,6 +21,14 @@ import (
 	"github.com/pilot-protocol/app-store/pkg/manifest"
 )
 
+// Bundle-extraction caps. A real adapter bundle is a few files totaling tens of
+// MB; these bounds protect the review gate from a crafted/zip-bomb tarball.
+const (
+	maxBundleEntries    = 64
+	maxBundleFileBytes  = 256 << 20 // 256 MiB per file
+	maxBundleTotalBytes = 512 << 20 // 512 MiB total decompressed
+)
+
 // Catalogue is the top-level index schema (catalogue/catalogue.json).
 type Catalogue struct {
 	Version   int     `json:"version"`
@@ -277,6 +285,8 @@ func extractBundle(targz []byte) (mfRaw, binBytes []byte, err error) {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	files := map[string][]byte{}
+	var total int64
+	entries := 0
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -288,9 +298,21 @@ func extractBundle(targz []byte) (mfRaw, binBytes []byte, err error) {
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		b, err := io.ReadAll(io.LimitReader(tr, 256<<20))
+		// Bound decompression: a real adapter bundle is a handful of files
+		// (manifest.json, bin/<binary>, optional install.json/install.sh). Cap
+		// entry count and total decompressed size so a crafted/zip-bomb bundle
+		// can't exhaust the review gate's memory.
+		entries++
+		if entries > maxBundleEntries {
+			return nil, nil, fmt.Errorf("bundle has too many files (> %d)", maxBundleEntries)
+		}
+		b, err := io.ReadAll(io.LimitReader(tr, maxBundleFileBytes))
 		if err != nil {
 			return nil, nil, err
+		}
+		total += int64(len(b))
+		if total > maxBundleTotalBytes {
+			return nil, nil, fmt.Errorf("bundle decompressed size exceeds %d bytes", maxBundleTotalBytes)
 		}
 		files[path.Clean(strings.TrimPrefix(hdr.Name, "./"))] = b
 	}
@@ -336,14 +358,15 @@ func errString(err error) string {
 	return err.Error()
 }
 
-// compareSemver returns -1/0/1 comparing MAJOR.MINOR.PATCH (prerelease ignored
-// beyond presence). Good enough for the downgrade guard; the supervisor has the
-// authoritative comparator.
+// compareSemver returns -1/0/1 comparing MAJOR.MINOR.PATCH plus prerelease
+// precedence per semver §11: at equal numeric versions, a version WITH a
+// prerelease ranks below one without (1.0.0-rc1 < 1.0.0), so the downgrade
+// guard rejects republishing a prerelease over a released build.
 func compareSemver(a, b string) int {
-	an := strings.SplitN(a, "-", 2)[0]
-	bn := strings.SplitN(b, "-", 2)[0]
-	ap := strings.Split(an, ".")
-	bp := strings.Split(bn, ".")
+	aParts := strings.SplitN(a, "-", 2)
+	bParts := strings.SplitN(b, "-", 2)
+	ap := strings.Split(aParts[0], ".")
+	bp := strings.Split(bParts[0], ".")
 	for i := 0; i < 3; i++ {
 		av, bv := atoi(get(ap, i)), atoi(get(bp, i))
 		if av != bv {
@@ -353,7 +376,74 @@ func compareSemver(a, b string) int {
 			return 1
 		}
 	}
+	// Numeric versions equal — apply prerelease precedence.
+	aPre, bPre := len(aParts) == 2, len(bParts) == 2
+	switch {
+	case !aPre && !bPre:
+		return 0
+	case aPre && !bPre:
+		return -1 // a is a prerelease of the same version → lower
+	case !aPre && bPre:
+		return 1
+	default:
+		return comparePrerelease(aParts[1], bParts[1])
+	}
+}
+
+// comparePrerelease compares two prerelease strings per semver §11: identifiers
+// are compared dot-by-dot; numeric identifiers compare numerically and rank
+// below alphanumeric ones; a smaller set of identifiers ranks lower when all
+// preceding identifiers are equal.
+func comparePrerelease(a, b string) int {
+	ai := strings.Split(a, ".")
+	bi := strings.Split(b, ".")
+	for i := 0; i < len(ai) || i < len(bi); i++ {
+		if i >= len(ai) {
+			return -1
+		}
+		if i >= len(bi) {
+			return 1
+		}
+		x, y := ai[i], bi[i]
+		xn, xNum := numericIdent(x)
+		yn, yNum := numericIdent(y)
+		switch {
+		case xNum && yNum:
+			if xn != yn {
+				if xn < yn {
+					return -1
+				}
+				return 1
+			}
+		case xNum && !yNum:
+			return -1 // numeric ranks below alphanumeric
+		case !xNum && yNum:
+			return 1
+		default:
+			if x != y {
+				if x < y {
+					return -1
+				}
+				return 1
+			}
+		}
+	}
 	return 0
+}
+
+// numericIdent reports whether s is an all-digit identifier and its value.
+func numericIdent(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, true
 }
 
 func get(s []string, i int) string {

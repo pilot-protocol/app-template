@@ -17,6 +17,27 @@ const humworkChallenge = `{"x402Version":1,"accepts":[{"scheme":"exact","network
 
 func usdc(n int64) *big.Int { return big.NewInt(n) }
 
+// TestSelect_EmptyAssetFailsClosed is a regression guard: an option that omits
+// the asset must NOT satisfy an asset-capped config — its price can't be trusted
+// to be denominated in the capped asset, so honoring it would defeat MaxAtomic.
+func TestSelect_EmptyAssetFailsClosed(t *testing.T) {
+	ch := &Challenge{Version: 1, Accepts: []Accepts{
+		{NetworkName: "base", Asset: "", PayTo: "0xabc", MaxAmountRequired: "1"},
+	}}
+
+	// Asset configured → the empty-asset option is ineligible (fail closed).
+	capped := Config{Networks: []string{"base"}, Asset: "USDC", MaxAtomic: usdc(10_000_000)}
+	if _, err := capped.Select(ch); !errors.Is(err, ErrNoEligible) {
+		t.Fatalf("empty-asset option must be ineligible under an asset cap, got %v", err)
+	}
+
+	// No asset configured → asset filter is off, so the option is selectable.
+	anyAsset := Config{Networks: []string{"base"}, MaxAtomic: usdc(10_000_000)}
+	if opt, err := anyAsset.Select(ch); err != nil || opt == nil {
+		t.Fatalf("with no asset configured the option should select, got %v", err)
+	}
+}
+
 type mockPayer struct {
 	calls int32
 	got   Accepts
