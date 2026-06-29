@@ -125,14 +125,20 @@ listing:
 
 # --- native delivery: ship the binary from the Pilot R2 artifact registry ---
 # For a cli app whose binary is NOT already on the host, list the per-OS/arch
-# artifacts you uploaded in the publish form's Artifacts step. At install the
-# adapter fetches the asset matching the host, verifies its sha256, stages it
-# under $APP, runs any install `args` (in `order`), and execs the staged path.
-# See docs/R2-ARTIFACT-REGISTRY.md.
+# artifacts. At install the adapter fetches the asset matching the host, verifies
+# its sha256, stages it under $APP, runs any install `args` (in `order`), and
+# execs the staged path. See docs/R2-ARTIFACT-REGISTRY.md.
+#
+# SINGLE SOURCE OF TRUTH: give `file:` (the filename) and the URL is DERIVED as
+#   <artifact_base>/<id>/<app_version>/<os>-<arch>/<file>
+# so the artifact path's version always tracks app_version — bump app_version in
+# ONE place (or `pilot-app update --bump`) and every asset URL follows. Pass an
+# explicit `url:` only for a non-registry host; a registry url whose version
+# segment differs from app_version is rejected by the gate.
+# artifact_base: https://artifacts.pilotprotocol.network   # override (e.g. the dev r2.dev bucket)
 # assets:
-#   # a single self-contained binary:
-#   - {os: linux,  arch: amd64, url: "https://artifacts.pilotprotocol.network/io.pilot.weather/0.1.0/linux-amd64/weathercli",
-#      sha256: "<64-hex>", exec_path: bin/weathercli, order: 1}
+#   # a single self-contained binary (URL derived from app_version):
+#   - {os: linux,  arch: amd64, file: weathercli, sha256: "<64-hex>", exec_path: bin/weathercli, order: 1}
 #   # an archive that unpacks to a wrapper + libs, with a one-time setup step:
-#   - {os: darwin, arch: arm64, url: "https://artifacts.pilotprotocol.network/io.pilot.weather/0.1.0/darwin-arm64/weathercli.tar.gz",
-#      sha256: "<64-hex>", unpack: tar.gz, exec_path: weathercli-0.1.0-darwin-arm64/weathercli, order: 1, args: ["--accept-license"]}
+#   - {os: darwin, arch: arm64, file: weathercli.tar.gz, sha256: "<64-hex>",
+#      unpack: tar.gz, exec_path: weathercli-0.1.0-darwin-arm64/weathercli, order: 1, args: ["--accept-license"]}

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path"
 	"strings"
@@ -122,6 +123,15 @@ func VerifyEntry(e Entry, prev *Entry) Result {
 	r.check("catalogue.id == manifest.id", e.ID == m.ID, e.ID, fmt.Sprintf("catalogue %q != manifest %q", e.ID, m.ID))
 	r.check("catalogue.version == manifest.app_version", e.Version == m.AppVersion,
 		e.Version, fmt.Sprintf("catalogue %q != manifest %q", e.Version, m.AppVersion))
+
+	// Single source of truth: every registry-hosted asset's URL must embed the
+	// app_version, so the delivered binary can never drift from the adapter
+	// version. install.json is optional (only asset-delivering cli apps ship it).
+	if drift := assetVersionDrift(raw, m.ID, m.AppVersion); drift == "" {
+		r.pass("asset URLs match app_version", "no version drift")
+	} else {
+		r.fail("asset URLs match app_version", drift)
+	}
 
 	if prev != nil {
 		r.check("not a version downgrade", compareSemver(e.Version, prev.Version) >= 0,
@@ -311,6 +321,88 @@ func extractBundle(targz []byte) (mfRaw, binBytes []byte, err error) {
 		return nil, nil, fmt.Errorf("binary %q named in manifest not found in bundle", m.Binary.Path)
 	}
 	return mfRaw, binBytes, nil
+}
+
+// assetVersionDrift reads the bundle's install.json (if present) and returns a
+// non-empty message if any registry-hosted asset URL embeds a version segment
+// that differs from wantVersion (the manifest app_version). Empty string means
+// no drift (or no install.json). This makes the single-source-of-truth invariant
+// airtight at the catalogue gate, covering bundles built by either publish path.
+func assetVersionDrift(targz []byte, id, wantVersion string) string {
+	raw, err := bundleFile(targz, "install.json")
+	if err != nil || raw == nil {
+		return "" // no asset-delivering app, nothing to check
+	}
+	var spec struct {
+		Assets []struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return "install.json does not parse: " + err.Error()
+	}
+	for _, a := range spec.Assets {
+		if !isRegistryURL(a.URL) {
+			continue
+		}
+		if v := registryURLVersion(a.URL, id); v != "" && v != wantVersion {
+			return fmt.Sprintf("asset %q url version %q != app_version %q", a.Name, v, wantVersion)
+		}
+	}
+	return ""
+}
+
+// isRegistryURL / registryURLVersion are local copies of the scaffold helpers,
+// inlined to keep the catalogue package free of a scaffold dependency.
+func isRegistryURL(u string) bool {
+	p, err := neturl.Parse(u)
+	if err != nil {
+		return false
+	}
+	h := p.Hostname()
+	return h == "artifacts.pilotprotocol.network" || strings.HasSuffix(h, ".r2.dev")
+}
+
+func registryURLVersion(rawURL, id string) string {
+	p, err := neturl.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	segs := strings.Split(strings.Trim(p.Path, "/"), "/")
+	for i, s := range segs {
+		if s == id && i+1 < len(segs) {
+			return segs[i+1]
+		}
+	}
+	return ""
+}
+
+// bundleFile returns one named file's bytes from a .tar.gz, or (nil, nil) if it
+// is absent. Names are matched after trimming a leading "./".
+func bundleFile(targz []byte, name string) ([]byte, error) {
+	gz, err := gzip.NewReader(strings.NewReader(string(targz)))
+	if err != nil {
+		return nil, err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		if path.Clean(strings.TrimPrefix(hdr.Name, "./")) == name {
+			return io.ReadAll(io.LimitReader(tr, 256<<20))
+		}
+	}
+	return nil, nil
 }
 
 func hasHelp(exposes []string) bool {

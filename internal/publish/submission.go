@@ -45,7 +45,8 @@ type SubArtifact struct {
 	Name     string   `json:"name"`      // per-platform id (default: exec_path basename); referenced by deps
 	OS       string   `json:"os"`        // linux | darwin
 	Arch     string   `json:"arch"`      // amd64 | arm64
-	URL      string   `json:"url"`       // R2 public URL
+	File     string   `json:"file"`      // filename only; URL is DERIVED from app version when url is empty (single source of truth)
+	URL      string   `json:"url"`       // R2 public URL; empty ⇒ derived from file + version
 	SHA256   string   `json:"sha256"`    // 64-hex of the uploaded object
 	Unpack   string   `json:"unpack"`    // "" (single file) | "tar.gz" (extract under $APP)
 	ExecPath string   `json:"exec_path"` // dest under $APP, or path inside the extracted tree
@@ -322,8 +323,22 @@ func (s Submission) validateArtifacts() []string {
 		if !subArchOK[a.Arch] {
 			e = append(e, fmt.Sprintf("Artifact %d: arch %q must be amd64 or arm64", i+1, a.Arch))
 		}
-		if u, err := url.Parse(strings.TrimSpace(a.URL)); err != nil || u.Scheme != "https" || u.Host == "" {
-			e = append(e, fmt.Sprintf("Artifact %d: url must be an absolute https URL (the R2 upload location)", i+1))
+		switch {
+		case strings.TrimSpace(a.URL) == "" && strings.TrimSpace(a.File) == "":
+			e = append(e, fmt.Sprintf("Artifact %d: provide file (URL derived from version) or an explicit https url", i+1))
+		case strings.TrimSpace(a.URL) == "":
+			// file-only: URL is derived from the app version at build time; nothing to check here.
+		default:
+			if u, err := url.Parse(strings.TrimSpace(a.URL)); err != nil || u.Scheme != "https" || u.Host == "" {
+				e = append(e, fmt.Sprintf("Artifact %d: url must be an absolute https URL (the R2 upload location)", i+1))
+			} else if scaffold.IsRegistryURL(a.URL) {
+				// Single-source-of-truth gate: a registry URL's version segment must
+				// equal the submission version, so an artifact can't drift from the
+				// adapter version.
+				if v := scaffold.RegistryURLVersion(a.URL, s.ID); v != "" && v != s.Version {
+					e = append(e, fmt.Sprintf("Artifact %d: url version %q != version %q — bump version (single source of truth; prefer file: to derive the URL)", i+1, v, s.Version))
+				}
+			}
 		}
 		if !subSHA256.MatchString(a.SHA256) {
 			e = append(e, fmt.Sprintf("Artifact %d: sha256 must be 64 lowercase hex chars", i+1))
@@ -426,7 +441,7 @@ func (s Submission) ToConfig() *scaffold.Config {
 	}
 	for _, a := range s.Artifacts {
 		cfg.Assets = append(cfg.Assets, scaffold.Asset{
-			Role: a.Role, Name: a.Name, OS: a.OS, Arch: a.Arch, URL: a.URL, SHA256: a.SHA256,
+			Role: a.Role, Name: a.Name, OS: a.OS, Arch: a.Arch, File: a.File, URL: a.URL, SHA256: a.SHA256,
 			Unpack: a.Unpack, ExecPath: a.ExecPath, Deps: a.Deps, Order: a.Order, Args: a.Args,
 		})
 	}

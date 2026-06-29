@@ -53,7 +53,20 @@ type Config struct {
 	// for cli apps whose command is already present on the host. See
 	// docs/R2-ARTIFACT-REGISTRY.md.
 	Assets []Asset `yaml:"assets"`
+
+	// ArtifactBase is the public base URL of the Pilot R2 artifact registry that
+	// derived asset URLs are built from. Default DefaultArtifactBase. A published
+	// asset that gives only `file:` (not a full `url:`) resolves to
+	//   <ArtifactBase>/<id>/<app_version>/<os>-<arch>/<file>
+	// so the artifact path's version can never drift from app_version — bump the
+	// version in ONE place and every asset URL follows. See Resolve.
+	ArtifactBase string `yaml:"artifact_base"`
 }
+
+// DefaultArtifactBase is the production Pilot R2 artifact registry public base.
+// Derived asset URLs ( file: without an explicit url: ) hang off it. Override
+// per-spec with artifact_base (e.g. the dev r2.dev bucket).
+const DefaultArtifactBase = "https://artifacts.pilotprotocol.network"
 
 // Asset is one platform-specific file delivered from the R2 artifact registry.
 // Integrity is the sha256 (verified at install); the whole bundle tarball is
@@ -64,7 +77,8 @@ type Asset struct {
 	Name     string   `yaml:"name" json:"name"`           // stable id within a platform (default: exec_path basename); referenced by other assets' deps
 	OS       string   `yaml:"os" json:"os"`               // linux | darwin
 	Arch     string   `yaml:"arch" json:"arch"`           // amd64 | arm64
-	URL      string   `yaml:"url" json:"url"`             // https download (R2 public URL)
+	File     string   `yaml:"file" json:"file,omitempty"` // filename only; URL is DERIVED from app_version when url is empty (single source of truth — see Config.ArtifactBase / Resolve)
+	URL      string   `yaml:"url" json:"url"`             // https download (R2 public URL); empty ⇒ derived from file + app_version
 	SHA256   string   `yaml:"sha256" json:"sha256"`       // 64-hex of the downloaded object; verified after download
 	Unpack   string   `yaml:"unpack" json:"unpack"`       // "" (single file) | "tar.gz" (extract archive under $APP)
 	ExecPath string   `yaml:"exec_path" json:"exec_path"` // dest under $APP for a single file, or the path INSIDE the extracted tree for an archive (e.g. smolvm-1.2.0-darwin-arm64/smolvm)
@@ -117,6 +131,50 @@ func (c *Config) AssetHosts() []string {
 	}
 	sort.Strings(hosts)
 	return hosts
+}
+
+// DerivedAssetURL builds the registry URL for an asset from app_version, so a
+// version bump in ONE place (app_version) cascades to every asset path:
+//
+//	<ArtifactBase>/<id>/<app_version>/<os>-<arch>/<file>
+//
+// This is the write-once R2 layout (docs/R2-ARTIFACT-REGISTRY.md): a new
+// app_version is a new prefix, so a derived URL can never point at a stale
+// version's bytes.
+func (c *Config) DerivedAssetURL(file, os, arch string) string {
+	return fmt.Sprintf("%s/%s/%s/%s-%s/%s",
+		strings.TrimRight(c.ArtifactBase, "/"), c.ID, c.AppVersion, os, arch, file)
+}
+
+// IsRegistryURL reports whether u points at the Pilot artifact registry (the
+// custom domain or any r2.dev managed bucket). Only registry URLs follow the
+// versioned <id>/<version>/<os>-<arch>/ layout, so only they are drift-checked
+// against app_version; a publisher's own CDN may use any scheme it likes.
+func IsRegistryURL(u string) bool {
+	p, err := url.Parse(u)
+	if err != nil {
+		return false
+	}
+	h := p.Hostname()
+	return h == "artifacts.pilotprotocol.network" || strings.HasSuffix(h, ".r2.dev")
+}
+
+// RegistryURLVersion extracts the <version> path segment from a registry URL
+// laid out as …/<id>/<version>/<os>-<arch>/<file>. The version is the segment
+// immediately after the app id. Returns "" if the id isn't found in the path.
+// Exported for the submission layer's pre-build drift check.
+func RegistryURLVersion(rawURL, id string) string {
+	p, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	segs := strings.Split(strings.Trim(p.Path, "/"), "/")
+	for i, s := range segs {
+		if s == id && i+1 < len(segs) {
+			return segs[i+1]
+		}
+	}
+	return ""
 }
 
 // Listing is the store-page metadata that drives the catalogue v2 rich view
@@ -442,6 +500,19 @@ func (c *Config) Resolve() {
 	if c.Grants.RatePerMin == 0 {
 		c.Grants.RatePerMin = 120
 	}
+	if c.ArtifactBase == "" {
+		c.ArtifactBase = DefaultArtifactBase
+	}
+	// Single source of truth: an asset that gives only `file:` gets its URL
+	// DERIVED from app_version, so the artifact path's version can never drift
+	// from the adapter version. An explicit url: is left as-is (validated +
+	// drift-checked in validateAssets).
+	for i := range c.Assets {
+		a := &c.Assets[i]
+		if a.URL == "" && a.File != "" {
+			a.URL = c.DerivedAssetURL(a.File, a.OS, a.Arch)
+		}
+	}
 	if x := c.Backend.X402; x != nil {
 		if x.Payer == "" {
 			x.Payer = "io.pilot.wallet"
@@ -706,6 +777,14 @@ func (c *Config) validateAssets() []error {
 		}
 		if u, err := url.Parse(a.URL); err != nil || u.Scheme != "https" || u.Host == "" {
 			errs = append(errs, fmt.Errorf("assets[%d].url %q must be an absolute https URL", i, a.URL))
+		} else if IsRegistryURL(a.URL) {
+			// Single-source-of-truth gate: a registry URL's version segment MUST
+			// equal app_version, so an artifact can never drift from the adapter
+			// version. Derived URLs satisfy this by construction; this catches a
+			// hand-written url: that points at a stale version's prefix.
+			if v := RegistryURLVersion(a.URL, c.ID); v != "" && v != c.AppVersion {
+				errs = append(errs, fmt.Errorf("assets[%d].url version %q != app_version %q — bump app_version (it is the single source of truth; prefer file: to derive the URL)", i, v, c.AppVersion))
+			}
 		}
 		if !sha256Pattern.MatchString(a.SHA256) {
 			errs = append(errs, fmt.Errorf("assets[%d].sha256 %q must be 64 lowercase hex chars", i, a.SHA256))
