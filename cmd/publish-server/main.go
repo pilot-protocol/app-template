@@ -6,7 +6,8 @@
 // API (CORS, JSON):
 //
 //	POST /api/preview  {Submission}        -> {help, commands}   live <ns>.help + pilotctl preview
-//	POST /api/submit   {Submission}        -> {case_id,status} | {errors}
+//	POST /api/submit   {Submission}        -> {case_id,status} | {errors}   first publish (id must NOT exist)
+//	POST /api/update   {Submission}        -> {case_id,status} | {errors}   new version (id must exist, higher ver, owning key)
 //
 // Admin (server-rendered, token-gated):
 //
@@ -34,6 +35,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/pilot-protocol/app-template/internal/catalogue"
 	"github.com/pilot-protocol/app-template/internal/publish"
 )
 
@@ -100,6 +102,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/preview", s.cors(s.apiPreview))
 	mux.HandleFunc("/api/submit", s.cors(s.apiSubmit))
+	mux.HandleFunc("/api/update", s.cors(s.apiUpdate))
 	// Self-contained admin assets (embedded). The dashboard depends on nothing
 	// from the website — its CSS ships in this binary and is served from here.
 	mux.Handle("GET /static/", http.FileServer(http.FS(assets)))
@@ -189,7 +192,21 @@ func (s *server) apiPreview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"help": help, "commands": cmds})
 }
 
-func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
+func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) { s.ingest(w, r, false) }
+
+// apiUpdate is the UPDATE counterpart of apiSubmit: it publishes a NEW version of
+// an app that already exists in the catalogue. Same schema, same machinery —
+// only the ownership precondition differs (the id must already exist, the version
+// must increase, and the platform key must own it). Keeping it a distinct
+// endpoint gives the website a clear "update" action with update-shaped errors.
+func (s *server) apiUpdate(w http.ResponseWriter, r *http.Request) { s.ingest(w, r, true) }
+
+// ingest validates a submission, enforces the create/update ownership gate
+// against the LIVE catalogue, and records a case (no build — that is the
+// admin-triggered step). isUpdate selects update semantics (id must exist) vs
+// create semantics (id must NOT exist), so a form submission can never clobber an
+// app owned by a different publisher key, in either direction.
+func (s *server) ingest(w http.ResponseWriter, r *http.Request, isUpdate bool) {
 	var sub publish.Submission
 	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
 		writeJSON(w, 400, map[string]any{"error": "bad json: " + err.Error()})
@@ -197,6 +214,10 @@ func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if errs := sub.Validate(); len(errs) > 0 {
 		writeJSON(w, 422, map[string]any{"errors": errs})
+		return
+	}
+	if code, errs := s.gateOwnership(sub, isUpdate); code != 0 {
+		writeJSON(w, code, map[string]any{"errors": errs})
 		return
 	}
 	// Record the submission WITHOUT building — we don't build a bundle for every
@@ -208,6 +229,43 @@ func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 202, map[string]any{"case_id": c.CaseID, "status": c.Status})
+}
+
+// gateOwnership enforces create-vs-update preconditions against the live signed
+// catalogue. It returns (0, nil) to allow, or (httpStatus, errors) to reject:
+//
+//   - create (isUpdate=false): the id must NOT already exist (else 409 → use /api/update).
+//   - update (isUpdate=true):  the id MUST exist, the version must increase, and
+//     the platform key (which signs form-path bundles) must equal the owning
+//     publisher pin — so the form can't override a PR-published, self-key-owned app.
+//
+// A fetch failure fails closed (502) — we never publish past an unknown owner.
+func (s *server) gateOwnership(sub publish.Submission, isUpdate bool) (int, []string) {
+	owners, err := catalogue.FetchOwners(catalogue.CatalogueURL())
+	if err != nil {
+		return http.StatusBadGateway, []string{"could not read the live catalogue to check ownership: " + err.Error()}
+	}
+	_, exists := owners[sub.ID]
+	switch {
+	case isUpdate && !exists:
+		return http.StatusConflict, []string{sub.ID + " is not published yet — use /api/submit to publish it first"}
+	case !isUpdate && exists:
+		return http.StatusConflict, []string{sub.ID + " is already published — use /api/update to ship a new version"}
+	case !isUpdate && !exists:
+		return 0, nil // brand-new app, allowed
+	}
+	// update of an existing app: enforce version increase + platform key ownership.
+	res := catalogue.CheckUpdate(owners, sub.ID, sub.Version, publish.PublisherString(s.key))
+	if res.OK() {
+		return 0, nil
+	}
+	var errs []string
+	for _, c := range res.Checks {
+		if !c.OK {
+			errs = append(errs, c.Name+": "+c.Msg)
+		}
+	}
+	return http.StatusUnprocessableEntity, errs
 }
 
 // adminBuild kicks off the async bundle build for a submitted (or previously

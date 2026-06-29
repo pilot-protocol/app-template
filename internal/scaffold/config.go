@@ -452,6 +452,10 @@ var (
 	knownArch = map[string]bool{"amd64": true, "arm64": true}
 )
 
+// IsSemver reports whether v is a valid MAJOR.MINOR.PATCH(-prerelease) version,
+// using the same rule app_version is validated by. Exported for the update CLI.
+func IsSemver(v string) bool { return semverPattern.MatchString(v) }
+
 // Parse decodes a pilot.app.yaml document (strict: unknown keys are errors, so
 // typos surface instead of being silently ignored).
 func Parse(data []byte) (*Config, error) {
