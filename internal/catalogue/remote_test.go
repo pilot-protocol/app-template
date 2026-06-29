@@ -35,13 +35,21 @@ func TestCheckUpdate_WrongKey(t *testing.T) {
 	}
 }
 
-// Same version (re-publish) and downgrade are both rejected.
-func TestCheckUpdate_NotHigher(t *testing.T) {
-	for _, v := range []string{"1.2.0", "1.1.9", "0.9.0"} {
+// A downgrade is rejected; a same-version re-publish by the owner is allowed.
+func TestCheckUpdate_DowngradeVsRepublish(t *testing.T) {
+	for _, v := range []string{"1.1.9", "0.9.0"} {
 		r := CheckUpdate(ownerSet(), "io.pilot.foo", v, "ed25519:OWNERKEYAAA")
 		if r.OK() {
-			t.Fatalf("version %s is not an increase over 1.2.0 — must fail", v)
+			t.Fatalf("version %s is a downgrade from 1.2.0 — must fail", v)
 		}
+	}
+	// same version, same owner → idempotent re-publish, allowed
+	if r := CheckUpdate(ownerSet(), "io.pilot.foo", "1.2.0", "ed25519:OWNERKEYAAA"); !r.OK() {
+		t.Fatalf("same-version re-publish by owner should pass, got %+v", r.Checks)
+	}
+	// same version but a DIFFERENT key is still a hijack → rejected
+	if r := CheckUpdate(ownerSet(), "io.pilot.foo", "1.2.0", "ed25519:ATTACKERBBB"); r.OK() {
+		t.Fatal("same version with a non-owner key must fail")
 	}
 }
 

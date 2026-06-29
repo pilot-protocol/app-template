@@ -54,8 +54,8 @@ The required `submission-validate` check runs `pilot-app verify-update` against 
 **live, signature-verified catalogue**. For an app id that already exists it
 requires, with clear errors if not:
 
-1. **The version increased.** A re-publish of the same version or a downgrade is
-   rejected (`x is not greater than the published y — bump the version`).
+1. **The version didn't go backwards.** A downgrade is rejected; a same-version
+   re-publish by the owner is allowed (idempotent). Normally you bump it.
 2. **The same publishing key.** Your bundle must be signed by the **same ed25519
    key** that owns the app (the `publisher` pin in the catalogue). A bundle signed
    by any other key is rejected:
@@ -83,9 +83,14 @@ was published by a third party with their own key (and vice versa).
   from day one, so you — not the platform — own all future updates.
 
 An app's update path is fixed to whichever key first published it. Moving an app
-between key owners (rotation, or form → self-key) is an **admin-gated transfer**
-(a signed statement that re-points the `publisher` pin) — open an issue; it is not
-something an ordinary PR can do, by design.
+between key owners (key loss, or a handoff) is an **admin-gated rotation**: from the
+publish-server admin page (`/admin?token=…`) the **Rotate a publisher key** form
+(or `POST /admin/rotate-key` with `{id, new_publisher}`) opens a re-signed catalogue
+PR that re-points the `publisher` pin. Holding the admin token authorizes rotating
+any app's key. **After that PR merges, the new owner must publish an update signed
+with the new key** before existing installs re-validate against the new pin (the
+runtime trust anchor follows the pin). Server needs `CATALOG_PUBLISH_TOKEN` +
+`CATALOG_SIGN_KEY`.
 
 ## Clients pick up the new version
 

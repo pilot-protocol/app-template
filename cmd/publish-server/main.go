@@ -52,6 +52,8 @@ type server struct {
 	mailer     *publish.Mailer
 	pubToken   string
 	adminToken string
+	catToken   string // CATALOG_PUBLISH_TOKEN: write to the platform repo (key rotation PR)
+	catSignKey string // CATALOG_SIGN_KEY: hex ed25519 catalogue signing key
 	origins    []string
 	registrar  publish.BrokerRegistrar // registers managed apps with the broker on approval
 	r2         publish.R2Config        // artifact registry creds (presign uploads); zero ⇒ /api/artifact disabled
@@ -83,6 +85,8 @@ func main() {
 		mailer:     publish.NewMailer(),
 		pubToken:   os.Getenv("PILOT_PUBLISH_TOKEN"),
 		adminToken: os.Getenv("ADMIN_TOKEN"),
+		catToken:   os.Getenv("CATALOG_PUBLISH_TOKEN"),
+		catSignKey: os.Getenv("CATALOG_SIGN_KEY"),
 		// CORS: only the production website may call the API. ALLOWED_ORIGINS
 		// overrides (e.g. add a local origin for testing); default is prod.
 		origins: splitOrigins(allowedOriginsEnv()),
@@ -117,6 +121,7 @@ func main() {
 	mux.HandleFunc("POST /admin/build", s.adminBuild)
 	mux.HandleFunc("POST /admin/approve", s.adminApprove)
 	mux.HandleFunc("POST /admin/reject", s.adminReject)
+	mux.HandleFunc("POST /admin/rotate-key", s.adminRotateKey)
 
 	log.Printf("publish-server on %s (publisher %s, origins=%v)", *addr, publish.PublisherString(key), s.origins)
 	log.Fatal(http.ListenAndServe(*addr, mux))
@@ -544,6 +549,46 @@ func (s *server) adminReject(w http.ResponseWriter, r *http.Request) {
 		log.Printf("reject email to %s failed: %v", c.Submission.Email, err)
 	}
 	s.redirectAdmin(w, r)
+}
+
+// adminRotateKey re-points an app's catalogue publisher pin to a new ed25519 key
+// and opens a (re-signed) catalogue PR on the platform repo. Admin-token gated:
+// holding the admin token authorizes rotating ANY app's owning key — the operator
+// escape hatch for key loss or a publisher handoff. The new owner must publish an
+// update signed with the new key for existing installs to re-validate.
+func (s *server) adminRotateKey(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(r) {
+		http.Error(w, "admin token required", http.StatusUnauthorized)
+		return
+	}
+	id := strings.TrimSpace(r.FormValue("id"))
+	newPub := strings.TrimSpace(r.FormValue("new_publisher"))
+	if id == "" || newPub == "" {
+		http.Error(w, "both id and new_publisher are required", http.StatusBadRequest)
+		return
+	}
+	if !publish.ValidPublisherPin(newPub) {
+		http.Error(w, "new_publisher must be ed25519:<base64 32-byte key> (from `pilotctl appstore gen-key`)", http.StatusBadRequest)
+		return
+	}
+	if s.catToken == "" || s.catSignKey == "" {
+		http.Error(w, "key rotation not configured on this server (set CATALOG_PUBLISH_TOKEN + CATALOG_SIGN_KEY)", http.StatusServiceUnavailable)
+		return
+	}
+	prURL, err := publish.RotatePublisher(id, newPub, s.catToken, s.catSignKey)
+	if err != nil {
+		http.Error(w, "rotation failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!doctype html><meta charset=utf-8><body style="font-family:system-ui;max-width:640px;margin:60px auto">`+
+		`<h2>Key rotation PR opened</h2><p><b>%s</b> → <code>%s</code></p>`+
+		`<p><a href="%s">%s</a></p>`+
+		`<p style="color:#a00">After this PR merges, the new owner must publish an update signed with the new key before existing installs re-validate.</p>`+
+		`<p><a href="/admin?token=%s">← back to admin</a></p></body>`,
+		template.HTMLEscapeString(id), template.HTMLEscapeString(newPub),
+		template.HTMLEscapeString(prURL), template.HTMLEscapeString(prURL),
+		template.HTMLEscapeString(r.FormValue("token")))
 }
 
 func (s *server) redirectAdmin(w http.ResponseWriter, r *http.Request) {

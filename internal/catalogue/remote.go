@@ -77,9 +77,9 @@ func FetchOwners(catURL string) (map[string]Owner, error) {
 // against the live owners map:
 //
 //   - unknown id        → first publish (trust-on-first-use); no constraint.
-//   - known id          → the new version MUST be strictly higher (no downgrade
-//     or re-publish of the same version), AND, when the new
-//     bundle's signer is known, it MUST equal the owning
+//   - known id          → the new version MUST NOT be a downgrade (a re-publish of
+//     the same version is allowed — idempotent), AND, when the
+//     new bundle's signer is known, it MUST equal the owning
 //     publisher pin (you can only update an app you own).
 //
 // newPublisher is the "ed25519:<base64>" that signed the new bundle, or "" when
@@ -93,9 +93,9 @@ func CheckUpdate(owners map[string]Owner, id, newVersion, newPublisher string) R
 		r.pass("app ownership", "new app id — first publish (no prior owner)")
 		return r
 	}
-	r.check("version is an increase", compareSemver(newVersion, owner.Version) > 0,
-		fmt.Sprintf("%s > %s", newVersion, owner.Version),
-		fmt.Sprintf("%s is not greater than the published %s — bump the version (updates must increase it)", newVersion, owner.Version))
+	r.check("version is not a downgrade", compareSemver(newVersion, owner.Version) >= 0,
+		fmt.Sprintf("%s ≥ %s", newVersion, owner.Version),
+		fmt.Sprintf("%s is older than the published %s — an update must not move the version backwards", newVersion, owner.Version))
 
 	switch {
 	case owner.Publisher == "":
