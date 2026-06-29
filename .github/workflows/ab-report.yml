@@ -1,0 +1,143 @@
+name: A/B report (vanilla vs Pilot)
+
+# When a publish PR touches submissions/<id>/, run the equivalent commands two
+# ways — the vanilla CLI binary vs the Pilot adapter (socket mode, no daemon) —
+# and post an HTML A/B report. Limitation: GitHub-hosted runners have no nested
+# virtualization (KVM), so VM-launching commands cannot run here. The per-app
+# command set (submissions/<id>/ab-commands.json) must therefore stay non-VM
+# (version / help / subcommand --help). See docs/CI-AB-REPORT.md.
+
+on:
+  pull_request:
+    paths: ['submissions/**']
+  workflow_dispatch:
+    inputs:
+      app_id:
+        description: 'App id, e.g. io.pilot.smolvm'
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ab-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Detect app id
+        id: app
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.app_id }}" ]; then
+            APP="${{ github.event.inputs.app_id }}"
+          else
+            APP=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- 'submissions/**' \
+              | sed -nE 's#^submissions/([^/]+)/.*#\1#p' | sort -u | head -1)
+          fi
+          if [ -z "$APP" ]; then echo "::error::could not detect an app id under submissions/"; exit 1; fi
+          echo "app=$APP" >> "$GITHUB_OUTPUT"
+          echo "Detected app: $APP"
+
+      - name: Build ipc-call
+        run: go build -o /tmp/ipc-call ./cmd/ipc-call
+
+      - name: Extract bundle and stage the adapter
+        id: stage
+        run: |
+          set -euo pipefail
+          APP="${{ steps.app.outputs.app }}"
+          DIR="submissions/$APP"
+          # Prefer the linux/amd64 bundle (this runner's arch); fall back to any.
+          BUNDLE=$(ls "$DIR"/*linux-amd64*.tar.gz 2>/dev/null | head -1 || true)
+          [ -n "$BUNDLE" ] || BUNDLE=$(ls "$DIR"/*.tar.gz 2>/dev/null | head -1 || true)
+          if [ -z "$BUNDLE" ]; then
+            echo "::notice::$APP ships no bundle tarball under $DIR (metadata-only change, or the binary is delivered out-of-band) — A/B report not applicable"
+            echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "Using bundle: $BUNDLE"
+          ROOT=/tmp/app; rm -rf "$ROOT"; mkdir -p "$ROOT"; tar -xzf "$BUNDLE" -C "$ROOT"
+
+          if [ ! -f "$ROOT/install.json" ]; then
+            echo "::notice::$APP ships no install.json (HTTP app, or a cli whose binary is not delivered) — A/B report not applicable"
+            echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          NS=$(jq -r '.namespace // empty' "$DIR/submission.json" 2>/dev/null || true)
+          [ -n "$NS" ] || NS="${APP##*.}"
+          BIN=$(jq -r '.binary.path' "$ROOT/manifest.json")
+          chmod +x "$ROOT/$BIN"
+          CMD=$(jq -r '.command' "$ROOT/install.json")
+          EXEC=$(jq -r --arg c "$CMD" '.assets[] | select((.exec_path|split("/")|last)==$c or .exec_path==$c) | .exec_path' "$ROOT/install.json" | head -1)
+          if [ -z "$EXEC" ]; then echo "::error::could not resolve the command exec_path from install.json"; exit 1; fi
+          echo "ns=$NS root=$ROOT bin=$BIN exec=$EXEC"
+          {
+            echo "ns=$NS"; echo "root=$ROOT"; echo "exec=$EXEC";
+          } >> "$GITHUB_OUTPUT"
+
+          # Run the adapter exactly as the daemon would; it stages the host's
+          # artifacts from the R2 registry on startup (needs network egress).
+          "$ROOT/$BIN" --socket "$ROOT/app.sock" --manifest "$ROOT/manifest.json" > /tmp/adapter.log 2>&1 &
+          echo $! > /tmp/adapter.pid
+          for i in $(seq 1 90); do [ -S "$ROOT/app.sock" ] && break; sleep 2; done
+          if [ ! -S "$ROOT/app.sock" ]; then
+            echo "::error::adapter socket never appeared (staging from R2 likely failed for this runner's os/arch)"
+            echo "----- adapter log -----"; cat /tmp/adapter.log || true
+            exit 1
+          fi
+          echo "Adapter up; staged binary: $ROOT/$EXEC"
+
+      - name: Run A/B report
+        if: steps.stage.outputs.skip != '1'
+        run: |
+          set -euo pipefail
+          ROOT="${{ steps.stage.outputs.root }}"
+          python3 scripts/ab_report.py \
+            --app "${{ steps.app.outputs.app }}" --ns "${{ steps.stage.outputs.ns }}" \
+            --mode socket --socket "$ROOT/app.sock" --ipc-call /tmp/ipc-call \
+            --vanilla "$ROOT/${{ steps.stage.outputs.exec }}" \
+            --submissions ./submissions --out ab-report.html
+
+      - name: Stop adapter
+        if: always()
+        run: '[ -f /tmp/adapter.pid ] && kill "$(cat /tmp/adapter.pid)" 2>/dev/null || true'
+
+      - name: Upload report
+        if: steps.stage.outputs.skip != '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ab-report-${{ steps.app.outputs.app }}
+          path: ab-report.html
+
+      - name: Comment on the PR
+        if: steps.stage.outputs.skip != '1' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const app = '${{ steps.app.outputs.app }}';
+            const html = fs.readFileSync('ab-report.html', 'utf8');
+            const re = /<tr><td>([^<]+)<\/td><td class='r'>(\d+)<\/td><td class='r'>(\d+)<\/td><td class='r'>([^<]+)<\/td><td>([^<]+)<\/td><\/tr>/g;
+            let table = '| Command | Vanilla ms | Pilot ms | Δ | Exit match |\n|---|--:|--:|--:|:--:|\n';
+            let n = 0;
+            for (const m of html.matchAll(re)) { table += `| ${m[1]} | ${m[2]} | ${m[3]} | ${m[4]} | ${m[5]} |\n`; n++; }
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const marker = `<!-- ab-report:${app} -->`;
+            const body = `${marker}\n### A/B report — \`${app}\` (vanilla vs Pilot)\n\n` +
+              `Equivalent commands run two ways: the vanilla CLI binary vs the Pilot adapter (socket mode). ` +
+              `CI runs **non-VM** commands only (GitHub runners have no KVM). ` +
+              `Full HTML report (commands, outputs, timings, adapter-generated help): ` +
+              `**[download from the run artifacts](${runUrl})**.\n\n${n ? table : '_No command pairs ran._'}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const prev = comments.find(c => c.body && c.body.includes(marker));
+            if (prev) await github.rest.issues.updateComment({ owner, repo, comment_id: prev.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body });
