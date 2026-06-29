@@ -110,12 +110,37 @@ script wires it up against the real registry.
 | **pilotprotocol** #317 | daemon dep bump so it accepts `proc.exec` |
 | website #44 | publish wizard cli path; **TODO**: add the Artifacts step (uploads + order/args) as a thin client over a presign endpoint |
 
+## Upload: presign endpoint (implemented)
+
+`POST /api/artifact/presign` (publish-server) issues a short-lived presigned PUT
+URL so the website's Artifacts step uploads straight to R2 — no S3 keys on the
+client, no manual `aws s3 cp`.
+
+```
+POST /api/artifact/presign
+  {"id":"io.pilot.toolx","version":"1.2.3","os":"linux","arch":"amd64","file":"toolx"}
+→ {"method":"PUT","put_url":"https://…(presigned, 15 min)…",
+   "public_url":"https://artifacts.pilotprotocol.network/io.pilot.toolx/1.2.3/linux-amd64/toolx",
+   "key":"io.pilot.toolx/1.2.3/linux-amd64/toolx","file":"toolx","expires_in":900}
+```
+
+- The **key is computed server-side** from `{id,version,os,arch,file}` — the client
+  never controls the prefix, so an upload can only land under its own
+  `<id>/<version>/<os>-<arch>/`.
+- **Write-once:** a key that already exists is refused (409) — bump the version to
+  upload new binaries. This is what guarantees an artifact can't drift from its
+  adapter version.
+- `public_url` is exactly what the scaffold *derives* from `app_version`, so the
+  `file:` you drop into `pilot.app.yaml` resolves to the bytes you just uploaded.
+- Config (server env): `R2_ACCOUNT_ID` (or `R2_ENDPOINT`), `R2_BUCKET`,
+  `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_REGION` (default `auto`),
+  `R2_PUBLIC_BASE`. Unset ⇒ the endpoint returns 503 (uploads disabled). The SigV4
+  presigner is dependency-free and verified against AWS's reference vector.
+
 ## Follow-ups
 
-- **Presign upload endpoint** (`POST /api/artifact/presign`) + a signing-proxy
-  `GET /artifact/...` so the form uploads straight to R2 and installs can run off
-  a stable proxy URL where a public domain isn't configured. (The e2e uploads via
-  the S3 API directly.)
+- **Signing-proxy `GET /artifact/...`** so installs can run off a stable proxy URL
+  where a public domain isn't configured.
 - **Server-side re-verify** of each artifact sha against the stored R2 object at
   submit time.
 - Production **custom domain** for `pilot-artifacts-prod` (needs a Cloudflare API

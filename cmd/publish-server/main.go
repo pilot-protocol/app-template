@@ -8,6 +8,7 @@
 //	POST /api/preview  {Submission}        -> {help, commands}   live <ns>.help + pilotctl preview
 //	POST /api/submit   {Submission}        -> {case_id,status} | {errors}   first publish (id must NOT exist)
 //	POST /api/update   {Submission}        -> {case_id,status} | {errors}   new version (id must exist, higher ver, owning key)
+//	POST /api/artifact/presign {id,version,os,arch,file} -> {put_url,public_url,key}   write-once R2 upload URL
 //
 // Admin (server-rendered, token-gated):
 //
@@ -34,9 +35,11 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/pilot-protocol/app-template/internal/catalogue"
 	"github.com/pilot-protocol/app-template/internal/publish"
+	"github.com/pilot-protocol/app-template/internal/scaffold"
 )
 
 //go:embed templates/*.html static/*
@@ -51,6 +54,7 @@ type server struct {
 	adminToken string
 	origins    []string
 	registrar  publish.BrokerRegistrar // registers managed apps with the broker on approval
+	r2         publish.R2Config        // artifact registry creds (presign uploads); zero ⇒ /api/artifact disabled
 }
 
 func main() {
@@ -82,6 +86,7 @@ func main() {
 		// CORS: only the production website may call the API. ALLOWED_ORIGINS
 		// overrides (e.g. add a local origin for testing); default is prod.
 		origins: splitOrigins(allowedOriginsEnv()),
+		r2:      publish.R2FromEnv(),
 	}
 	// Managed-app approval registers the app with the broker by writing its
 	// registry file (BROKER_REGISTRY). Unset = managed registration is logged
@@ -103,6 +108,7 @@ func main() {
 	mux.HandleFunc("/api/preview", s.cors(s.apiPreview))
 	mux.HandleFunc("/api/submit", s.cors(s.apiSubmit))
 	mux.HandleFunc("/api/update", s.cors(s.apiUpdate))
+	mux.HandleFunc("/api/artifact/presign", s.cors(s.apiArtifactPresign))
 	// Self-contained admin assets (embedded). The dashboard depends on nothing
 	// from the website — its CSS ships in this binary and is served from here.
 	mux.Handle("GET /static/", http.FileServer(http.FS(assets)))
@@ -266,6 +272,87 @@ func (s *server) gateOwnership(sub publish.Submission, isUpdate bool) (int, []st
 		}
 	}
 	return http.StatusUnprocessableEntity, errs
+}
+
+// artifactReq is the presign request: which platform binary, for which app
+// version, the publisher wants to upload. The server computes the write-once key
+// from these (the client never controls the prefix), so an upload can only ever
+// land under <id>/<version>/<os>-<arch>/, never in another app's or version's space.
+type artifactReq struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	OS      string `json:"os"`
+	Arch    string `json:"arch"`
+	File    string `json:"file"`
+}
+
+var (
+	knownArtOS   = map[string]bool{"linux": true, "darwin": true}
+	knownArtArch = map[string]bool{"amd64": true, "arm64": true}
+)
+
+// apiArtifactPresign issues a short-lived presigned PUT URL for one platform
+// artifact, plus the public URL the derived asset URL will resolve to. The key is
+// server-computed and write-once: a key that already exists is refused (bump the
+// version — a new version is a new prefix), which is what keeps an artifact from
+// ever drifting from its adapter version. The website's Artifacts step uploads
+// straight to R2 with the returned URL and gets back {file, public_url} to drop
+// into the submission. Disabled (503) when R2 creds are not configured.
+func (s *server) apiArtifactPresign(w http.ResponseWriter, r *http.Request) {
+	if !s.r2.Configured() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "artifact registry not configured on this server (set R2_* env)"})
+		return
+	}
+	var req artifactReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]any{"error": "bad json: " + err.Error()})
+		return
+	}
+	var errs []string
+	if !strings.HasPrefix(req.ID, "io.") || strings.ToLower(req.ID) != req.ID {
+		errs = append(errs, "id must be a lowercase reverse-DNS app id (io.<...>)")
+	}
+	if !scaffold.IsSemver(req.Version) {
+		errs = append(errs, "version must be semver")
+	}
+	if !knownArtOS[req.OS] {
+		errs = append(errs, "os must be linux or darwin")
+	}
+	if !knownArtArch[req.Arch] {
+		errs = append(errs, "arch must be amd64 or arm64")
+	}
+	if req.File == "" || strings.ContainsAny(req.File, "/\\") || strings.Contains(req.File, "..") {
+		errs = append(errs, "file must be a bare filename (no path separators or \"..\")")
+	}
+	if len(errs) > 0 {
+		writeJSON(w, 422, map[string]any{"errors": errs})
+		return
+	}
+
+	key := publish.ArtifactKey(req.ID, req.Version, req.OS, req.Arch, req.File)
+	// Write-once guard: never re-issue an upload for an existing object.
+	if exists, err := s.r2.ObjectExists(key); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "could not check the registry: " + err.Error()})
+		return
+	} else if exists {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": key + " already exists — artifacts are write-once; bump the version to upload new binaries"})
+		return
+	}
+
+	const ttl = 15 * time.Minute
+	put, err := s.r2.PresignPut(key, ttl)
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "presign failed: " + err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"method":     "PUT",
+		"put_url":    put,
+		"public_url": s.r2.PublicURL(key),
+		"key":        key,
+		"file":       req.File,
+		"expires_in": int(ttl.Seconds()),
+	})
 }
 
 // adminBuild kicks off the async bundle build for a submitted (or previously
