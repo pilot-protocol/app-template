@@ -53,7 +53,20 @@ type Config struct {
 	// for cli apps whose command is already present on the host. See
 	// docs/R2-ARTIFACT-REGISTRY.md.
 	Assets []Asset `yaml:"assets"`
+
+	// ArtifactBase is the public base URL of the Pilot R2 artifact registry that
+	// derived asset URLs are built from. Default DefaultArtifactBase. A published
+	// asset that gives only `file:` (not a full `url:`) resolves to
+	//   <ArtifactBase>/<id>/<app_version>/<os>-<arch>/<file>
+	// so the artifact path's version can never drift from app_version — bump the
+	// version in ONE place and every asset URL follows. See Resolve.
+	ArtifactBase string `yaml:"artifact_base"`
 }
+
+// DefaultArtifactBase is the production Pilot R2 artifact registry public base.
+// Derived asset URLs ( file: without an explicit url: ) hang off it. Override
+// per-spec with artifact_base (e.g. the dev r2.dev bucket).
+const DefaultArtifactBase = "https://artifacts.pilotprotocol.network"
 
 // Asset is one platform-specific file delivered from the R2 artifact registry.
 // Integrity is the sha256 (verified at install); the whole bundle tarball is
@@ -64,7 +77,8 @@ type Asset struct {
 	Name     string   `yaml:"name" json:"name"`           // stable id within a platform (default: exec_path basename); referenced by other assets' deps
 	OS       string   `yaml:"os" json:"os"`               // linux | darwin
 	Arch     string   `yaml:"arch" json:"arch"`           // amd64 | arm64
-	URL      string   `yaml:"url" json:"url"`             // https download (R2 public URL)
+	File     string   `yaml:"file" json:"file,omitempty"` // filename only; URL is DERIVED from app_version when url is empty (single source of truth — see Config.ArtifactBase / Resolve)
+	URL      string   `yaml:"url" json:"url"`             // https download (R2 public URL); empty ⇒ derived from file + app_version
 	SHA256   string   `yaml:"sha256" json:"sha256"`       // 64-hex of the downloaded object; verified after download
 	Unpack   string   `yaml:"unpack" json:"unpack"`       // "" (single file) | "tar.gz" (extract archive under $APP)
 	ExecPath string   `yaml:"exec_path" json:"exec_path"` // dest under $APP for a single file, or the path INSIDE the extracted tree for an archive (e.g. smolvm-1.2.0-darwin-arm64/smolvm)
@@ -117,6 +131,19 @@ func (c *Config) AssetHosts() []string {
 	}
 	sort.Strings(hosts)
 	return hosts
+}
+
+// DerivedAssetURL builds the registry URL for an asset from app_version, so a
+// version bump in ONE place (app_version) cascades to every asset path:
+//
+//	<ArtifactBase>/<id>/<app_version>/<os>-<arch>/<file>
+//
+// This is the write-once R2 layout (docs/R2-ARTIFACT-REGISTRY.md): a new
+// app_version is a new prefix, so a derived URL can never point at a stale
+// version's bytes.
+func (c *Config) DerivedAssetURL(file, os, arch string) string {
+	return fmt.Sprintf("%s/%s/%s/%s-%s/%s",
+		strings.TrimRight(c.ArtifactBase, "/"), c.ID, c.AppVersion, os, arch, file)
 }
 
 // Listing is the store-page metadata that drives the catalogue v2 rich view
@@ -394,6 +421,10 @@ var (
 	knownArch = map[string]bool{"amd64": true, "arm64": true}
 )
 
+// IsSemver reports whether v is a valid MAJOR.MINOR.PATCH(-prerelease) version,
+// using the same rule app_version is validated by. Exported for the update CLI.
+func IsSemver(v string) bool { return semverPattern.MatchString(v) }
+
 // Parse decodes a pilot.app.yaml document (strict: unknown keys are errors, so
 // typos surface instead of being silently ignored).
 func Parse(data []byte) (*Config, error) {
@@ -441,6 +472,19 @@ func (c *Config) Resolve() {
 	}
 	if c.Grants.RatePerMin == 0 {
 		c.Grants.RatePerMin = 120
+	}
+	if c.ArtifactBase == "" {
+		c.ArtifactBase = DefaultArtifactBase
+	}
+	// Single source of truth: an asset that gives only `file:` gets its URL
+	// DERIVED from app_version, so the artifact path's version can never drift
+	// from the adapter version. An explicit url: is left as-is (validated +
+	// drift-checked in validateAssets).
+	for i := range c.Assets {
+		a := &c.Assets[i]
+		if a.URL == "" && a.File != "" {
+			a.URL = c.DerivedAssetURL(a.File, a.OS, a.Arch)
+		}
 	}
 	if x := c.Backend.X402; x != nil {
 		if x.Payer == "" {

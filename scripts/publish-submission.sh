@@ -29,6 +29,15 @@ BUNDLE_URL="${REL_BASE}/${PRIMARY_FILE}"
 # Every asset to release: the .bundles map's files, or just .bundle when absent.
 mapfile -t FILES < <(jq -r 'if (.bundles // {}) | length > 0 then (.bundles | to_entries[] | .value.file) else .bundle end' "$META")
 
+# Re-enforce the UPDATE gate against the LIVE catalogue before touching any org
+# repo: a new id is a first publish; an existing id must increase the version and
+# (pointer path) be signed by the owning publisher key. This is the same gate the
+# PR check runs — defense in depth at publish time, since the catalogue PR for
+# this version has not merged yet, so the live catalogue still holds the prior
+# owner+version. (No-ops harmlessly for a brand-new app.)
+echo "==> update gate (same publisher key + higher version)"
+"${PILOT_APP_BIN:-pilot-app}" verify-update "$DIR"
+
 # Re-run the review gate on every platform bundle before touching any org repo —
 # the platform repo must never get an entry for a bundle that fails verification.
 for f in "${FILES[@]}"; do

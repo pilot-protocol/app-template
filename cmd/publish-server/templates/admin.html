@@ -28,6 +28,18 @@
       {{end}}
     </table>
   </div>
+
+  <h1 style="margin-top:40px">Rotate a publisher key</h1>
+  <p class="lede">Re-point an app's owning publisher key (e.g. after a key loss or a handoff). Opens a re-signed catalogue PR on the platform repo. <strong>After it merges, the new owner must publish an update signed with the new key</strong> before existing installs re-validate.</p>
+  <div class="card" style="padding:20px 28px">
+    <form method="post" action="/admin/rotate-key">
+      <input type="hidden" name="token" value="{{.Token}}">
+      <p><label>App ID<br><input class="mono" name="id" placeholder="io.pilot.example" size="40" required></label></p>
+      <p><label>New publisher key<br><input class="mono" name="new_publisher" placeholder="ed25519:&lt;base64&gt;" size="64" required></label></p>
+      <p class="muted">The new owner generates it with <code>pilotctl appstore gen-key</code> and gives you the public line.</p>
+      <p><button type="submit">Open rotation PR</button></p>
+    </form>
+  </div>
 </div>
 </body>
 </html>

@@ -6,7 +6,9 @@
 // API (CORS, JSON):
 //
 //	POST /api/preview  {Submission}        -> {help, commands}   live <ns>.help + pilotctl preview
-//	POST /api/submit   {Submission}        -> {case_id,status} | {errors}
+//	POST /api/submit   {Submission}        -> {case_id,status} | {errors}   first publish (id must NOT exist)
+//	POST /api/update   {Submission}        -> {case_id,status} | {errors}   new version (id must exist, higher ver, owning key)
+//	POST /api/artifact/presign {id,version,os,arch,file} -> {put_url,public_url,key}   write-once R2 upload URL
 //
 // Admin (server-rendered, token-gated):
 //
@@ -33,8 +35,11 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/pilot-protocol/app-template/internal/catalogue"
 	"github.com/pilot-protocol/app-template/internal/publish"
+	"github.com/pilot-protocol/app-template/internal/scaffold"
 )
 
 //go:embed templates/*.html static/*
@@ -47,8 +52,11 @@ type server struct {
 	mailer     *publish.Mailer
 	pubToken   string
 	adminToken string
+	catToken   string // CATALOG_PUBLISH_TOKEN: write to the platform repo (key rotation PR)
+	catSignKey string // CATALOG_SIGN_KEY: hex ed25519 catalogue signing key
 	origins    []string
 	registrar  publish.BrokerRegistrar // registers managed apps with the broker on approval
+	r2         publish.R2Config        // artifact registry creds (presign uploads); zero ⇒ /api/artifact disabled
 }
 
 func main() {
@@ -77,9 +85,12 @@ func main() {
 		mailer:     publish.NewMailer(),
 		pubToken:   os.Getenv("PILOT_PUBLISH_TOKEN"),
 		adminToken: os.Getenv("ADMIN_TOKEN"),
+		catToken:   os.Getenv("CATALOG_PUBLISH_TOKEN"),
+		catSignKey: os.Getenv("CATALOG_SIGN_KEY"),
 		// CORS: only the production website may call the API. ALLOWED_ORIGINS
 		// overrides (e.g. add a local origin for testing); default is prod.
 		origins: splitOrigins(allowedOriginsEnv()),
+		r2:      publish.R2FromEnv(),
 	}
 	// Managed-app approval registers the app with the broker by writing its
 	// registry file (BROKER_REGISTRY). Unset = managed registration is logged
@@ -100,6 +111,8 @@ func main() {
 	})
 	mux.HandleFunc("/api/preview", s.cors(s.apiPreview))
 	mux.HandleFunc("/api/submit", s.cors(s.apiSubmit))
+	mux.HandleFunc("/api/update", s.cors(s.apiUpdate))
+	mux.HandleFunc("/api/artifact/presign", s.cors(s.apiArtifactPresign))
 	// Self-contained admin assets (embedded). The dashboard depends on nothing
 	// from the website — its CSS ships in this binary and is served from here.
 	mux.Handle("GET /static/", http.FileServer(http.FS(assets)))
@@ -108,6 +121,7 @@ func main() {
 	mux.HandleFunc("POST /admin/build", s.adminBuild)
 	mux.HandleFunc("POST /admin/approve", s.adminApprove)
 	mux.HandleFunc("POST /admin/reject", s.adminReject)
+	mux.HandleFunc("POST /admin/rotate-key", s.adminRotateKey)
 
 	log.Printf("publish-server on %s (publisher %s, origins=%v)", *addr, publish.PublisherString(key), s.origins)
 	log.Fatal(http.ListenAndServe(*addr, mux))
@@ -189,7 +203,21 @@ func (s *server) apiPreview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"help": help, "commands": cmds})
 }
 
-func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
+func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) { s.ingest(w, r, false) }
+
+// apiUpdate is the UPDATE counterpart of apiSubmit: it publishes a NEW version of
+// an app that already exists in the catalogue. Same schema, same machinery —
+// only the ownership precondition differs (the id must already exist, the version
+// must increase, and the platform key must own it). Keeping it a distinct
+// endpoint gives the website a clear "update" action with update-shaped errors.
+func (s *server) apiUpdate(w http.ResponseWriter, r *http.Request) { s.ingest(w, r, true) }
+
+// ingest validates a submission, enforces the create/update ownership gate
+// against the LIVE catalogue, and records a case (no build — that is the
+// admin-triggered step). isUpdate selects update semantics (id must exist) vs
+// create semantics (id must NOT exist), so a form submission can never clobber an
+// app owned by a different publisher key, in either direction.
+func (s *server) ingest(w http.ResponseWriter, r *http.Request, isUpdate bool) {
 	var sub publish.Submission
 	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
 		writeJSON(w, 400, map[string]any{"error": "bad json: " + err.Error()})
@@ -197,6 +225,10 @@ func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if errs := sub.Validate(); len(errs) > 0 {
 		writeJSON(w, 422, map[string]any{"errors": errs})
+		return
+	}
+	if code, errs := s.gateOwnership(sub, isUpdate); code != 0 {
+		writeJSON(w, code, map[string]any{"errors": errs})
 		return
 	}
 	// Record the submission WITHOUT building — we don't build a bundle for every
@@ -208,6 +240,124 @@ func (s *server) apiSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 202, map[string]any{"case_id": c.CaseID, "status": c.Status})
+}
+
+// gateOwnership enforces create-vs-update preconditions against the live signed
+// catalogue. It returns (0, nil) to allow, or (httpStatus, errors) to reject:
+//
+//   - create (isUpdate=false): the id must NOT already exist (else 409 → use /api/update).
+//   - update (isUpdate=true):  the id MUST exist, the version must increase, and
+//     the platform key (which signs form-path bundles) must equal the owning
+//     publisher pin — so the form can't override a PR-published, self-key-owned app.
+//
+// A fetch failure fails closed (502) — we never publish past an unknown owner.
+func (s *server) gateOwnership(sub publish.Submission, isUpdate bool) (int, []string) {
+	owners, err := catalogue.FetchOwners(catalogue.CatalogueURL())
+	if err != nil {
+		return http.StatusBadGateway, []string{"could not read the live catalogue to check ownership: " + err.Error()}
+	}
+	_, exists := owners[sub.ID]
+	switch {
+	case isUpdate && !exists:
+		return http.StatusConflict, []string{sub.ID + " is not published yet — use /api/submit to publish it first"}
+	case !isUpdate && exists:
+		return http.StatusConflict, []string{sub.ID + " is already published — use /api/update to ship a new version"}
+	case !isUpdate && !exists:
+		return 0, nil // brand-new app, allowed
+	}
+	// update of an existing app: enforce version increase + platform key ownership.
+	res := catalogue.CheckUpdate(owners, sub.ID, sub.Version, publish.PublisherString(s.key))
+	if res.OK() {
+		return 0, nil
+	}
+	var errs []string
+	for _, c := range res.Checks {
+		if !c.OK {
+			errs = append(errs, c.Name+": "+c.Msg)
+		}
+	}
+	return http.StatusUnprocessableEntity, errs
+}
+
+// artifactReq is the presign request: which platform binary, for which app
+// version, the publisher wants to upload. The server computes the write-once key
+// from these (the client never controls the prefix), so an upload can only ever
+// land under <id>/<version>/<os>-<arch>/, never in another app's or version's space.
+type artifactReq struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	OS      string `json:"os"`
+	Arch    string `json:"arch"`
+	File    string `json:"file"`
+}
+
+var (
+	knownArtOS   = map[string]bool{"linux": true, "darwin": true}
+	knownArtArch = map[string]bool{"amd64": true, "arm64": true}
+)
+
+// apiArtifactPresign issues a short-lived presigned PUT URL for one platform
+// artifact, plus the public URL the derived asset URL will resolve to. The key is
+// server-computed and write-once: a key that already exists is refused (bump the
+// version — a new version is a new prefix), which is what keeps an artifact from
+// ever drifting from its adapter version. The website's Artifacts step uploads
+// straight to R2 with the returned URL and gets back {file, public_url} to drop
+// into the submission. Disabled (503) when R2 creds are not configured.
+func (s *server) apiArtifactPresign(w http.ResponseWriter, r *http.Request) {
+	if !s.r2.Configured() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "artifact registry not configured on this server (set R2_* env)"})
+		return
+	}
+	var req artifactReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]any{"error": "bad json: " + err.Error()})
+		return
+	}
+	var errs []string
+	if !strings.HasPrefix(req.ID, "io.") || strings.ToLower(req.ID) != req.ID {
+		errs = append(errs, "id must be a lowercase reverse-DNS app id (io.<...>)")
+	}
+	if !scaffold.IsSemver(req.Version) {
+		errs = append(errs, "version must be semver")
+	}
+	if !knownArtOS[req.OS] {
+		errs = append(errs, "os must be linux or darwin")
+	}
+	if !knownArtArch[req.Arch] {
+		errs = append(errs, "arch must be amd64 or arm64")
+	}
+	if req.File == "" || strings.ContainsAny(req.File, "/\\") || strings.Contains(req.File, "..") {
+		errs = append(errs, "file must be a bare filename (no path separators or \"..\")")
+	}
+	if len(errs) > 0 {
+		writeJSON(w, 422, map[string]any{"errors": errs})
+		return
+	}
+
+	key := publish.ArtifactKey(req.ID, req.Version, req.OS, req.Arch, req.File)
+	// Write-once guard: never re-issue an upload for an existing object.
+	if exists, err := s.r2.ObjectExists(key); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "could not check the registry: " + err.Error()})
+		return
+	} else if exists {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": key + " already exists — artifacts are write-once; bump the version to upload new binaries"})
+		return
+	}
+
+	const ttl = 15 * time.Minute
+	put, err := s.r2.PresignPut(key, ttl)
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "presign failed: " + err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"method":     "PUT",
+		"put_url":    put,
+		"public_url": s.r2.PublicURL(key),
+		"key":        key,
+		"file":       req.File,
+		"expires_in": int(ttl.Seconds()),
+	})
 }
 
 // adminBuild kicks off the async bundle build for a submitted (or previously
@@ -399,6 +549,46 @@ func (s *server) adminReject(w http.ResponseWriter, r *http.Request) {
 		log.Printf("reject email to %s failed: %v", c.Submission.Email, err)
 	}
 	s.redirectAdmin(w, r)
+}
+
+// adminRotateKey re-points an app's catalogue publisher pin to a new ed25519 key
+// and opens a (re-signed) catalogue PR on the platform repo. Admin-token gated:
+// holding the admin token authorizes rotating ANY app's owning key — the operator
+// escape hatch for key loss or a publisher handoff. The new owner must publish an
+// update signed with the new key for existing installs to re-validate.
+func (s *server) adminRotateKey(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(r) {
+		http.Error(w, "admin token required", http.StatusUnauthorized)
+		return
+	}
+	id := strings.TrimSpace(r.FormValue("id"))
+	newPub := strings.TrimSpace(r.FormValue("new_publisher"))
+	if id == "" || newPub == "" {
+		http.Error(w, "both id and new_publisher are required", http.StatusBadRequest)
+		return
+	}
+	if !publish.ValidPublisherPin(newPub) {
+		http.Error(w, "new_publisher must be ed25519:<base64 32-byte key> (from `pilotctl appstore gen-key`)", http.StatusBadRequest)
+		return
+	}
+	if s.catToken == "" || s.catSignKey == "" {
+		http.Error(w, "key rotation not configured on this server (set CATALOG_PUBLISH_TOKEN + CATALOG_SIGN_KEY)", http.StatusServiceUnavailable)
+		return
+	}
+	prURL, err := publish.RotatePublisher(id, newPub, s.catToken, s.catSignKey)
+	if err != nil {
+		http.Error(w, "rotation failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!doctype html><meta charset=utf-8><body style="font-family:system-ui;max-width:640px;margin:60px auto">`+
+		`<h2>Key rotation PR opened</h2><p><b>%s</b> → <code>%s</code></p>`+
+		`<p><a href="%s">%s</a></p>`+
+		`<p style="color:#a00">After this PR merges, the new owner must publish an update signed with the new key before existing installs re-validate.</p>`+
+		`<p><a href="/admin?token=%s">← back to admin</a></p></body>`,
+		template.HTMLEscapeString(id), template.HTMLEscapeString(newPub),
+		template.HTMLEscapeString(prURL), template.HTMLEscapeString(prURL),
+		template.HTMLEscapeString(r.FormValue("token")))
 }
 
 func (s *server) redirectAdmin(w http.ResponseWriter, r *http.Request) {
