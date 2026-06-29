@@ -42,6 +42,8 @@ func main() {
 		cmdVerify(os.Args[2:])
 	case "verify-submission":
 		cmdVerifySubmission(os.Args[2:])
+	case "verify-update":
+		cmdVerifyUpdate(os.Args[2:])
 	case "submit":
 		cmdSubmit(os.Args[2:])
 	case "example":
@@ -63,6 +65,8 @@ Usage:
   pilot-app validate -c pilot.app.yaml            validate a spec, no output
   pilot-app verify   <bundle.tar.gz | catalogue.json>
                                                   run the catalogue review-gate checks (SPEC §7.1)
+  pilot-app verify-update <submissions/<id>/submission.json>
+                                                  enforce the update gate: same publisher key + higher version
   pilot-app submit   -C <project-dir> --prepare <app-template-fork>
                                                   write a submission PR payload (the single front door)
   pilot-app example                               print a starter pilot.app.yaml
@@ -255,6 +259,82 @@ func cmdVerifySubmission(args []string) {
 		os.Exit(1)
 	}
 	fmt.Printf("\nVERIFY OK — built + verified %d platform(s) from the submission spec.\n", len(b.Platforms))
+}
+
+// cmdVerifyUpdate enforces the update ownership + monotonicity gate for a
+// submission against the LIVE catalogue: if the app id already exists, the new
+// version must be strictly higher and (for the PR/pointer path, where the bundle
+// is pre-signed) the bundle's publisher key must equal the owning publisher pin.
+// A brand-new id passes (first publish). This is the CI gate that makes "an
+// update needs the same publishing key" enforceable without any stored secret —
+// the publisher proves ownership by signing with the key already pinned.
+//
+// It accepts a submission.json (pointer or rich) or a submissions/<id>/ dir.
+func cmdVerifyUpdate(args []string) {
+	fs := flag.NewFlagSet("verify-update", flag.ExitOnError)
+	_ = fs.Parse(args)
+	target := fs.Arg(0)
+	if target == "" {
+		fatalf("usage: pilot-app verify-update <submissions/<id>/submission.json | submissions/<id>/>")
+	}
+	subPath, subDir := target, filepath.Dir(target)
+	if fi, err := os.Stat(target); err == nil && fi.IsDir() {
+		subPath, subDir = filepath.Join(target, "submission.json"), target
+	}
+
+	raw, err := os.ReadFile(subPath)
+	if err != nil {
+		fatalf("read %s: %v", subPath, err)
+	}
+	// One decode covers both shapes: a pointer carries `bundle`; a rich submission
+	// carries backend/methods. Either way we need id + version, and for a pointer
+	// we additionally recover the signer pubkey from the built bundle's manifest.
+	var ptr struct {
+		ID      string `json:"id"`
+		Version string `json:"version"`
+		Bundle  string `json:"bundle"`
+	}
+	if err := json.Unmarshal(raw, &ptr); err != nil {
+		fatalf("parse %s: %v", subPath, err)
+	}
+	if ptr.ID == "" || ptr.Version == "" {
+		fatalf("submission %s is missing id/version", subPath)
+	}
+
+	newPublisher := ""
+	if ptr.Bundle != "" {
+		// Pointer path: the bundle is pre-built and publisher-signed — recover the
+		// signer from its manifest so we can enforce the same-key rule.
+		facts, err := catalogue.ReadBundleFacts(filepath.Join(subDir, ptr.Bundle))
+		if err != nil {
+			fatalf("read bundle facts for %s: %v", ptr.Bundle, err)
+		}
+		newPublisher = facts.Publisher
+		if facts.Version != ptr.Version {
+			fatalf("submission version %q != bundle manifest version %q", ptr.Version, facts.Version)
+		}
+	}
+
+	owners, err := catalogue.FetchOwners(catalogue.CatalogueURL())
+	if err != nil {
+		fatalf("update gate: %v", err)
+	}
+	r := catalogue.CheckUpdate(owners, ptr.ID, ptr.Version, newPublisher)
+
+	fmt.Printf("update gate for %s v%s:\n", ptr.ID, ptr.Version)
+	allOK := true
+	for _, c := range r.Checks {
+		mark := "✓"
+		if !c.OK {
+			mark, allOK = "✗", false
+		}
+		fmt.Printf("  %s %-34s %s\n", mark, c.Name, c.Msg)
+	}
+	if !allOK {
+		fmt.Fprintln(os.Stderr, "\nUPDATE GATE FAILED — an update must increase the version and be signed by the original publisher key.")
+		os.Exit(1)
+	}
+	fmt.Println("\nUPDATE GATE OK.")
 }
 
 // checkStaging inspects one built platform tarball and confirms the native

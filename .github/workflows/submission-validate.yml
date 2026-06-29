@@ -47,3 +47,19 @@ jobs:
             found=1
           done
           if [ "$found" = 0 ]; then echo "no submissions in this PR — tool CI only"; fi
+
+      - name: Enforce the update gate (same publisher key + higher version)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # For every submission, check it against the LIVE catalogue: a new app id
+          # passes (first publish); an EXISTING id must increase the version and —
+          # on the PR/pointer path, where the bundle is pre-signed — be signed by
+          # the original publisher key. This is how "an update needs the same
+          # publishing key" is enforced in CI, with no stored secret: ownership is
+          # proven by possession of the key whose pubkey is already pinned.
+          for sub in submissions/*/submission.json; do
+            echo "::group::update-gate $(dirname "$sub")"
+            /tmp/pilot-app verify-update "$sub"
+            echo "::endgroup::"
+          done
