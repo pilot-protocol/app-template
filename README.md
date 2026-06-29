@@ -1,6 +1,6 @@
 # pilot-app — publish an existing API or CLI on the Pilot app store
 
-[![coverage](https://img.shields.io/badge/coverage-79%25-brightgreen)](#testing)
+[![coverage](https://img.shields.io/badge/coverage-78%25-brightgreen)](#testing)
 [![go](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](go.mod)
 
 `pilot-app` turns a declarative `pilot.app.yaml` into a complete, signed,
@@ -254,7 +254,7 @@ coverage can't silently regress:
 |---|---|---|
 | `internal/broker` | holds master keys, verifies caller identity | 78% |
 | `internal/catalogue` | the objective review gate (`VerifyEntry`) | 80% |
-| `internal/publish` | build → sign → submit pipeline | 72% |
+| `internal/publish` | build → sign → submit pipeline | 70% |
 | `internal/scaffold` | `pilot.app.yaml` → adapter generator | 68% |
 
 Reproduce the number behind the badge with `make cover`.

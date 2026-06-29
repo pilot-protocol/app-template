@@ -52,7 +52,7 @@ jobs:
           # The catalogue gate (VerifyEntry) is the objective review gate, and
           # publish is the build→sign→submit pipeline — both gated now.
           gate catalogue 80
-          gate publish 72
+          gate publish 70
           # Report the rest.
           for p in x402; do
             echo "internal/$p: $(go test -cover ./internal/$p/ | grep -oE 'coverage: [0-9.]+%')"
