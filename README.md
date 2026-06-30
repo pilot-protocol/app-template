@@ -53,6 +53,12 @@ You only ever touch **one repo** (`app-template`); see
 > **New to publishing?** Start with [`docs/PUBLISHING.md`](docs/PUBLISHING.md) —
 > the field-level **required-vs-optional** reference, the two publish paths and
 > why they're at parity, and a `cli`-app worked example.
+>
+> **Shipping a real app end to end?** Follow
+> [`docs/PUBLISHING-PLAYBOOK.md`](docs/PUBLISHING-PLAYBOOK.md) — the complete
+> runbook across every backend (`http`/`cli`) and auth mode (`byo`/`managed`),
+> native-binary delivery, testing, and the submission → catalogue → website-card
+> steps, with edge cases and a pre-flight checklist.
 
 ### Two ways to publish — same required fields, same result
 
