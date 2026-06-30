@@ -75,7 +75,15 @@ jobs:
           BIN=$(jq -r '.binary.path' "$ROOT/manifest.json")
           chmod +x "$ROOT/$BIN"
           CMD=$(jq -r '.command' "$ROOT/install.json")
-          EXEC=$(jq -r --arg c "$CMD" '.assets[] | select((.exec_path|split("/")|last)==$c or .exec_path==$c) | .exec_path' "$ROOT/install.json" | head -1)
+          # Resolve the vanilla binary for THIS runner's os/arch. A multi-platform
+          # cli app lists one asset per os/arch, all with the same exec_path
+          # basename (the command), so a blind `head -1` can pick a non-host asset
+          # that the adapter never staged here — leaving the vanilla path missing.
+          HOSTOS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          case "$(uname -m)" in x86_64|amd64) HOSTARCH=amd64;; aarch64|arm64) HOSTARCH=arm64;; *) HOSTARCH=amd64;; esac
+          EXEC=$(jq -r --arg c "$CMD" --arg os "$HOSTOS" --arg arch "$HOSTARCH" '.assets[] | select(((.exec_path|split("/")|last)==$c or .exec_path==$c) and (.os==$os) and (.arch==$arch)) | .exec_path' "$ROOT/install.json" | head -1)
+          # Fall back to any matching asset (single-platform/universal bundles).
+          [ -n "$EXEC" ] || EXEC=$(jq -r --arg c "$CMD" '.assets[] | select((.exec_path|split("/")|last)==$c or .exec_path==$c) | .exec_path' "$ROOT/install.json" | head -1)
           if [ -z "$EXEC" ]; then echo "::error::could not resolve the command exec_path from install.json"; exit 1; fi
           echo "ns=$NS root=$ROOT bin=$BIN exec=$EXEC"
           {
