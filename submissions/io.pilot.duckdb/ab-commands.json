@@ -1,0 +1,62 @@
+{
+  "commands": [
+    {
+      "label": "duckdb -version",
+      "vanilla": [
+        "-version"
+      ],
+      "method": "duckdb.version",
+      "payload": {}
+    },
+    {
+      "label": "duckdb -help",
+      "vanilla": [
+        "-help"
+      ],
+      "method": "duckdb.cli_help",
+      "payload": {}
+    },
+    {
+      "label": "select scalar (csv)",
+      "vanilla": [
+        ":memory:",
+        "-csv",
+        "-c",
+        "SELECT 42 AS answer"
+      ],
+      "method": "duckdb.query_csv",
+      "payload": {
+        "database": ":memory:",
+        "sql": "SELECT 42 AS answer"
+      }
+    },
+    {
+      "label": "select scalar (json)",
+      "vanilla": [
+        ":memory:",
+        "-json",
+        "-c",
+        "SELECT 'duck' AS who, 7 AS n"
+      ],
+      "method": "duckdb.query_json",
+      "payload": {
+        "database": ":memory:",
+        "sql": "SELECT 'duck' AS who, 7 AS n"
+      }
+    },
+    {
+      "label": "range agg (csv)",
+      "vanilla": [
+        ":memory:",
+        "-csv",
+        "-c",
+        "SELECT count(*) c, sum(i) s FROM range(1,1001) t(i)"
+      ],
+      "method": "duckdb.query_csv",
+      "payload": {
+        "database": ":memory:",
+        "sql": "SELECT count(*) c, sum(i) s FROM range(1,1001) t(i)"
+      }
+    }
+  ]
+}
