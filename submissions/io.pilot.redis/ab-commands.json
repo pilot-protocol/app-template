@@ -1,0 +1,50 @@
+{
+  "commands": [
+    {
+      "label": "redis-cli --version",
+      "vanilla": [
+        "redis-cli",
+        "--version"
+      ],
+      "method": "redis.version",
+      "payload": {}
+    },
+    {
+      "label": "redis-cli --help",
+      "vanilla": [
+        "redis-cli",
+        "--help"
+      ],
+      "method": "redis.cli_help",
+      "payload": {}
+    },
+    {
+      "label": "redis-server --help",
+      "vanilla": [
+        "redis-server",
+        "--help"
+      ],
+      "method": "redis.exec",
+      "payload": {
+        "args": [
+          "redis-server",
+          "--help"
+        ]
+      }
+    },
+    {
+      "label": "redis-cli --version (exec)",
+      "vanilla": [
+        "redis-cli",
+        "--version"
+      ],
+      "method": "redis.exec",
+      "payload": {
+        "args": [
+          "redis-cli",
+          "--version"
+        ]
+      }
+    }
+  ]
+}
