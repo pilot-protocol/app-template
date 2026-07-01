@@ -1,0 +1,36 @@
+{
+  "commands": [
+    {
+      "label": "docker --version",
+      "vanilla": [
+        "--version"
+      ],
+      "method": "docker.version",
+      "payload": {}
+    },
+    {
+      "label": "docker --help",
+      "vanilla": [
+        "--help"
+      ],
+      "method": "docker.cli_help",
+      "payload": {}
+    },
+    {
+      "label": "docker version (exec)",
+      "vanilla": [
+        "version",
+        "--format",
+        "{{.Client.Version}}"
+      ],
+      "method": "docker.exec",
+      "payload": {
+        "args": [
+          "version",
+          "--format",
+          "{{.Client.Version}}"
+        ]
+      }
+    }
+  ]
+}

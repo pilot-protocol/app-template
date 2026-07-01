@@ -1,0 +1,229 @@
+{
+  "id": "io.pilot.docker",
+  "version": "29.6.1",
+  "description": "Docker 29.6.1 as a native CLI for agents (Linux): delivers the Docker Engine (dockerd + containerd + runc) and the docker CLI, sha-pinned. Start a local engine (docker.engine_start), then pull images and run containers — run/ps/images/pull/logs, plus build, exec, networks, volumes, and any docker command via a verbatim-argv passthrough. Real containers on a real Linux host, no Docker Desktop.",
+  "email": "apps@pilotprotocol.network",
+  "backend": {
+    "type": "cli",
+    "command": [
+      "dockerctl"
+    ],
+    "env_passthrough": [
+      "DOCKER_HOST",
+      "DOCKER_DIR",
+      "DOCKER_TLS_VERIFY",
+      "DOCKER_CERT_PATH",
+      "DOCKER_CONFIG",
+      "DOCKER_CONTEXT",
+      "HOME"
+    ]
+  },
+  "methods": [
+    {
+      "name": "docker.engine_start",
+      "description": "Start a local Docker Engine (dockerd) on this Linux host, daemonized, on a private unix socket under `DOCKER_DIR` (default /tmp/pilot-docker); waits until the API is ready. Subsequent docker methods auto-target this socket. Requires root (dockerd manages namespaces/cgroups). This is the bundled `dockerd` with `--data-root/--exec-root` under DOCKER_DIR.",
+      "latency": "slow",
+      "cli": {
+        "args": [
+          "engine-start"
+        ]
+      }
+    },
+    {
+      "name": "docker.engine_stop",
+      "description": "Stop the local dockerd started by docker.engine_start.",
+      "latency": "med",
+      "cli": {
+        "args": [
+          "engine-stop"
+        ]
+      }
+    },
+    {
+      "name": "docker.version",
+      "description": "Print docker client + server (if reachable) version info. This is `docker version`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "version"
+        ]
+      }
+    },
+    {
+      "name": "docker.info",
+      "description": "Show system-wide Docker info (containers, images, storage driver, kernel, runtimes). This is `docker info`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "info"
+        ]
+      }
+    },
+    {
+      "name": "docker.ps",
+      "description": "List all containers (running and stopped). This is `docker ps -a`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "ps",
+          "-a"
+        ]
+      }
+    },
+    {
+      "name": "docker.images",
+      "description": "List images in the local store. This is `docker images`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "images"
+        ]
+      }
+    },
+    {
+      "name": "docker.pull",
+      "description": "Pull an image from a registry. This is `docker pull <image>`.",
+      "latency": "slow",
+      "params": [
+        {
+          "name": "image",
+          "type": "string",
+          "required": true,
+          "description": "container image reference, e.g. \"hello-world\", \"alpine:3.20\", \"nginx\""
+        }
+      ],
+      "cli": {
+        "args": [
+          "pull",
+          "${image}"
+        ]
+      }
+    },
+    {
+      "name": "docker.run",
+      "description": "Run a container from `image` with its default command and remove it on exit (`docker run --rm <image>`). For flags/commands (detached, ports, volumes, a custom command) use docker.exec, e.g. {\"args\":[\"run\",\"-d\",\"-p\",\"8080:80\",\"nginx\"]}.",
+      "latency": "slow",
+      "params": [
+        {
+          "name": "image",
+          "type": "string",
+          "required": true,
+          "description": "container image reference, e.g. \"hello-world\", \"alpine:3.20\", \"nginx\""
+        }
+      ],
+      "cli": {
+        "args": [
+          "run",
+          "--rm",
+          "${image}"
+        ]
+      }
+    },
+    {
+      "name": "docker.logs",
+      "description": "Fetch the logs of a container. This is `docker logs <container>`.",
+      "latency": "fast",
+      "params": [
+        {
+          "name": "container",
+          "type": "string",
+          "required": true,
+          "description": "container name or id"
+        }
+      ],
+      "cli": {
+        "args": [
+          "logs",
+          "${container}"
+        ]
+      }
+    },
+    {
+      "name": "docker.exec",
+      "description": "Run the docker CLI with a verbatim argv — the full surface beyond the curated methods. Payload is {\"args\":[...]} passed straight to `docker` (+ optional {\"stdin\":\"...\"}). This is how you run a container with any flags, build an image, exec into a container, manage networks/volumes/compose, etc. Examples: {\"args\":[\"run\",\"-d\",\"--name\",\"web\",\"-p\",\"8080:80\",\"nginx\"]}; {\"args\":[\"run\",\"--rm\",\"alpine\",\"sh\",\"-c\",\"echo hi\"]}; {\"args\":[\"build\",\"-t\",\"myapp\",\"/work\"]}; {\"args\":[\"exec\",\"web\",\"nginx\",\"-v\"]}. The wrapper's own verbs `engine-start`/`engine-stop` also work here.",
+      "latency": "slow",
+      "params": [
+        {
+          "name": "args",
+          "type": "array",
+          "required": true,
+          "description": "verbatim argv passed to docker, e.g. [\"run\",\"--rm\",\"alpine\",\"echo\",\"hi\"]"
+        },
+        {
+          "name": "stdin",
+          "type": "string",
+          "required": false,
+          "description": "optional text piped to the CLI's stdin (e.g. a Dockerfile for `build -`)"
+        }
+      ],
+      "cli": {
+        "passthrough": true
+      }
+    },
+    {
+      "name": "docker.cli_help",
+      "description": "Return the complete `docker --help` (all commands + global options) from the delivered binary. This is `docker --help`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "--help"
+        ]
+      }
+    }
+  ],
+  "listing": {
+    "display_name": "Docker",
+    "tagline": "Run Docker from an agent — a local Docker Engine + CLI on Linux, real containers",
+    "app_description": "# Docker (Engine + CLI) — native CLI for agents (Linux)\n\nThis app installs the official **Docker 29.6.1** static distribution on a Linux host and fronts it as typed\nmethods. The bundle carries the full **Docker Engine** — `dockerd`, `containerd`, `runc`, `containerd-shim-runc-v2`,\n`docker-proxy`, `docker-init`, `ctr` — plus the `docker` CLI, each sha-pinned and staged at install. A small\n`dockerctl` wrapper manages the engine lifecycle and fronts the CLI.\n\n## Linux only\n\nDocker containers require Linux kernel features (namespaces, cgroups, overlayfs) — there is **no native macOS\n`dockerd`** (Docker Desktop runs the engine inside a hidden Linux VM). This app therefore targets **Linux (amd64 +\narm64)**. `docker.engine_start` runs a real daemon and requires **root** (the pilot host must run as root, e.g. in a\ncontainer or VM). To use Docker against an existing daemon instead, set `DOCKER_HOST` and skip `engine_start`.\n\n## The usual flow\n\n1. **Start the engine:** `docker.engine_start` `{}` — boots `dockerd` on a private socket under `DOCKER_DIR`\n   (default `/tmp/pilot-docker`), waits until the API is ready.\n2. **Pull + run:** `docker.pull` `{ \"image\": \"hello-world\" }`, then `docker.run` `{ \"image\": \"hello-world\" }`.\n3. **Inspect:** `docker.ps`, `docker.images`, `docker.logs`, `docker.info`.\n4. **Anything else:** `docker.exec` `{ \"args\": [\"run\",\"-d\",\"-p\",\"8080:80\",\"nginx\"] }` — any docker command with any flags.\n5. **Stop:** `docker.engine_stop`.\n\n## Methods\n\n- `docker.engine_start` / `docker.engine_stop` — local Docker Engine lifecycle (root).\n- `docker.version`, `docker.info` — client/server versions and system info.\n- `docker.ps`, `docker.images`, `docker.logs` — inspect containers/images/logs.\n- `docker.pull` / `docker.run` — pull an image / run a container (`--rm`).\n- `docker.exec` — the docker CLI with a verbatim argv (+ optional stdin): run with any flags, `build`, `exec`,\n  networks, volumes, compose plugins, etc.\n- `docker.cli_help` — the full `docker --help`. `docker.help` — the self-describing method list.\n\n## Configuration\n\n- **`DOCKER_DIR`** (env) — where dockerd keeps its socket, data-root, exec-root, pidfile, and log\n  (default `/tmp/pilot-docker`).\n- **`DOCKER_HOST`** (env) — point the CLI at an existing/remote daemon instead of the bundled one\n  (`tcp://host:2375` or `unix:///path`); when set, skip `docker.engine_start`.\n- **Root** — `dockerd` needs root and kernel container support. Works on a Linux host/VM/privileged container where\n  the pilot daemon runs as root; not on a restricted, capability-stripped sandbox.\n- **Storage driver** — defaults to `overlay2`; pass an alternative via `docker.exec`\n  (`{\"args\":[\"engine-start\",\"--storage-driver\",\"vfs\"]}`) on filesystems where overlay2 is unavailable.\n\n## Good to know\n\n- Free and open source (Apache-2.0). Binaries are the official Docker static release, repackaged unmodified.\n- Output returns verbatim; on a non-zero exit the reply is `{stdout, stderr, exit}`.\n\n## docker --help\n```\nDocker CLI — commands and options\n=================================\n\nDocker runs applications in containers. This app delivers the Docker Engine\n(dockerd + containerd + runc) and the docker CLI. Start a local engine with\n'engine-start', then use any docker command.\n\nUsage:  docker [OPTIONS] COMMAND\n\nA self-sufficient runtime for containers\n\nCommon Commands:\n  run         Create and run a new container from an image\n  exec        Execute a command in a running container\n  ps          List containers\n  build       Build an image from a Dockerfile\n  pull        Download an image from a registry\n  push        Upload an image to a registry\n  images      List images\n  login       Authenticate to a registry\n  logout      Log out from a registry\n  search      Search Docker Hub for images\n  version     Show the Docker version information\n  info        Display system-wide information\n\nManagement Commands:\n  builder     Manage builds\n  compose*    Docker Compose\n  container   Manage containers\n  context     Manage contexts\n  image       Manage images\n  manifest    Manage Docker image manifests and manifest lists\n  network     Manage networks\n  plugin      Manage plugins\n  system      Manage Docker\n  volume      Manage volumes\n\nSwarm Commands:\n  swarm       Manage Swarm\n\nCommands:\n  attach      Attach local standard input, output, and error streams to a running container\n  commit      Create a new image from a container's changes\n  cp          Copy files/folders between a container and the local filesystem\n  create      Create a new container\n  diff        Inspect changes to files or directories on a container's filesystem\n  events      Get real time events from the server\n  export      Export a container's filesystem as a tar archive\n  history     Show the history of an image\n  import      Import the contents from a tarball to create a filesystem image\n  inspect     Return low-level information on Docker objects\n  kill        Kill one or more running containers\n  load        Load an image from a tar archive or STDIN\n  logs        Fetch the logs of a container\n  pause       Pause all processes within one or more containers\n  port        List port mappings or a specific mapping for the container\n  rename      Rename a container\n  restart     Restart one or more containers\n  rm          Remove one or more containers\n  rmi         Remove one or more images\n  save        Save one or more images to a tar archive (streamed to STDOUT by default)\n  start       Start one or more stopped containers\n  stats       Display a live stream of container(s) resource usage statistics\n  stop        Stop one or more running containers\n  tag         Create a tag TARGET_IMAGE that refers to SOURCE_IMAGE\n  top         Display the running processes of a container\n  unpause     Unpause all processes within one or more containers\n  update      Update configuration of one or more containers\n  wait        Block until one or more containers stop, then print their exit codes\n\nGlobal Options:\n      --config string      Location of client config files (default\n                           \"/Users/alexgodo/.docker\")\n  -c, --context string     Name of the context to use to connect to the\n                           daemon (overrides DOCKER_HOST env var and\n                           default context set with \"docker context use\")\n  -D, --debug              Enable debug mode\n  -H, --host string        Daemon socket to connect to\n  -l, --log-level string   Set the logging level (\"debug\", \"info\",\n                           \"warn\", \"error\", \"fatal\") (default \"info\")\n      --tls                Use TLS; implied by --tlsverify\n      --tlscacert string   Trust certs signed only by this CA (default\n                           \"/Users/alexgodo/.docker/ca.pem\")\n      --tlscert string     Path to TLS certificate file (default\n                           \"/Users/alexgodo/.docker/cert.pem\")\n      --tlskey string      Path to TLS key file (default\n                           \"/Users/alexgodo/.docker/key.pem\")\n      --tlsverify          Use TLS and verify the remote\n  -v, --version            Print version information and quit\n\nRun 'docker COMMAND --help' for more information on a command.\n\nFor more help on how to use Docker, head to https://docs.docker.com/go/guides/\n```\n",
+    "license": "Apache-2.0",
+    "homepage": "https://www.docker.com",
+    "source_url": "https://github.com/moby/moby",
+    "categories": [
+      "devops",
+      "containers",
+      "runtime",
+      "data"
+    ],
+    "keywords": [
+      "docker",
+      "containers",
+      "dockerd",
+      "moby",
+      "containerd",
+      "runc",
+      "oci",
+      "devops",
+      "engine",
+      "images"
+    ]
+  },
+  "vendor": {
+    "name": "Pilot Protocol",
+    "url": "https://pilotprotocol.network",
+    "contact": "apps@pilotprotocol.network",
+    "agent_usage": "On a Linux host with root, agents call docker.engine_start to boot a local dockerd, then docker.pull/docker.run/docker.ps/docker.images/docker.logs and docker.exec (any docker command with a verbatim argv, incl. build/exec/networks/volumes). Set DOCKER_HOST to target an existing daemon instead. Output is text, or {stdout,stderr,exit} on a non-zero exit.",
+    "capabilities": "Delivers the official Docker 29.6.1 static Engine+CLI (dockerd, containerd, runc, containerd-shim-runc-v2, docker-proxy, docker-init, ctr, docker) as a sha-pinned per-arch Linux bundle with a dockerctl wrapper that manages the daemon lifecycle and fronts the CLI. Run real OCI containers on a Linux host/VM/privileged container. Apache-2.0; repackaged unmodified."
+  },
+  "artifacts": [
+    {
+      "role": "binary",
+      "os": "linux",
+      "arch": "amd64",
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.docker/29.6.1/linux-amd64/docker-29.6.1-linux-amd64.tar.gz",
+      "sha256": "af67328c2d617401f22c108b2ebe5f06e6f59978c50a3f2c07d5f0041216172d",
+      "unpack": "tar.gz",
+      "exec_path": "docker-29.6.1-linux-amd64/bin/dockerctl",
+      "order": 1
+    },
+    {
+      "role": "binary",
+      "os": "linux",
+      "arch": "arm64",
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.docker/29.6.1/linux-arm64/docker-29.6.1-linux-arm64.tar.gz",
+      "sha256": "c16db13a77f40fd9af7fe5520cb1bd9c78b5c2ab2d6e1749863683dce957f572",
+      "unpack": "tar.gz",
+      "exec_path": "docker-29.6.1-linux-arm64/bin/dockerctl",
+      "order": 1
+    }
+  ]
+}
