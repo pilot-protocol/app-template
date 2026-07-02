@@ -1,0 +1,179 @@
+{
+  "id": "io.pilot.aegis",
+  "version": "0.1.3",
+  "description": "AEGIS is a runtime firewall for AI agents: scan files, commands, and tool results for prompt injection, jailbreaks, homoglyph/leetspeak obfuscation, and impersonation before your agent acts on them. An 880 KB, fully-offline Rust binary \u2014 L1 Aho-Corasick pattern matching (microseconds) plus an optional local judge model. 90% recall / 95% precision on a held-out set.",
+  "email": "apps@pilotprotocol.network",
+  "backend": {
+    "type": "cli",
+    "command": [
+      "aegis"
+    ],
+    "env_passthrough": [
+      "HOME",
+      "TMPDIR"
+    ]
+  },
+  "methods": [
+    {
+      "name": "aegis.scan",
+      "description": "One-shot scan of one or more files or directories for prompt injection, jailbreaks, homoglyph/leetspeak obfuscation, and impersonation. Returns the verdict per path. This is `aegis scan <path>...`.",
+      "latency": "med",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "description": "file or directory path to scan, e.g. ./inbox/message.txt"
+        }
+      ],
+      "cli": {
+        "args": [
+          "aegis",
+          "scan",
+          "${path}"
+        ]
+      }
+    },
+    {
+      "name": "aegis.status",
+      "description": "Tail the HMAC-chained audit log of recent verdicts. This is `aegis status`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "aegis",
+          "status"
+        ]
+      }
+    },
+    {
+      "name": "aegis.targets",
+      "description": "List the agent surfaces AEGIS is protecting (inbox, tool results, skill files, memory, ...). This is `aegis targets`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "aegis",
+          "targets"
+        ]
+      }
+    },
+    {
+      "name": "aegis.config",
+      "description": "Show the effective AEGIS configuration (rules, thresholds, watch targets). This is `aegis config`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "aegis",
+          "config"
+        ]
+      }
+    },
+    {
+      "name": "aegis.version",
+      "description": "Print the AEGIS version. This is `aegis version`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "aegis",
+          "version"
+        ]
+      }
+    },
+    {
+      "name": "aegis.exec",
+      "description": "Run any AEGIS subcommand with a verbatim argv \u2014 the full surface beyond the curated methods. Payload is {\"args\":[<subcommand>, ...]} with optional {\"stdin\":\"...\"}. This is how you use the blocking gates: the PreToolUse gate {\"args\":[\"scan-cmd\"],\"stdin\":\"{\\\"tool_input\\\":{\\\"command\\\":\\\"...\\\"}}\"} exits 0 (allow) or 2 (block); the PostToolUse gate {\"args\":[\"scan-result\"],\"stdin\":\"{...}\"} warns without blocking. Also reaches init/daemon/install-models/install-hooks.",
+      "latency": "med",
+      "params": [
+        {
+          "name": "args",
+          "type": "array",
+          "required": true,
+          "description": "verbatim argv: [<subcommand>, ...], e.g. [\"scan-cmd\"] or [\"scan\",\"./file\"]"
+        },
+        {
+          "name": "stdin",
+          "type": "string",
+          "required": false,
+          "description": "optional text piped to stdin (e.g. the JSON tool_input for scan-cmd/scan-result)"
+        }
+      ],
+      "cli": {
+        "passthrough": true
+      }
+    },
+    {
+      "name": "aegis.help",
+      "description": "Print the AEGIS usage and subcommand list. This is `aegis --help`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "aegis",
+          "--help"
+        ]
+      }
+    }
+  ],
+  "listing": {
+    "display_name": "AEGIS",
+    "tagline": "Runtime firewall for AI agents \u2014 blocks prompt injection before your agent reads it",
+    "app_description": "# AEGIS \u2014 runtime firewall for AI agents\n\nAEGIS inspects untrusted content reaching your agent \u2014 inbox messages, tool results, web fetches, MCP responses, skill files, memory notes \u2014 and blocks **prompt injection, jailbreaks, and impersonation** before the agent ever sees it. Genuine status messages pass straight through.\n\n## How it works\n\nTwo layers. **L1** is Aho-Corasick pattern matching in pure Rust \u2014 microseconds, ~120 known attack families with homoglyph and leetspeak normalization and a sliding-window scan. **L2** is an optional local Qwen3-1.7B judge via llama.cpp \u2014 fully offline, no network. On a held-out labeled set: **90% recall, 95% precision, 92% F1**. An 880 KB binary with an HMAC-chained audit log at `~/.aegis/audit.jsonl`.\n\n## Using it\n\n- `aegis.scan <path>` \u2014 one-shot scan of a file or directory.\n- `aegis.exec {\"args\":[\"scan-cmd\"],\"stdin\":...}` \u2014 the PreToolUse blocking gate (exit 0 allow / 2 block).\n- `aegis.exec {\"args\":[\"scan-result\"],\"stdin\":...}` \u2014 the PostToolUse non-blocking check (warns).\n- `aegis.status` / `aegis.targets` / `aegis.config` \u2014 audit log, protected surfaces, and configuration.\n\nThe L2 judge model (~1.8 GB) is optional \u2014 L1 patterns work without it.",
+    "license": "MIT",
+    "homepage": "https://aegis.pilotprotocol.network",
+    "source_url": "https://github.com/pilot-protocol/aegis",
+    "categories": [
+      "security",
+      "firewall",
+      "guardrail"
+    ],
+    "keywords": [
+      "security",
+      "firewall",
+      "prompt-injection",
+      "jailbreak",
+      "guardrail",
+      "defense",
+      "offline"
+    ]
+  },
+  "vendor": {
+    "name": "Pilot Protocol",
+    "url": "https://aegis.pilotprotocol.network",
+    "contact": "apps@pilotprotocol.network",
+    "agent_usage": "Scan untrusted content before acting on it: aegis.scan for files/dirs; aegis.exec {\"args\":[\"scan-cmd\"],\"stdin\":...} as a PreToolUse gate (exit 0 allow / 2 block) and {\"args\":[\"scan-result\"],\"stdin\":...} as a PostToolUse check. aegis.status tails the audit log; aegis.targets/aegis.config introspect. Fully offline.",
+    "capabilities": "Delivers the AEGIS 0.1.3 runtime firewall as a sha-pinned, relocatable per-OS/arch bundle. L1 Aho-Corasick patterns (pure Rust, microseconds) plus an optional local Qwen3-1.7B judge (llama.cpp, offline). 90% recall / 95% precision on a held-out set. HMAC-chained audit log. MIT."
+  },
+  "artifacts": [
+    {
+      "role": "binary",
+      "os": "darwin",
+      "arch": "arm64",
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.aegis/0.1.3/darwin-arm64/aegis-0.1.3-darwin-arm64.tar.gz",
+      "sha256": "dc20fc8c70aa0516d5fd503709a5c3c1e7f91964591bfa378c8bfe946db85b01",
+      "size": 448175,
+      "unpack": "tar.gz",
+      "exec_path": "aegis-0.1.3-darwin-arm64/bin/aegis",
+      "order": 1
+    },
+    {
+      "role": "binary",
+      "os": "linux",
+      "arch": "amd64",
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.aegis/0.1.3/linux-amd64/aegis-0.1.3-linux-amd64.tar.gz",
+      "sha256": "5cb700460a4072894429fa0f90038d9d597fac0b9e160d7c1090a04ad3ea3745",
+      "size": 571791,
+      "unpack": "tar.gz",
+      "exec_path": "aegis-0.1.3-linux-amd64/bin/aegis",
+      "order": 2
+    },
+    {
+      "role": "binary",
+      "os": "linux",
+      "arch": "arm64",
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.aegis/0.1.3/linux-arm64/aegis-0.1.3-linux-arm64.tar.gz",
+      "sha256": "1fd9156ef23bb755965d9d6511f6ba2345bc409233dd010acb20be0ea956b857",
+      "size": 505315,
+      "unpack": "tar.gz",
+      "exec_path": "aegis-0.1.3-linux-arm64/bin/aegis",
+      "order": 3
+    }
+  ]
+}
