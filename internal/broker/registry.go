@@ -56,6 +56,8 @@ type ProvisionSpec struct {
 	MintCooldownMs     int            `json:"mint_cooldown_ms"`      // per-identity re-mint cooldown (0 = none)
 	ProvisionPath      string         `json:"provision_path"`        // reserved route, default "/_provision"
 	BalancePath        string         `json:"balance_path"`          // reserved route, default "/_balance"
+	KeyPath            string         `json:"key_path"`              // reserved: return current key, default "/_key"
+	RotatePath         string         `json:"rotate_path"`           // reserved: rotate the key, default "/_rotate"
 	PushPath           string         `json:"push_path"`             // cloud push route, default "/push" (debits credit)
 	ListPath           string         `json:"list_path"`             // owner-scoped list route, default "/list" (free read)
 	ArtifactMaxBytes   int64          `json:"artifact_max_bytes"`    // push body cap (0 = default 256MiB)
@@ -66,6 +68,8 @@ type ProvisionSpec struct {
 const (
 	defaultProvisionPath = "/_provision"
 	defaultBalancePath   = "/_balance"
+	defaultKeyPath       = "/_key"
+	defaultRotatePath    = "/_rotate"
 	defaultPushPath      = "/push"
 	defaultListPath      = "/list"
 	defaultArtifactMax   = 256 << 20
@@ -202,6 +206,12 @@ func resolveProvision(a *AppEntry, getenv func(string) string) error {
 	}
 	if p.ProvisionPath == "" {
 		p.ProvisionPath = defaultProvisionPath
+	}
+	if p.KeyPath == "" {
+		p.KeyPath = defaultKeyPath
+	}
+	if p.RotatePath == "" {
+		p.RotatePath = defaultRotatePath
 	}
 	if p.BalancePath == "" {
 		p.BalancePath = defaultBalancePath

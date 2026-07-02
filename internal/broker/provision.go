@@ -341,30 +341,66 @@ type pushEnvelope struct {
 	Artifact string `json:"artifact"` // base64 of the packed VM (optional if Image is set)
 }
 
-// serveProvisioned routes a verified request for a provisioned app: reserved
-// identity/credit routes, plus cloud methods that debit credit and forward
-// through the CloudProvider. The master key never reaches the caller.
-func (b *Broker) serveProvisioned(w http.ResponseWriter, r *http.Request, app *AppEntry, mpath string, caller CallerID, body []byte) {
+// serveProvisioned routes a request for a provisioned app. Auth is per-route:
+//
+//   - identity/key routes (_provision, _balance, _key, _rotate) REQUIRE a valid
+//     Pilot SIGNATURE (sigOK) — so only the real identity can mint/rotate/read a
+//     key, and a leaked key alone can never rotate or lock out the owner;
+//   - cloud methods (push, list) accept EITHER a valid signature OR a valid
+//     derived key as a Bearer credential, so an agent can use its key directly.
+//
+// The master key never reaches the caller.
+func (b *Broker) serveProvisioned(w http.ResponseWriter, r *http.Request, app *AppEntry, mpath string, signedCaller CallerID, sigOK bool, body []byte) {
 	p := app.Provision
 	ip := clientIP(r.Header.Get, r.RemoteAddr, b.IPTrust)
 
 	switch mpath {
-	case p.ProvisionPath:
-		b.serveProvision(w, app, caller, ip)
+	case p.ProvisionPath, p.BalancePath, p.KeyPath, p.RotatePath:
+		if !sigOK {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "this route requires a signed Pilot request"})
+			return
+		}
+		switch mpath {
+		case p.ProvisionPath:
+			b.serveProvision(w, app, signedCaller, ip)
+		case p.BalancePath:
+			b.serveBalance(w, app, signedCaller)
+		case p.KeyPath:
+			b.serveKey(w, app, signedCaller)
+		case p.RotatePath:
+			b.serveRotate(w, app, signedCaller)
+		}
 		return
-	case p.BalancePath:
-		b.serveBalance(w, app, caller)
-		return
-	case p.PushPath:
-		b.servePush(w, r, app, caller, body)
-		return
-	case p.ListPath:
-		b.serveCloudList(w, r, app, caller)
+	case p.PushPath, p.ListPath:
+		caller, ok := b.authCloudCaller(app, signedCaller, sigOK, r.Header.Get)
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "cloud methods need a signed request or a valid key"})
+			return
+		}
+		if mpath == p.PushPath {
+			b.servePush(w, r, app, caller, body)
+		} else {
+			b.serveCloudList(w, r, app, caller)
+		}
 		return
 	default:
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "method not allowed for this app: " + mpath})
 		return
 	}
+}
+
+// authCloudCaller resolves the caller for a cloud method: the signed caller when
+// the request carried a valid signature, else the callerID sealed in a valid
+// derived key presented as `Authorization: Bearer <key>`.
+func (b *Broker) authCloudCaller(app *AppEntry, signedCaller CallerID, sigOK bool, h func(string) string) (CallerID, bool) {
+	if sigOK {
+		return signedCaller, true
+	}
+	auth := h("Authorization")
+	if tok, found := strings.CutPrefix(auth, "Bearer "); found {
+		return b.callerFromKey(app, strings.TrimSpace(tok))
+	}
+	return "", false
 }
 
 // servePush debits the caller's credit, then forwards the artifact to the cloud
@@ -480,13 +516,88 @@ func (b *Broker) serveProvision(w http.ResponseWriter, app *AppEntry, caller Cal
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "provision: " + err.Error()})
 		return
 	}
-	key := DeriveKey(app.deriveSecret, byte(p.KeyVersion), caller)
+	key := DeriveKey(app.deriveSecret, byte(p.KeyVersion), rec.Rot, caller)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"key":     key,
 		"credits": rec.Credits,
 		"caller":  string(caller),
 		"new":     rec.New,
 	})
+}
+
+// serveKey handles GET /<app>/_key: return the caller's CURRENT key (idempotent
+// get — the deterministic key for their current rotation). Signature-authed.
+func (b *Broker) serveKey(w http.ResponseWriter, app *AppEntry, caller CallerID) {
+	ps, ok := b.provStore()
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store does not support provisioning"})
+		return
+	}
+	rec, exists, err := ps.Get(app.ID, string(caller))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "key: " + err.Error()})
+		return
+	}
+	if !exists {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not provisioned; call provision first"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"key":     DeriveKey(app.deriveSecret, byte(app.Provision.KeyVersion), rec.Rot, caller),
+		"credits": rec.Credits,
+		"caller":  string(caller),
+	})
+}
+
+// serveRotate handles POST /<app>/_rotate: bump the caller's rotation counter so
+// their OLD key stops working (leak recovery) and return the new key. Credit is
+// NOT reset — it stays with the caller. Signature-authed, so a leaked key alone
+// cannot rotate (only the real Pilot identity can).
+func (b *Broker) serveRotate(w http.ResponseWriter, app *AppEntry, caller CallerID) {
+	ps, ok := b.provStore()
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store does not support provisioning"})
+		return
+	}
+	rec, exists, err := ps.Rotate(app.ID, string(caller))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "rotate: " + err.Error()})
+		return
+	}
+	if !exists {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not provisioned; call provision first"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"key":     DeriveKey(app.deriveSecret, byte(app.Provision.KeyVersion), rec.Rot, caller),
+		"credits": rec.Credits, // unchanged by rotation
+		"caller":  string(caller),
+		"rotated": true,
+	})
+}
+
+// callerFromKey validates a presented derived key (Bearer) against the caller's
+// CURRENT rotation counter and returns the trusted callerID. This lets an agent
+// use the key directly (outside the daemon-signed path). An old (pre-rotation)
+// key fails because its MAC binds the previous rot.
+func (b *Broker) callerFromKey(app *AppEntry, token string) (CallerID, bool) {
+	_, callerStr, _, parsed := ParseDerived(token)
+	if !parsed {
+		return "", false
+	}
+	ps, ok := b.provStore()
+	if !ok {
+		return "", false
+	}
+	rec, exists, err := ps.Get(app.ID, callerStr)
+	if err != nil || !exists {
+		return "", false
+	}
+	got, ok := ValidateDerived(app.secretsByVersion, token, rec.Rot)
+	if !ok || got != callerStr {
+		return "", false
+	}
+	return CallerID(callerStr), true
 }
 
 // serveBalance handles GET /<app>/_balance → the caller's credit balance.

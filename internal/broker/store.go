@@ -51,6 +51,15 @@ type ProvisionStore interface {
 	// failed, so a failed cloud push never burns credit. It never overflows past
 	// what was debited in practice (callers only refund what they reserved).
 	Refund(app, caller string, n int)
+
+	// Get returns the caller's provision record (for reading the current rotation
+	// counter + credit). exists is false for an unprovisioned caller.
+	Get(app, caller string) (rec ProvisionRecord, exists bool, err error)
+
+	// Rotate increments the caller's per-user rotation counter and returns the
+	// updated record. It does NOT touch credit — a rotated key keeps the same
+	// balance. Rotating an unprovisioned caller is a no-op (exists=false).
+	Rotate(app, caller string) (rec ProvisionRecord, exists bool, err error)
 }
 
 // ProvisionRecord is a per-user provisioning row.
@@ -61,6 +70,7 @@ type ProvisionRecord struct {
 	FirstSeen time.Time `json:"first_seen"`
 	LastMint  time.Time `json:"last_mint"`
 	Credits   int       `json:"credits"`
+	Rot       int       `json:"rot"` // per-user rotation counter (bumped by Rotate)
 	New       bool      `json:"new"` // true when this call created (seeded) the row
 }
 
@@ -157,6 +167,26 @@ func (s *MemStore) Refund(app, caller string, n int) {
 	if rec := s.prov[key(app, caller)]; rec != nil {
 		rec.Credits += n
 	}
+}
+
+func (s *MemStore) Get(app, caller string) (ProvisionRecord, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rec := s.prov[key(app, caller)]; rec != nil {
+		return *rec, true, nil
+	}
+	return ProvisionRecord{}, false, nil
+}
+
+func (s *MemStore) Rotate(app, caller string) (ProvisionRecord, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec := s.prov[key(app, caller)]
+	if rec == nil {
+		return ProvisionRecord{}, false, nil
+	}
+	rec.Rot++ // credit untouched
+	return *rec, true, nil
 }
 
 func key(app, caller string) string { return app + "|" + caller }

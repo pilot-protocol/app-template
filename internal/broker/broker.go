@@ -84,16 +84,18 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. WHO is calling — verified, not asserted. Signed over the full request.
-	caller, err := b.Verify.Verify(r.Header.Get, r.Method, r.URL.Path, body)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
-		return
-	}
+	caller, sigErr := b.Verify.Verify(r.Header.Get, r.Method, r.URL.Path, body)
 
 	// 2. Provisioned apps take a distinct path: mint per-user keys, meter a credit
 	//    ledger, and forward through the CloudProvider (owner-tagged isolation).
+	//    Signature is per-route (identity routes require it; cloud methods also
+	//    accept a derived-key bearer), so verification is non-fatal here.
 	if app.Provision != nil {
-		b.serveProvisioned(w, r, app, mpath, caller, body)
+		b.serveProvisioned(w, r, app, mpath, caller, sigErr == nil, body)
+		return
+	}
+	if sigErr != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": sigErr.Error()})
 		return
 	}
 

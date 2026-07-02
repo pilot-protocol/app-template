@@ -169,7 +169,7 @@ func TestProvisionedFlow_EndToEnd(t *testing.T) {
 	if m["new"] != true || m["credits"].(float64) != 3 {
 		t.Fatalf("provision result: %v", m)
 	}
-	caller, ok := ValidateDerived(map[byte][]byte{1: []byte("hmac-derive-secret")}, m["key"].(string))
+	caller, ok := ValidateDerived(map[byte][]byte{1: []byte("hmac-derive-secret")}, m["key"].(string), 0)
 	if !ok || caller != alice.pub {
 		t.Fatalf("derived key must validate to alice: ok=%v caller=%s", ok, caller)
 	}
@@ -268,6 +268,63 @@ func TestProvisioned_PerIPCapIgnoresSpoofedXFF(t *testing.T) {
 	}
 	if codes[0] != 200 || codes[1] != 200 || codes[2] != http.StatusTooManyRequests {
 		t.Fatalf("per-IP cap should ignore spoofed XFF and trip on the 3rd: %v", codes)
+	}
+}
+
+// bearerCall dispatches a cloud request authenticated by a derived KEY (no
+// signature) — how an agent uses its key directly.
+func bearerCall(t *testing.T, b *Broker, key, method, path string, body []byte, ip string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer "+key)
+	if ip != "" {
+		req.Header.Set("X-Real-IP", ip)
+	}
+	rr := httptest.NewRecorder()
+	b.ServeHTTP(rr, req)
+	return rr
+}
+
+func TestProvisioned_KeyRotationAndBearer(t *testing.T) {
+	_, srv := newStubCloud()
+	defer srv.Close()
+	b := provTestBroker(t, srv.URL, 5, 0)
+	alice := newIdentity(t)
+
+	// provision → key K0
+	k0 := decodeMap(t, alice.call(t, b, "POST", "/io.pilot.smol/_provision", nil, "1.1.1.1", ""))["key"].(string)
+
+	// the key works as a Bearer for push (no signature)
+	if rr := bearerCall(t, b, k0, "POST", "/io.pilot.smol/push", pushBody("a", "x"), "1.1.1.1"); rr.Code != 201 {
+		t.Fatalf("bearer push with current key should work, got %d %s", rr.Code, rr.Body)
+	}
+
+	// a leaked key CANNOT rotate (rotate requires a signature) → 401
+	if rr := bearerCall(t, b, k0, "POST", "/io.pilot.smol/_rotate", nil, "1.1.1.1"); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("bearer rotate must be rejected (401), got %d", rr.Code)
+	}
+
+	// the owner rotates (signed) → new key, credit preserved (was 5, one push spent = 4)
+	rot := decodeMap(t, alice.call(t, b, "POST", "/io.pilot.smol/_rotate", nil, "1.1.1.1", ""))
+	k1 := rot["key"].(string)
+	if k1 == k0 {
+		t.Fatal("rotate must return a different key")
+	}
+	if rot["credits"].(float64) != 4 {
+		t.Fatalf("rotate must NOT reset credit, got %v", rot["credits"])
+	}
+
+	// the OLD key no longer works as a Bearer
+	if rr := bearerCall(t, b, k0, "GET", "/io.pilot.smol/list", nil, "1.1.1.1"); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("old key must be rejected after rotation, got %d", rr.Code)
+	}
+	// the NEW key works
+	if rr := bearerCall(t, b, k1, "GET", "/io.pilot.smol/list", nil, "1.1.1.1"); rr.Code != 200 {
+		t.Fatalf("new key must work, got %d %s", rr.Code, rr.Body)
+	}
+	// smol.key returns the current (rotated) key
+	if got := decodeMap(t, alice.call(t, b, "GET", "/io.pilot.smol/_key", nil, "1.1.1.1", ""))["key"].(string); got != k1 {
+		t.Fatalf("smol.key should return the current key")
 	}
 }
 
