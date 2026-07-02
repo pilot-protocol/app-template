@@ -159,7 +159,22 @@ func (p *masterKeyProvider) Push(ctx context.Context, owner string, spec PushSpe
 		"name":   ownerName(owner, spec.Name),
 		"env":    map[string]string{p.ownerEnvKey: owner}, // the isolation tag
 	})
-	return p.do(ctx, http.MethodPost, "/v1/machines", body)
+	created, err := p.do(ctx, http.MethodPost, "/v1/machines", body)
+	if err != nil || created.Status/100 != 2 {
+		return created, err
+	}
+	// Start the machine so a pushed VM actually RUNS in the cloud. A start failure
+	// is non-fatal — the machine exists and can be started later; we relay the
+	// created machine either way.
+	var m struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(created.Body, &m) == nil && m.ID != "" {
+		if started, serr := p.do(ctx, http.MethodPost, "/v1/machines/"+m.ID+"/start", nil); serr == nil && started.Status/100 == 2 {
+			return started, nil
+		}
+	}
+	return created, nil
 }
 
 func (p *masterKeyProvider) uploadArtifact(ctx context.Context, owner, name string, artifact []byte) (CloudResp, error) {

@@ -84,7 +84,7 @@ signed_call "$WORK/alice.key" GET /io.pilot.smol/_balance "" 1.1.1.1
 
 echo "── cloud push + metering ──"
 signed_call "$WORK/alice.key" POST /io.pilot.smol/push "$PUSHBODY" 1.1.1.1
-[ "$STATUS" = 201 ] || fail "alice push status=$STATUS ($(cat "$WORK/out.json"))"
+[[ "$STATUS" =~ ^20[01]$ ]] || fail "alice push status=$STATUS ($(cat "$WORK/out.json"))"
 OWNER="$(python3 -c "import json;print(json.load(open('$WORK/out.json'))['env']['PILOT_OWNER'])")"
 [ -n "$OWNER" ] && pass "push created an owner-tagged machine"
 signed_call "$WORK/alice.key" GET /io.pilot.smol/_balance "" 1.1.1.1
@@ -93,7 +93,7 @@ signed_call "$WORK/alice.key" GET /io.pilot.smol/_balance "" 1.1.1.1
 echo "── isolation ──"
 signed_call "$WORK/bob.key" POST /io.pilot.smol/_provision "" 2.2.2.2
 signed_call "$WORK/bob.key" POST /io.pilot.smol/push "$PUSHBODY" 2.2.2.2
-[ "$STATUS" = 201 ] || fail "bob push status=$STATUS"
+[[ "$STATUS" =~ ^20[01]$ ]] || fail "bob push status=$STATUS"
 signed_call "$WORK/alice.key" GET /io.pilot.smol/list "" 1.1.1.1
 [ "$(jlen)" = 1 ] || fail "alice should see exactly 1 machine, saw $(jlen)"
 signed_call "$WORK/bob.key" GET /io.pilot.smol/list "" 2.2.2.2
@@ -102,7 +102,7 @@ pass "each caller lists ONLY their own machine (broker-enforced isolation)"
 
 echo "── credit exhaustion (402) ──"
 signed_call "$WORK/alice.key" POST /io.pilot.smol/push "$PUSHBODY" 1.1.1.1   # 1→0
-[ "$STATUS" = 201 ] || fail "alice second push status=$STATUS"
+[[ "$STATUS" =~ ^20[01]$ ]] || fail "alice second push status=$STATUS"
 signed_call "$WORK/alice.key" POST /io.pilot.smol/push "$PUSHBODY" 1.1.1.1   # 0 → 402
 [ "$STATUS" = 402 ] && pass "push at zero credit returns 402"
 
