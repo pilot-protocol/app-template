@@ -82,3 +82,27 @@ func TestMeter_PartialChargeKeepsRunning(t *testing.T) {
 		t.Fatalf("expected 4_994_060 remaining, got %d", c)
 	}
 }
+
+func TestRunMeter_OneTick(t *testing.T) {
+	st := NewMemStore()
+	st.Provision("io.pilot.smol", "alice", "ip", 100, 0, 0, time.Unix(1, 0))
+	fp := &fakeProvider{stopped: map[string]bool{},
+		machines: []MachineInfo{{ID: "m1", Owner: "alice", State: "started", Cpus: 4, MemoryMb: 8192}}}
+	app := meterApp(fp)
+	reg := &Registry{apps: map[string]*AppEntry{"io.pilot.smol": app}}
+	b := New(reg, st)
+	ctx, cancel := context.WithCancel(context.Background())
+	go b.RunMeter(ctx, 20*time.Millisecond)
+	// wait for at least one tick to drain + stop the exhausted machine
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if fp.stopped["m1"] {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if !fp.stopped["m1"] {
+		t.Fatal("RunMeter should have drained + stopped the exhausted machine")
+	}
+}

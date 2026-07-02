@@ -186,3 +186,32 @@ func TestOwnerNameSanitizesCloudInvalidChars(t *testing.T) {
 		t.Fatalf("unexpected sanitized name: %q", got)
 	}
 }
+
+func TestGetAndRotate(t *testing.T) {
+	for name, st := range provisionStores(t) {
+		t.Run(name, func(t *testing.T) {
+			now := time.Unix(7_000_000, 0)
+			st.Provision("app", "u", "ip", 50, 0, 0, now)
+			rec, ok, err := st.Get("app", "u")
+			if err != nil || !ok || rec.Credits != 50 || rec.Rot != 0 {
+				t.Fatalf("get: %+v ok=%v err=%v", rec, ok, err)
+			}
+			// rotate bumps rot, keeps credit
+			r1, ok, _ := st.Rotate("app", "u")
+			if !ok || r1.Rot != 1 || r1.Credits != 50 {
+				t.Fatalf("rotate must bump rot + keep credit: %+v", r1)
+			}
+			r2, _, _ := st.Rotate("app", "u")
+			if r2.Rot != 2 {
+				t.Fatalf("second rotate rot=%d", r2.Rot)
+			}
+			// unknown caller
+			if _, ok, _ := st.Get("app", "nobody"); ok {
+				t.Fatal("unknown caller must not exist")
+			}
+			if _, ok, _ := st.Rotate("app", "nobody"); ok {
+				t.Fatal("rotate unknown caller must be no-op")
+			}
+		})
+	}
+}
