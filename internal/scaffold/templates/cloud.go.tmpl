@@ -29,10 +29,14 @@ const cloudKeyName = "{{.Namespace}}_cloud_key"
 
 // CloudClient signs and sends brokered (cloud) requests for this app.
 type CloudClient struct {
-	base   string
-	sign   Signer
-	appDir string
-	http   *http.Client
+	base         string
+	identityPath string
+	appDir       string
+	http         *http.Client
+
+	signerOnce sync.Once
+	sign       Signer
+	signerErr  error
 
 	once    sync.Once
 	prov    json.RawMessage
@@ -41,18 +45,23 @@ type CloudClient struct {
 
 // NewCloudClient builds the cloud client. base is the broker URL for this app
 // (…/<app-id>); identityPath is the daemon --identity; appDir is $APP, where the
-// provisioned key is cached.
+// provisioned key is cached. Signer creation is DEFERRED: the local (cli) methods
+// don't need the daemon identity, so the adapter must boot even when --identity
+// isn't supplied (local-only use). Cloud methods load the signer lazily and fail
+// clearly if it's absent.
 func NewCloudClient(base, identityPath, appDir string) (*CloudClient, error) {
-	signer, err := NewSigner(identityPath)
-	if err != nil {
-		return nil, err
-	}
 	return &CloudClient{
-		base:   strings.TrimRight(base, "/"),
-		sign:   signer,
-		appDir: appDir,
-		http:   &http.Client{Timeout: 300 * time.Second},
+		base:         strings.TrimRight(base, "/"),
+		identityPath: identityPath,
+		appDir:       appDir,
+		http:         &http.Client{Timeout: 300 * time.Second},
 	}, nil
+}
+
+// signer lazily loads the daemon identity the first time a cloud method needs it.
+func (c *CloudClient) signer() (Signer, error) {
+	c.signerOnce.Do(func() { c.sign, c.signerErr = NewSigner(c.identityPath) })
+	return c.sign, c.signerErr
 }
 
 // Call signs (method, full-path, body) and sends one brokered request, returning
@@ -64,7 +73,11 @@ func (c *CloudClient) Call(ctx context.Context, verb, path string, body []byte) 
 		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	for k, v := range c.sign(verb, req.URL.Path, body) {
+	sign, err := c.signer()
+	if err != nil {
+		return nil, 0, fmt.Errorf("cloud methods need a daemon identity (--identity): %w", err)
+	}
+	for k, v := range sign(verb, req.URL.Path, body) {
 		req.Header.Set(k, v)
 	}
 	resp, err := c.http.Do(req)

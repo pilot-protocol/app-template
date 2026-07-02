@@ -7,7 +7,7 @@ func TestDeriveKey_DeterministicAndUnique(t *testing.T) {
 	a := CallerID("AAAApublickeybase64rawstdxxxxxxxxxxxxxxxxxxxx")
 	b := CallerID("BBBBpublickeybase64rawstdyyyyyyyyyyyyyyyyyyyy")
 
-	if DeriveKey(secret, 1, a) != DeriveKey(secret, 1, a) {
+	if first, again := DeriveKey(secret, 1, a), DeriveKey(secret, 1, a); first != again {
 		t.Fatal("same (secret,version,caller) must derive the same key")
 	}
 	if DeriveKey(secret, 1, a) == DeriveKey(secret, 1, b) {

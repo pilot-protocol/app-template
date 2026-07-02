@@ -47,20 +47,20 @@ type AppEntry struct {
 // ProvisionSpec configures a provisioned app. It is additive: managed apps leave
 // it nil and behave exactly as before.
 type ProvisionSpec struct {
-	Provider           string         `json:"provider"`               // "master" (default, works with a machine-scoped key) | "tokenmint" (needs an admin key)
-	SecretEnv          string         `json:"secret_env"`             // env var holding the HMAC derive secret (never in this file)
-	KeyVersion         int            `json:"key_version"`            // rotation tag minted onto new keys (default 1)
-	SeedCredits        int            `json:"seed_credits"`           // free credits granted on first provision
-	CostCredits        map[string]int `json:"cost_credits"`           // method-path → credits to debit (default 1)
-	MaxIdentitiesPerIP int            `json:"max_identities_per_ip"`  // per-IP distinct-caller cap (0 = unlimited)
-	MintCooldownMs     int            `json:"mint_cooldown_ms"`       // per-identity re-mint cooldown (0 = none)
-	ProvisionPath      string         `json:"provision_path"`         // reserved route, default "/_provision"
-	BalancePath        string         `json:"balance_path"`           // reserved route, default "/_balance"
-	PushPath           string         `json:"push_path"`              // cloud push route, default "/push" (debits credit)
-	ListPath           string         `json:"list_path"`              // owner-scoped list route, default "/list" (free read)
-	ArtifactMaxBytes   int64          `json:"artifact_max_bytes"`     // push body cap (0 = default 256MiB)
-	OwnerEnvKey        string         `json:"owner_env_key"`          // machine env key stamped with the owner (default "PILOT_OWNER")
-	AdminKeyEnv        string         `json:"admin_key_env"`          // tokenmint: env var holding the admin key
+	Provider           string         `json:"provider"`              // "master" (default, works with a machine-scoped key) | "tokenmint" (needs an admin key)
+	SecretEnv          string         `json:"secret_env"`            // env var holding the HMAC derive secret (never in this file)
+	KeyVersion         int            `json:"key_version"`           // rotation tag minted onto new keys (default 1)
+	SeedCredits        int            `json:"seed_credits"`          // free credits granted on first provision
+	CostCredits        map[string]int `json:"cost_credits"`          // method-path → credits to debit (default 1)
+	MaxIdentitiesPerIP int            `json:"max_identities_per_ip"` // per-IP distinct-caller cap (0 = unlimited)
+	MintCooldownMs     int            `json:"mint_cooldown_ms"`      // per-identity re-mint cooldown (0 = none)
+	ProvisionPath      string         `json:"provision_path"`        // reserved route, default "/_provision"
+	BalancePath        string         `json:"balance_path"`          // reserved route, default "/_balance"
+	PushPath           string         `json:"push_path"`             // cloud push route, default "/push" (debits credit)
+	ListPath           string         `json:"list_path"`             // owner-scoped list route, default "/list" (free read)
+	ArtifactMaxBytes   int64          `json:"artifact_max_bytes"`    // push body cap (0 = default 256MiB)
+	OwnerEnvKey        string         `json:"owner_env_key"`         // machine env key stamped with the owner (default "PILOT_OWNER")
+	AdminKeyEnv        string         `json:"admin_key_env"`         // tokenmint: env var holding the admin key
 }
 
 const (

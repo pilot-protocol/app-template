@@ -727,7 +727,7 @@ func (c *Config) Validate() []error {
 			// per-method backend discriminator the generator dispatches on.
 			switch {
 			case m.HTTP != nil && m.CLI != nil:
-				errs = append(errs, fmt.Errorf("methods[%d] (%s): a hybrid method must declare exactly one of http: or cli:", i, m.Name))
+				errs = append(errs, fmt.Errorf("methods[%d] (%s): a hybrid method must declare exactly one of the http or cli routes", i, m.Name))
 			case m.HTTP != nil:
 				errs = append(errs, c.validateHTTPMethod(i, m)...)
 			case m.CLI != nil:

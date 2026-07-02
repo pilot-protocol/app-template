@@ -6,10 +6,11 @@
 //
 //   - every call requires the master key as a Bearer token (proving the broker,
 //     not the user, holds it), and
+//
 //   - GET /v1/machines returns ALL tenant machines with NO server-side filter, so
 //     the broker's owner-tag filter is what actually enforces isolation.
 //
-//	REFCLOUD_MASTER=smk_… refcloud -addr 127.0.0.1:8311
+//     REFCLOUD_MASTER=smk_… refcloud -addr 127.0.0.1:8311
 package main
 
 import (
@@ -46,10 +47,10 @@ func main() {
 }
 
 type cloud struct {
-	master   string
-	mu       sync.Mutex
-	store    []map[string]any
-	seq      int
+	master string
+	mu     sync.Mutex
+	store  []map[string]any
+	seq    int
 }
 
 // requireMaster rejects any call that doesn't present the master key — the whole
