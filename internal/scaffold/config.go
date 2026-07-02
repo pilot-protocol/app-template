@@ -204,6 +204,12 @@ type Backend struct {
 	//   headers: { x-api-key: "${MYAPP_API_KEY}" }
 	Headers map[string]string `yaml:"headers"`
 
+	// BrokerURL overrides the default Pilot broker base a managed/provisioned
+	// adapter dials (BrokerBaseURL). Set it when an app is fronted by its OWN
+	// broker deployment (e.g. io.pilot.smol on a dedicated host) rather than the
+	// shared broker.pilotprotocol.network. Empty ⇒ the shared broker.
+	BrokerURL string `yaml:"broker_url"`
+
 	// Auth selects how the adapter authenticates to the backend:
 	//   "" / "byo"   — each user supplies their own key (the ${TOKEN} headers above)
 	//   "managed"    — Pilot holds ONE master key and meters per user. The generated
@@ -224,17 +230,66 @@ type Backend struct {
 // meters per (app, caller), and forwards to the partner API.
 const BrokerBaseURL = "https://broker.pilotprotocol.network"
 
-// Managed reports whether this app uses Pilot's managed (shared) master key.
-func (c *Config) Managed() bool { return c.Backend.Auth == "managed" }
+// Managed reports whether this app is keyless and signs to the Pilot broker —
+// true for both the shared-master model ("managed") and the per-user provisioning
+// model ("provisioned"). Both generate a signer and point at the broker.
+func (c *Config) Managed() bool {
+	return c.Backend.Auth == "managed" || c.Backend.Auth == "provisioned"
+}
+
+// Provisioned reports whether the broker mints a per-user key for this app (the
+// io.pilot.smol model). Provisioned apps write that key to $APP/secrets.json.
+func (c *Config) Provisioned() bool { return c.Backend.Auth == "provisioned" }
+
+// IsHybrid reports whether the adapter runs some methods via the local CLI and
+// routes others to the broker (per-method cli vs http route).
+func (c *Config) IsHybrid() bool { return c.Backend.Type == "hybrid" }
+
+// HasCLIMethods / HasHTTPMethods report which route kinds the methods use — the
+// manifest unions grants for a hybrid app from these.
+func (c *Config) HasCLIMethods() bool {
+	for _, m := range c.Methods {
+		if m.CLI != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Config) HasHTTPMethods() bool {
+	for _, m := range c.Methods {
+		if m.HTTP != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// DefaultProvisionPath is the broker's reserved auto-provision route. A hybrid
+// app's provision method uses this path; the generated dispatch treats a method
+// whose http.path equals it as the provisioning call (no request body forwarded).
+const DefaultProvisionPath = "/_provision"
+
+// ProvisionPath is the reserved provision route the generated adapter recognizes.
+func (c *Config) ProvisionPath() string { return DefaultProvisionPath }
 
 // AdapterBackendURL is what the generated adapter actually dials: the Pilot
 // broker (managed) or the partner API directly (byo). For managed apps the
 // partner base_url is registered with the broker, never baked into user hosts.
 func (c *Config) AdapterBackendURL() string {
 	if c.Managed() {
-		return strings.TrimRight(BrokerBaseURL, "/") + "/" + c.ID
+		return strings.TrimRight(c.brokerBase(), "/") + "/" + c.ID
 	}
 	return c.Backend.BaseURL
+}
+
+// brokerBase is the broker host this app's adapter dials — its own BrokerURL
+// override when set, else the shared Pilot broker.
+func (c *Config) brokerBase() string {
+	if c.Backend.BrokerURL != "" {
+		return c.Backend.BrokerURL
+	}
+	return BrokerBaseURL
 }
 
 // AdapterBackendHost is the net.dial grant target for the generated adapter:
@@ -243,7 +298,7 @@ func (c *Config) AdapterBackendURL() string {
 func (c *Config) AdapterBackendHost() string {
 	raw := c.Backend.BaseURL
 	if c.Managed() {
-		raw = BrokerBaseURL
+		raw = c.brokerBase()
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -600,8 +655,18 @@ func (c *Config) Validate() []error {
 		if len(c.Backend.Command) == 0 {
 			errs = append(errs, fmt.Errorf("backend.command is required for a cli backend"))
 		}
+	case "hybrid":
+		// A hybrid app runs local cli methods AND broker-routed cloud methods. It
+		// needs a command when it has any cli method; the broker URL is derived
+		// (AdapterBackendURL), so base_url is not required.
+		if c.HasCLIMethods() && len(c.Backend.Command) == 0 {
+			errs = append(errs, fmt.Errorf("backend.command is required for a hybrid app with cli methods"))
+		}
+		if !c.Managed() {
+			errs = append(errs, fmt.Errorf("backend.auth must be \"managed\" or \"provisioned\" for a hybrid app (cloud methods sign to the broker)"))
+		}
 	default:
-		errs = append(errs, fmt.Errorf("backend.type %q must be \"http\" or \"cli\"", c.Backend.Type))
+		errs = append(errs, fmt.Errorf("backend.type %q must be \"http\", \"cli\", or \"hybrid\"", c.Backend.Type))
 	}
 	if x := c.Backend.X402; x != nil {
 		if c.Backend.Type != "http" {
@@ -653,61 +718,90 @@ func (c *Config) Validate() []error {
 		}
 		switch c.Backend.Type {
 		case "http":
-			if m.HTTP == nil {
-				errs = append(errs, fmt.Errorf("methods[%d] (%s): http backend requires an http: route", i, m.Name))
-			} else {
-				if m.HTTP.Path == "" || !strings.HasPrefix(m.HTTP.Path, "/") {
-					errs = append(errs, fmt.Errorf("methods[%d].http.path must start with /", i))
-				}
-				switch m.HTTP.Verb {
-				case "GET", "POST", "PATCH", "PUT", "DELETE":
-				default:
-					errs = append(errs, fmt.Errorf("methods[%d].http.verb %q must be GET|POST|PATCH|PUT|DELETE", i, m.HTTP.Verb))
-				}
-				// Every {name} placeholder in the path must be a declared param,
-				// so the adapter can fill it and <ns>.help documents it.
-				placeholder := map[string]bool{}
-				for _, p := range pathParamNames(m.HTTP.Path) {
-					placeholder[p] = true
-					if _, ok := m.Params[p]; !ok {
-						errs = append(errs, fmt.Errorf("methods[%d] (%s): path placeholder {%s} has no matching entry under params", i, m.Name, p))
-					}
-				}
-				// Per-param locations: each must be one of the five values, a
-				// path/path_raw param must correspond to a {name} placeholder, and
-				// an `in` entry must name a declared param.
-				inNames := make([]string, 0, len(m.HTTP.ParamIn))
-				for name := range m.HTTP.ParamIn {
-					inNames = append(inNames, name)
-				}
-				sort.Strings(inNames)
-				for _, name := range inNames {
-					loc := m.HTTP.ParamIn[name]
-					if !validParamIn[loc] {
-						errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q in %q must be query|path|path_raw|body|header", i, m.Name, name, loc))
-					}
-					if _, ok := m.Params[name]; !ok {
-						errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q has an `in` location but is not declared under params", i, m.Name, name))
-					}
-					if (loc == InPath || loc == InPathRaw) && !placeholder[name] {
-						errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q is in %q but the path %q has no {%s} placeholder", i, m.Name, name, loc, m.HTTP.Path, name))
-					}
-				}
-			}
+			errs = append(errs, c.validateHTTPMethod(i, m)...)
 		case "cli":
-			if m.CLI == nil {
-				errs = append(errs, fmt.Errorf("methods[%d] (%s): cli backend requires a cli: route", i, m.Name))
-			} else if m.CLI.Passthrough {
-				if len(m.CLI.Args) > 0 {
-					errs = append(errs, fmt.Errorf("methods[%d] (%s): cli.passthrough takes argv from the call payload — remove cli.args", i, m.Name))
-				}
-				if m.CLI.ParamsAsFlags {
-					errs = append(errs, fmt.Errorf("methods[%d] (%s): cli.params_as_flags has no effect with passthrough", i, m.Name))
-				}
-			} else if len(m.CLI.Args) == 0 && !m.CLI.ParamsAsFlags {
-				errs = append(errs, fmt.Errorf("methods[%d] (%s): cli route needs args, params_as_flags, or passthrough", i, m.Name))
+			errs = append(errs, c.validateCLIMethod(i, m)...)
+		case "hybrid":
+			// Each hybrid method is EITHER a local cli route OR a cloud http route,
+			// never both and never neither — the presence of cli:/http: is the
+			// per-method backend discriminator the generator dispatches on.
+			switch {
+			case m.HTTP != nil && m.CLI != nil:
+				errs = append(errs, fmt.Errorf("methods[%d] (%s): a hybrid method must declare exactly one of the http or cli routes", i, m.Name))
+			case m.HTTP != nil:
+				errs = append(errs, c.validateHTTPMethod(i, m)...)
+			case m.CLI != nil:
+				errs = append(errs, c.validateCLIMethod(i, m)...)
+			default:
+				errs = append(errs, fmt.Errorf("methods[%d] (%s): a hybrid method needs an http: (cloud) or cli: (local) route", i, m.Name))
 			}
 		}
+	}
+	return errs
+}
+
+// validateHTTPMethod checks one method's http route (verb, path, placeholders,
+// per-param locations). Shared by http and hybrid apps.
+func (c *Config) validateHTTPMethod(i int, m Method) []error {
+	var errs []error
+	if m.HTTP == nil {
+		return append(errs, fmt.Errorf("methods[%d] (%s): http backend requires an http: route", i, m.Name))
+	}
+	if m.HTTP.Path == "" || !strings.HasPrefix(m.HTTP.Path, "/") {
+		errs = append(errs, fmt.Errorf("methods[%d].http.path must start with /", i))
+	}
+	switch m.HTTP.Verb {
+	case "GET", "POST", "PATCH", "PUT", "DELETE":
+	default:
+		errs = append(errs, fmt.Errorf("methods[%d].http.verb %q must be GET|POST|PATCH|PUT|DELETE", i, m.HTTP.Verb))
+	}
+	// Every {name} placeholder in the path must be a declared param, so the
+	// adapter can fill it and <ns>.help documents it.
+	placeholder := map[string]bool{}
+	for _, p := range pathParamNames(m.HTTP.Path) {
+		placeholder[p] = true
+		if _, ok := m.Params[p]; !ok {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): path placeholder {%s} has no matching entry under params", i, m.Name, p))
+		}
+	}
+	// Per-param locations: each must be one of the five values, a path/path_raw
+	// param must correspond to a {name} placeholder, and an `in` entry must name a
+	// declared param.
+	inNames := make([]string, 0, len(m.HTTP.ParamIn))
+	for name := range m.HTTP.ParamIn {
+		inNames = append(inNames, name)
+	}
+	sort.Strings(inNames)
+	for _, name := range inNames {
+		loc := m.HTTP.ParamIn[name]
+		if !validParamIn[loc] {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q in %q must be query|path|path_raw|body|header", i, m.Name, name, loc))
+		}
+		if _, ok := m.Params[name]; !ok {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q has an `in` location but is not declared under params", i, m.Name, name))
+		}
+		if (loc == InPath || loc == InPathRaw) && !placeholder[name] {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q is in %q but the path %q has no {%s} placeholder", i, m.Name, name, loc, m.HTTP.Path, name))
+		}
+	}
+	return errs
+}
+
+// validateCLIMethod checks one method's cli route. Shared by cli and hybrid apps.
+func (c *Config) validateCLIMethod(i int, m Method) []error {
+	var errs []error
+	switch {
+	case m.CLI == nil:
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): cli backend requires a cli: route", i, m.Name))
+	case m.CLI.Passthrough:
+		if len(m.CLI.Args) > 0 {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): cli.passthrough takes argv from the call payload — remove cli.args", i, m.Name))
+		}
+		if m.CLI.ParamsAsFlags {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): cli.params_as_flags has no effect with passthrough", i, m.Name))
+		}
+	case len(m.CLI.Args) == 0 && !m.CLI.ParamsAsFlags:
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): cli route needs args, params_as_flags, or passthrough", i, m.Name))
 	}
 	return errs
 }
@@ -722,8 +816,8 @@ func (c *Config) validateAssets() []error {
 		return nil
 	}
 	var errs []error
-	if c.Backend.Type != "cli" {
-		errs = append(errs, fmt.Errorf("assets are only valid for a cli backend (an http app delivers no binary)"))
+	if c.Backend.Type != "cli" && c.Backend.Type != "hybrid" {
+		errs = append(errs, fmt.Errorf("assets are only valid for a cli or hybrid backend (an http app delivers no binary)"))
 	}
 	// Orders and binary roles are scoped per host platform: each host installs
 	// only its own (os,arch) assets, so two platforms may both use order 1, but

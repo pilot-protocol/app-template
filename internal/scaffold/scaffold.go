@@ -48,6 +48,18 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 		if cfg.HasAssets() {
 			files = append(files, file{filepath.Join("internal", "backend", "stage.go"), "stage.go.tmpl"})
 		}
+	case "hybrid":
+		// A hybrid adapter runs local cli methods AND signs cloud methods to the
+		// broker, so it emits BOTH the exec runner and the cloud client (+ signer),
+		// plus the stager when it ships a native binary.
+		files = append(files,
+			file{filepath.Join("internal", "backend", "exec.go"), "client_cli.go.tmpl"},
+			file{filepath.Join("internal", "backend", "cloud.go"), "cloud.go.tmpl"},
+			file{filepath.Join("internal", "backend", "signer.go"), "signer.go.tmpl"},
+		)
+		if cfg.HasAssets() {
+			files = append(files, file{filepath.Join("internal", "backend", "stage.go"), "stage.go.tmpl"})
+		}
 	}
 
 	var written []string

@@ -72,6 +72,31 @@ func main() {
 	if err != nil {
 		log.Fatalf("{{.BinaryName}}: backend config: %v", err)
 	}
+{{- else if eq .Backend.Type "hybrid"}}
+	// Hybrid: a local CLI runner for the local methods AND a broker-signing cloud
+	// client for the brokered (cloud) methods. Both share the same $APP dir.
+	cfg := resolveConfig(*manifestPath)
+	appDir := os.Getenv("APP")
+	if *manifestPath != "" {
+		appDir = filepath.Dir(*manifestPath)
+	}
+{{- if .HasAssets}}
+	stagedCmd, err := backend.StageAssets(appDir)
+	if err != nil {
+		log.Fatalf("{{.BinaryName}}: install assets: %v", err)
+	}
+	base := {{printf "%#v" .Backend.Command}}
+	if stagedCmd != "" {
+		base[0] = stagedCmd
+	}
+	runner := backend.NewRunner(base{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+{{- else}}
+	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+{{- end}}
+	cloudCli, err := backend.NewCloudClient(cfg.BackendURL, *identity, appDir)
+	if err != nil {
+		log.Fatalf("{{.BinaryName}}: cloud client: %v", err)
+	}
 {{- else}}
 {{- if .HasAssets}}
 	// Native delivery: fetch this host's binaries from the Pilot R2 artifact
@@ -98,6 +123,8 @@ func main() {
 	d := ipc.NewDispatcher()
 {{- if eq .Backend.Type "http"}}
 	registerHandlers(d, client, readAppVersion(*manifestPath), cfg.BackendURL)
+{{- else if eq .Backend.Type "hybrid"}}
+	registerHandlers(d, runner, cloudCli, readAppVersion(*manifestPath), cfg.BackendURL)
 {{- else}}
 	registerHandlers(d, runner, readAppVersion(*manifestPath))
 {{- end}}
@@ -301,6 +328,98 @@ func jsonScalar(v json.RawMessage) string {
 	}
 	return string(v)
 }
+{{- else if eq .Backend.Type "hybrid"}}
+func registerHandlers(d *ipc.Dispatcher, r *backend.Runner, c *backend.CloudClient, version, backendURL string) {
+{{- range .Methods}}
+{{- if .CLI}}
+	d.Register("{{.Name}}", forwardExec(r, backend.Spec{ {{if .CLI.Passthrough}}Passthrough: true{{else}}Args: {{printf "%#v" .CLI.Args}}, ParamsAsFlags: {{.CLI.ParamsAsFlags}}{{end}} }, dur("{{.TimeoutFor}}"))) // {{.Duration}} (local)
+{{- else}}
+	d.Register("{{.Name}}", cloudHandler(c, "{{.HTTP.Verb}}", "{{.HTTP.Path}}", {{if eq .HTTP.Path $.ProvisionPath}}true{{else}}false{{end}}, dur("{{.TimeoutFor}}"))) // {{.Duration}} (cloud)
+{{- end}}
+{{- end}}
+	d.Register("{{.Namespace}}.help", helpHandlerHybrid(version, backendURL, c))
+}
+
+// cloudHandler routes one brokered method: it makes sure the caller is
+// provisioned (auto-provision on first cloud use), then signs and forwards the
+// call to the broker. The provision route itself just returns the result.
+func cloudHandler(c *backend.CloudClient, verb, path string, isProvision bool, timeout time.Duration) ipc.Handler {
+	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		if isProvision {
+			return c.EnsureProvisioned(ctx)
+		}
+		if _, err := c.EnsureProvisioned(ctx); err != nil {
+			return nil, err
+		}
+		out, status, err := c.Call(ctx, verb, path, []byte(req.Payload))
+		if err != nil {
+			return nil, err
+		}
+		if status/100 != 2 {
+			return nil, fmt.Errorf("%s %s: broker returned %d: %s", verb, path, status, string(out))
+		}
+		return out, nil
+	}
+}
+
+// helpHandlerHybrid serves {{.Namespace}}.help and, on the side, best-effort
+// provisions the caller so {{.Namespace}}.help establishes their cloud key per
+// the app contract (provision on install or first help).
+func helpHandlerHybrid(version, backendURL string, c *backend.CloudClient) ipc.Handler {
+	base := helpHandler(version, backendURL)
+	return func(ctx context.Context, env *ipc.Envelope) (json.RawMessage, error) {
+		pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		_, _ = c.EnsureProvisioned(pctx)
+		return base(ctx, env)
+	}
+}
+
+// forwardExec runs the backend CLI for one local method: enumerated methods fill
+// ${field} placeholders from the payload; passthrough methods take a verbatim
+// "args" array. Both accept an optional "stdin" piped to the child.
+func forwardExec(r *backend.Runner, spec backend.Spec, timeout time.Duration) ipc.Handler {
+	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
+		call, err := decodeCall(spec, req.Payload)
+		if err != nil {
+			return nil, err
+		}
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		return r.Run(ctx, spec, call)
+	}
+}
+
+// decodeCall extracts one invocation's dynamic inputs from the IPC payload (see
+// the cli backend for the full contract).
+func decodeCall(spec backend.Spec, raw json.RawMessage) (backend.Call, error) {
+	var call backend.Call
+	if spec.Passthrough {
+		var p struct {
+			Args  []string `json:"args"`
+			Stdin string   `json:"stdin"`
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return call, fmt.Errorf(`passthrough payload must be {"args":[...],"stdin"?:"..."}: %w`, err)
+			}
+		}
+		call.Args, call.Stdin = p.Args, p.Stdin
+		return call, nil
+	}
+	params, err := stringParams(raw)
+	if err != nil {
+		return call, err
+	}
+	if s, ok := params["stdin"]; ok {
+		call.Stdin = s
+		delete(params, "stdin")
+	}
+	call.Params = params
+	return call, nil
+}
 {{- else}}
 func registerHandlers(d *ipc.Dispatcher, r *backend.Runner, version string) {
 {{- range .Methods}}
@@ -408,19 +527,19 @@ type helpDoc struct {
 	App             string            `json:"app"`
 	Version         string            `json:"version"`
 	Description     string            `json:"description"`
-{{- if eq .Backend.Type "http"}}
+{{- if ne .Backend.Type "cli"}}
 	Backend         string            `json:"backend"`
 {{- end}}
 	DurationClasses map[string]string `json:"duration_classes"`
 	Methods         []methodDoc       `json:"methods"`
 }
 
-{{if eq .Backend.Type "http"}}func helpHandler(version, backendURL string) ipc.Handler {{"{"}}{{else}}func helpHandler(version string) ipc.Handler {{"{"}}{{end}}
+{{if ne .Backend.Type "cli"}}func helpHandler(version, backendURL string) ipc.Handler {{"{"}}{{else}}func helpHandler(version string) ipc.Handler {{"{"}}{{end}}
 	doc := helpDoc{
 		App:         "{{.ID}}",
 		Version:     version,
 		Description: {{printf "%q" .Description}},
-{{- if eq .Backend.Type "http"}}
+{{- if ne .Backend.Type "cli"}}
 		Backend:     backendURL,
 {{- end}}
 		DurationClasses: map[string]string{

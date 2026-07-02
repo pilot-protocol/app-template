@@ -1,0 +1,15 @@
+{
+  "_comment": "CI-safe A/B command set for io.pilot.smol. NO microVM boots and NO cloud calls — GitHub runners have no KVM and no broker. These prove the adapter's LOCAL (cli) methods forward the smolvm command tree identically to the vanilla binary. Cloud methods (smol.push/provision/balance/list) route to the broker and are covered by scripts/e2e-provision.sh, not here.",
+  "commands": [
+    {"label": "Version", "note": "enumerated local method → `smolvm --version`",
+     "vanilla": ["--version"], "method": "smol.version", "payload": {}},
+    {"label": "Top-level help", "note": "passthrough → `smolvm --help`",
+     "vanilla": ["--help"], "method": "smol.exec", "payload": {"args": ["--help"]}},
+    {"label": "machine --help", "note": "subcommand group reachable via passthrough",
+     "vanilla": ["machine", "--help"], "method": "smol.exec", "payload": {"args": ["machine", "--help"]}},
+    {"label": "pack --help", "note": "subcommand group reachable via passthrough",
+     "vanilla": ["pack", "--help"], "method": "smol.exec", "payload": {"args": ["pack", "--help"]}},
+    {"label": "config --help", "note": "subcommand group reachable via passthrough",
+     "vanilla": ["config", "--help"], "method": "smol.exec", "payload": {"args": ["config", "--help"]}}
+  ]
+}

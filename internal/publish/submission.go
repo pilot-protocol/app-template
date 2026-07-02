@@ -55,20 +55,24 @@ type SubArtifact struct {
 	Args     []string `json:"args"`      // optional post-stage install args
 }
 
-// SubBackend selects and configures the data plane the adapter forwards to:
-// either an HTTP API (Type "http", the default) or a local CLI (Type "cli").
+// SubBackend selects and configures the data plane the adapter forwards to: an
+// HTTP API (Type "http", the default), a local CLI (Type "cli"), or a "hybrid"
+// app that runs local cli methods AND routes cloud methods to the broker.
 type SubBackend struct {
-	// Type is "http" (default) or "cli". Empty means http for back-compat with
-	// older form payloads that predate the selector.
+	// Type is "http" (default), "cli", or "hybrid". Empty means http for
+	// back-compat with older form payloads that predate the selector.
 	Type string `json:"type"`
 
 	// --- http fields ---
 	BaseURL string      `json:"base_url"`
 	Headers []SubHeader `json:"headers"` // auth/extra headers; values may use ${TOKEN}
 	// Auth selects how the adapter authenticates to the backend:
-	//   "" / "byo"  — each user brings their own key (the ${TOKEN} headers)
-	//   "managed"   — Pilot holds one master key and meters per user; the
-	//                 generated adapter is keyless and points at the broker.
+	//   "" / "byo"     — each user brings their own key (the ${TOKEN} headers)
+	//   "managed"      — Pilot holds one master key and meters per user; the
+	//                    generated adapter is keyless and points at the broker.
+	//   "provisioned"  — the broker mints a per-user key bound to the caller's
+	//                    identity + IP, seeds/meters a credit ledger, and forwards
+	//                    cloud methods (the io.pilot.smol model). Keyless adapter.
 	Auth string `json:"auth"`
 	// Quota is the per-caller call cap the broker enforces for a managed app
 	// (0 = unlimited). Set at publish time so the rate limit ships with the app.
@@ -81,14 +85,46 @@ type SubBackend struct {
 	// minimal baseline (PATH/HOME/locale/TMPDIR). The child never inherits the
 	// adapter's full environment.
 	EnvPassthrough []string `json:"env_passthrough"`
+
+	// --- provisioned fields (Auth "provisioned") ---
+	Provider           string         `json:"provider"`              // "master" (default) | "tokenmint"
+	CloudBaseURL       string         `json:"cloud_base_url"`        // the cloud API base the broker forwards to (defaults to BaseURL)
+	BrokerURL          string         `json:"broker_url"`            // override the broker base the adapter dials (own broker deployment); empty ⇒ shared broker
+	SeedCredits        int            `json:"seed_credits"`          // free credits granted per new user
+	CostCredits        map[string]int `json:"cost_credits"`          // cloud method-path → credits to debit (default 1)
+	MaxIdentitiesPerIP int            `json:"max_identities_per_ip"` // per-IP distinct-caller cap (0 = unlimited)
+	MintCooldownMs     int            `json:"mint_cooldown_ms"`      // per-identity re-mint cooldown (0 = none)
+	PushPath           string         `json:"push_path"`             // cloud push route (default "/push")
+	BalancePath        string         `json:"balance_path"`          // balance route (default "/_balance")
+	ArtifactMaxBytes   int64          `json:"artifact_max_bytes"`    // push body cap (0 = broker default)
+	OwnerEnvKey        string         `json:"owner_env_key"`         // machine env key stamped with the owner (default PILOT_OWNER)
+	AdminKeyEnv        string         `json:"admin_key_env"`         // tokenmint: env var holding the admin key
 }
 
 // IsCLI reports whether this submission fronts a local CLI rather than an HTTP API.
 func (b SubBackend) IsCLI() bool { return b.Type == "cli" }
 
-// Managed reports whether this submission uses Pilot's managed master key. Only
-// meaningful for http backends (a cli app holds no key).
-func (b SubBackend) Managed() bool { return !b.IsCLI() && b.Auth == "managed" }
+// IsHybrid reports whether the app runs local cli methods AND brokered cloud
+// methods (per-method cli vs http route).
+func (b SubBackend) IsHybrid() bool { return b.Type == "hybrid" }
+
+// Provisioned reports whether the broker mints a per-user key for this app.
+func (b SubBackend) Provisioned() bool { return b.Auth == "provisioned" }
+
+// Managed reports whether this submission is keyless and registers with the
+// broker — true for the shared-master ("managed") and per-user ("provisioned")
+// models. Not meaningful for a pure cli app (Type "cli" holds no key).
+func (b SubBackend) Managed() bool {
+	return !b.IsCLI() && (b.Auth == "managed" || b.Auth == "provisioned")
+}
+
+// CloudBase returns the cloud API base the broker forwards a provisioned app to.
+func (b SubBackend) CloudBase() string {
+	if b.CloudBaseURL != "" {
+		return b.CloudBaseURL
+	}
+	return b.BaseURL
+}
 
 // SubHeader is one request header. Value may contain ${TOKEN} placeholders that
 // the operator supplies at install (env or $APP/secrets.json) — never baked in.
@@ -107,6 +143,12 @@ type SubMethod struct {
 	HTTP        SubRoute    `json:"http"`        // http backend route
 	CLI         SubCLIRoute `json:"cli"`         // cli backend route
 	Params      []SubParam  `json:"params"`
+}
+
+// HasHTTP / HasCLI report which route a hybrid method declares (exactly one).
+func (m SubMethod) HasHTTP() bool { return strings.TrimSpace(m.HTTP.Path) != "" }
+func (m SubMethod) HasCLI() bool {
+	return m.CLI.Passthrough || len(m.CLI.Args) > 0 || m.CLI.ParamsAsFlags
 }
 
 // SubRoute is the backend HTTP mapping for a method.
@@ -201,12 +243,25 @@ func (s Submission) Validate() []string {
 	if !reEmail.MatchString(strings.TrimSpace(s.Email)) {
 		e = append(e, "A valid email is required")
 	}
-	if s.Backend.IsCLI() {
+	switch {
+	case s.Backend.IsCLI():
 		if len(s.Backend.Command) == 0 || strings.TrimSpace(s.Backend.Command[0]) == "" {
 			e = append(e, `CLI backend requires a command (the base argv, e.g. ["gh"])`)
 		}
-	} else if !reURL.MatchString(strings.TrimSpace(s.Backend.BaseURL)) {
-		e = append(e, "Backend base URL must be an absolute http(s) URL")
+	case s.Backend.IsHybrid():
+		if !s.Backend.Managed() {
+			e = append(e, `Hybrid backend requires auth "managed" or "provisioned" (cloud methods sign to the broker)`)
+		}
+		if s.hasCLIMethods() && (len(s.Backend.Command) == 0 || strings.TrimSpace(s.Backend.Command[0]) == "") {
+			e = append(e, `Hybrid backend with cli methods requires a command (the base argv, e.g. ["smolvm"])`)
+		}
+		if s.Backend.Provisioned() && !reURL.MatchString(strings.TrimSpace(s.Backend.CloudBase())) {
+			e = append(e, "Provisioned backend requires cloud_base_url (or base_url) as an absolute http(s) URL")
+		}
+	default:
+		if !reURL.MatchString(strings.TrimSpace(s.Backend.BaseURL)) {
+			e = append(e, "Backend base URL must be an absolute http(s) URL")
+		}
 	}
 	e = append(e, s.validateArtifacts()...)
 	if len(s.Methods) == 0 {
@@ -233,22 +288,59 @@ func (s Submission) Validate() []string {
 		if strings.TrimSpace(m.Description) == "" {
 			e = append(e, fmt.Sprintf("Method %q: description is required", n))
 		}
-		if s.Backend.IsCLI() {
+		switch {
+		case s.Backend.IsHybrid():
+			// Each hybrid method declares EXACTLY one of cli/http — the presence of
+			// a route is the per-method backend discriminator.
 			switch {
-			case m.CLI.Passthrough:
-				if len(m.CLI.Args) > 0 || m.CLI.ParamsAsFlags {
-					e = append(e, fmt.Sprintf("Method %q: passthrough takes argv from the call — remove args/params_as_flags", n))
-				}
-			case len(m.CLI.Args) == 0 && !m.CLI.ParamsAsFlags:
-				e = append(e, fmt.Sprintf("Method %q: CLI method needs args, params_as_flags, or passthrough", n))
+			case m.HasHTTP() && m.HasCLI():
+				e = append(e, fmt.Sprintf("Method %q: a hybrid method must declare exactly one of http or cli", n))
+			case m.HasCLI():
+				e = append(e, validateSubCLIMethod(n, m)...)
+			case m.HasHTTP():
+				e = append(e, validateSubHTTPMethod(n, m)...)
+			default:
+				e = append(e, fmt.Sprintf("Method %q: a hybrid method needs an http (cloud) or cli (local) route", n))
 			}
-		} else if m.HTTP.Path == "" || !strings.HasPrefix(m.HTTP.Path, "/") {
-			e = append(e, fmt.Sprintf("Method %q: path must start with /", n))
-		} else {
-			e = append(e, validateParamLocations(n, m)...)
+		case s.Backend.IsCLI():
+			e = append(e, validateSubCLIMethod(n, m)...)
+		default:
+			e = append(e, validateSubHTTPMethod(n, m)...)
 		}
 	}
 	return e
+}
+
+// hasCLIMethods reports whether any submission method declares a cli route.
+func (s Submission) hasCLIMethods() bool {
+	for _, m := range s.Methods {
+		if m.HasCLI() {
+			return true
+		}
+	}
+	return false
+}
+
+// validateSubCLIMethod checks one method's cli route (shared by cli + hybrid).
+func validateSubCLIMethod(n string, m SubMethod) []string {
+	var e []string
+	switch {
+	case m.CLI.Passthrough:
+		if len(m.CLI.Args) > 0 || m.CLI.ParamsAsFlags {
+			e = append(e, fmt.Sprintf("Method %q: passthrough takes argv from the call — remove args/params_as_flags", n))
+		}
+	case len(m.CLI.Args) == 0 && !m.CLI.ParamsAsFlags:
+		e = append(e, fmt.Sprintf("Method %q: CLI method needs args, params_as_flags, or passthrough", n))
+	}
+	return e
+}
+
+// validateSubHTTPMethod checks one method's http route (shared by http + hybrid).
+func validateSubHTTPMethod(n string, m SubMethod) []string {
+	if m.HTTP.Path == "" || !strings.HasPrefix(m.HTTP.Path, "/") {
+		return []string{fmt.Sprintf("Method %q: path must start with /", n)}
+	}
+	return validateParamLocations(n, m)
 }
 
 // subParamIn is the closed set of param request locations (empty = default).
@@ -302,8 +394,8 @@ func (s Submission) validateArtifacts() []string {
 		return nil
 	}
 	var e []string
-	if !s.Backend.IsCLI() {
-		e = append(e, "Artifacts (binary delivery) are only valid for a cli backend")
+	if !s.Backend.IsCLI() && !s.Backend.IsHybrid() {
+		e = append(e, "Artifacts (binary delivery) are only valid for a cli or hybrid backend")
 	}
 	orders := map[string]bool{}
 	for i, a := range s.Artifacts {
@@ -355,6 +447,11 @@ func (s Submission) ToConfig() *scaffold.Config {
 	backend := scaffold.Backend{Type: "http", BaseURL: s.Backend.BaseURL, Auth: s.Backend.Auth}
 	if s.Backend.IsCLI() {
 		backend = scaffold.Backend{Type: "cli", Command: s.Backend.Command, EnvPassthrough: s.Backend.EnvPassthrough}
+	}
+	if s.Backend.IsHybrid() {
+		// Hybrid: local cli command + keyless broker auth (the broker URL is
+		// derived from the app id, so no base_url is baked into the adapter).
+		backend = scaffold.Backend{Type: "hybrid", Command: s.Backend.Command, EnvPassthrough: s.Backend.EnvPassthrough, Auth: s.Backend.Auth, BrokerURL: s.Backend.BrokerURL}
 	}
 	cfg := &scaffold.Config{
 		ID:          s.ID,
@@ -408,7 +505,10 @@ func (s Submission) ToConfig() *scaffold.Config {
 			Timeout:  m.Timeout, // explicit per-method timeout (overrides the latency-class default)
 			Params:   params,
 		}
-		if s.Backend.IsCLI() {
+		// A hybrid app routes per method by which route it declares; cli/http apps
+		// route every method the same way.
+		methodIsCLI := s.Backend.IsCLI() || (s.Backend.IsHybrid() && m.HasCLI())
+		if methodIsCLI {
 			method.CLI = &scaffold.CLIRoute{
 				Args:          m.CLI.Args,
 				ParamsAsFlags: m.CLI.ParamsAsFlags,

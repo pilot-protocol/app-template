@@ -482,6 +482,15 @@ func (s *server) registerManaged(sub publish.Submission) {
 		log.Printf("broker registration for %s failed: %v", entry.ID, err)
 		return
 	}
+	if entry.Provision != nil {
+		provider := entry.Provision.Provider
+		if provider == "" {
+			provider = "master"
+		}
+		log.Printf("broker: registered provisioned app %s -> %s (provider=%s; set cloud master key in env %s AND derive secret in env %s; HUP the broker to load)",
+			entry.ID, entry.Upstream, provider, entry.KeyEnv, entry.Provision.SecretEnv)
+		return
+	}
 	log.Printf("broker: registered managed app %s -> %s (set master key in env %s; HUP the broker to load)",
 		entry.ID, entry.Upstream, entry.KeyEnv)
 }

@@ -15,17 +15,20 @@
   ],
   "grants": [
     {"cap": "fs.read", "target": "$APP/config.json"},
-{{- if .Backend.NeedsSecrets}}
+{{- if or .Backend.NeedsSecrets .Provisioned}}
     {"cap": "fs.read", "target": "$APP/secrets.json"},
+{{- end}}
+{{- if .Provisioned}}
+    {"cap": "fs.write", "target": "$APP/secrets.json"},
 {{- end}}
 {{- if .Managed}}
     {"cap": "key.sign", "target": "self"},
 {{- end}}
-{{- if eq .Backend.Type "http"}}
+{{- if .HasHTTPMethods}}
     {"cap": "net.dial", "target": "{{.AdapterBackendHost}}",
      "if": {"kind": "rate", "params": {"per": "min", "limit": {{.Grants.RatePerMin}}}}},
 {{- end}}
-{{- if eq .Backend.Type "cli"}}
+{{- if .HasCLIMethods}}
     {"cap": "proc.exec", "target": "{{index .Backend.Command 0}}"},
 {{- end}}
 {{- if .HasAssets}}
@@ -44,7 +47,7 @@
     {"cap": "{{.Cap}}", "target": "{{.Target}}"}
 {{- end}}
   ],
-  "protection": "{{if or .Backend.X402 (eq .Backend.Type "cli")}}guarded{{else}}shareable{{end}}",
+  "protection": "{{if or .Backend.X402 .HasCLIMethods}}guarded{{else}}shareable{{end}}",
   "store": {
     "publisher": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     "signature": "sig:placeholder-store-sig-replaced-at-publish-time"

@@ -20,16 +20,31 @@ type BrokerRegistrar interface {
 
 // MasterKeyEnv is the env var name the broker reads the master key from for this
 // submission, derived deterministically from the app id so ops knows what to set
-// (e.g. io.pilot.partner -> PARTNER_MASTER_KEY).
-func (s Submission) MasterKeyEnv() string {
+// (e.g. io.pilot.partner -> PARTNER_MASTER_KEY). For a provisioned app this holds
+// the cloud master key (e.g. the smk_… key) the broker forwards with.
+func (s Submission) MasterKeyEnv() string { return s.envName("MASTER_KEY") }
+
+// DeriveSecretEnv names the env var holding a provisioned app's HMAC derive
+// secret (e.g. io.pilot.smol -> SMOL_DERIVE_SECRET). Distinct from MasterKeyEnv:
+// the master key talks to the cloud; the derive secret mints per-user keys.
+func (s Submission) DeriveSecretEnv() string { return s.envName("DERIVE_SECRET") }
+
+// AdminKeyEnv names the env var holding a tokenmint provider's admin key.
+func (s Submission) AdminKeyEnv() string { return s.envName("ADMIN_KEY") }
+
+func (s Submission) envName(suffix string) string {
 	repl := strings.NewReplacer("-", "_", ".", "_")
-	return strings.ToUpper(repl.Replace(s.Namespace())) + "_MASTER_KEY"
+	return strings.ToUpper(repl.Replace(s.Namespace())) + "_" + suffix
 }
 
 // BrokerEntry derives the broker registry entry for a managed submission:
 // where to forward (Upstream), which env var holds the master key (KeyEnv),
 // which header to inject it as (AuthHeader), and which method paths are allowed.
+// A provisioned submission takes a different shape (per-user keys + credit).
 func (s Submission) BrokerEntry() broker.AppEntry {
+	if s.Backend.Provisioned() {
+		return s.provisionedBrokerEntry()
+	}
 	authHeader := "Authorization" // safe default if the submitter didn't name one
 	authScheme := ""              // e.g. "Bearer" for Authorization: Bearer <key>
 	for _, h := range s.Backend.Headers {
@@ -58,6 +73,46 @@ func (s Submission) BrokerEntry() broker.AppEntry {
 		AuthScheme: authScheme,
 		Allow:      allow,
 		Quota:      s.Backend.Quota, // per-caller cap set at publish time (0 = unlimited)
+	}
+}
+
+// provisionedBrokerEntry derives the registry entry for a provisioned app: the
+// broker forwards to CloudBase with the cloud master key (KeyEnv), mints per-user
+// keys from the derive secret (Provision.SecretEnv), and meters a credit ledger.
+// The generated adapter is keyless; both secrets stay in the broker env.
+func (s Submission) provisionedBrokerEntry() broker.AppEntry {
+	b := s.Backend
+	var allow []string // the cloud (http) method paths this app exposes through the broker
+	for _, m := range s.Methods {
+		if m.HasHTTP() {
+			if p := strings.TrimSpace(m.HTTP.Path); p != "" {
+				allow = append(allow, p)
+			}
+		}
+	}
+	prov := &broker.ProvisionSpec{
+		Provider:           b.Provider,
+		SecretEnv:          s.DeriveSecretEnv(),
+		KeyVersion:         1,
+		SeedCredits:        b.SeedCredits,
+		CostCredits:        b.CostCredits,
+		MaxIdentitiesPerIP: b.MaxIdentitiesPerIP,
+		MintCooldownMs:     b.MintCooldownMs,
+		PushPath:           b.PushPath,
+		BalancePath:        b.BalancePath,
+		ArtifactMaxBytes:   b.ArtifactMaxBytes,
+		OwnerEnvKey:        b.OwnerEnvKey,
+		AdminKeyEnv:        b.AdminKeyEnv,
+	}
+	if prov.Provider == "tokenmint" && prov.AdminKeyEnv == "" {
+		prov.AdminKeyEnv = s.AdminKeyEnv()
+	}
+	return broker.AppEntry{
+		ID:        s.ID,
+		Upstream:  strings.TrimRight(b.CloudBase(), "/"),
+		KeyEnv:    s.MasterKeyEnv(),
+		Allow:     allow,
+		Provision: prov,
 	}
 }
 
