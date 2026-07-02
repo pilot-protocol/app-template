@@ -1,0 +1,119 @@
+{
+  "id": "io.pilot.smol",
+  "version": "1.2.0",
+  "description": "Smol Machines — fast, hardware-isolated Linux microVMs for agents, now local AND cloud. Create and run sub-second microVMs locally with the smolvm CLI (real hypervisor isolation, networking off by default), then push a VM to the smol cloud with a single method. Pilot provisions a per-user cloud key automatically on install; each user's cloud machines are isolated and metered against their own free credit. No cloud account, no API key to manage.",
+  "email": "apps@pilotprotocol.network",
+  "backend": {
+    "type": "hybrid",
+    "command": ["smolvm"],
+    "env_passthrough": ["HOME", "TMPDIR"],
+    "auth": "provisioned",
+    "provider": "master",
+    "cloud_base_url": "https://api.smolmachines.com",
+    "broker_url": "https://smol-broker.pilotprotocol.network",
+    "seed_credits": 5,
+    "cost_credits": { "/push": 1 },
+    "max_identities_per_ip": 5,
+    "mint_cooldown_ms": 0,
+    "owner_env_key": "PILOT_OWNER",
+    "artifact_max_bytes": 268435456
+  },
+  "methods": [
+    {
+      "name": "smol.exec",
+      "description": "Run any smolvm subcommand in a fast, hardware-isolated Linux microVM LOCALLY. Payload is {\"args\":[...]} — the verbatim smolvm argv. Command surface: `machine run` (ephemeral VM, one-off command), `machine create|start|exec|stop|delete|shell|status|ls|cp|update|monitor|prune` (persistent VMs; `exec` persists filesystem changes), `pack create|run` (portable .smolmachine artifacts), `serve` (HTTP API), `config`. Key flags: `--net` (networking is OFF by default), `--image <oci|./archive.tar|->`, `-v HOST:GUEST`, `-p HOST:GUEST`, `--gpu`, `--ssh-agent`, `--secret-env GUEST=HOST`. Example args: [\"machine\",\"run\",\"--net\",\"--image\",\"alpine\",\"--\",\"sh\",\"-c\",\"echo hi\"]. Not supported over IPC: interactive sessions (-it / `machine shell`) and long-running `serve`.",
+      "latency": "med",
+      "params": [],
+      "cli": { "passthrough": true }
+    },
+    {
+      "name": "smol.version",
+      "description": "Report the local smolvm engine version. This is `smolvm --version`.",
+      "latency": "fast",
+      "params": [],
+      "cli": { "args": ["--version"] }
+    },
+    {
+      "name": "smol.provision",
+      "description": "Provision (or fetch) this Pilot user's proprietary smol cloud key and free credit balance. Runs automatically on install and on smol.help — you rarely call it directly. The key is bound to your Pilot identity, stored only in your app's private secrets, and used to push and isolate your cloud VMs. Returns {key, credits}.",
+      "latency": "fast",
+      "params": [],
+      "http": { "verb": "POST", "path": "/_provision" }
+    },
+    {
+      "name": "smol.balance",
+      "description": "Report your remaining smol cloud credit balance. Returns {credits}.",
+      "latency": "fast",
+      "params": [],
+      "http": { "verb": "GET", "path": "/_balance" }
+    },
+    {
+      "name": "smol.push",
+      "description": "Push a VM to the smol cloud as YOU (your provisioned key). Provide either a local packed artifact (base64 of a `smolvm pack` output) OR an OCI `image` reference the cloud pulls. Costs 1 credit; the broker checks your balance first (402 if insufficient) and tags the created cloud machine as owned by you so no other user can see or touch it. Returns the created machine.",
+      "latency": "slow",
+      "params": [
+        { "name": "image", "type": "string", "required": false, "description": "An OCI image reference the cloud pulls to create the machine, e.g. \"alpine:3.20\". Use this OR artifact." },
+        { "name": "artifact", "type": "string", "required": false, "description": "Base64 of a locally packed VM (`smolvm pack` output) to publish and boot in the cloud. Use this OR image." },
+        { "name": "name", "type": "string", "required": false, "description": "A short name for the cloud machine (namespaced to you). Defaults to a generated name." },
+        { "name": "arch", "type": "string", "required": false, "description": "Target architecture for the cloud machine, e.g. \"amd64\" or \"arm64\"." }
+      ],
+      "http": { "verb": "POST", "path": "/push" }
+    },
+    {
+      "name": "smol.list",
+      "description": "List YOUR smol cloud machines (only yours — the broker filters by owner). Free (no credit). Returns an array of machines.",
+      "latency": "fast",
+      "params": [],
+      "http": { "verb": "GET", "path": "/list" }
+    }
+  ],
+  "listing": {
+    "display_name": "Smol Machines",
+    "tagline": "Fast, hardware-isolated microVMs — local and cloud",
+    "app_description": "Smol Machines — fast, hardware-isolated Linux microVMs for agents, now with a **cloud plane**. Spin up sub-second, real-hypervisor-isolated microVMs locally with the smolvm CLI (not shared-kernel containers), then **push a VM to the cloud** with one method.\n\n**Local (free, offline):**\n- Run untrusted or AI-generated code safely, networking off by default\n- Give an agent a real Linux shell — stateful, isolated\n- Ephemeral `machine run` or persistent VMs; portable `.smolmachine` artifacts via `pack`\n- GPU/Vulkan compute, headless-browser automation, CI-style jobs\n\n**Cloud (per-user, metered):**\n- `smol.push` sends a local VM (or an OCI image) to the smol cloud\n- Pilot provisions your **own** cloud key automatically on install — no account, no API key to manage\n- Your cloud machines are **isolated per user** and metered against your **free credit**; `smol.balance` shows what's left, `smol.list` shows only your machines\n\nDiscover the live method surface with smol.help, which lists each method's parameters and latency class. The master cloud key never leaves Pilot's broker; you only ever hold your own scoped key.",
+    "license": "Apache-2.0",
+    "homepage": "https://smolmachines.com",
+    "source_url": "https://github.com/smol-machines/smolvm",
+    "categories": ["dev", "virtualization", "security"],
+    "keywords": ["microvm", "sandbox", "vm", "isolation", "gpu", "ci", "cloud"]
+  },
+  "vendor": {
+    "name": "smol machines",
+    "url": "https://smolmachines.com",
+    "contact": "apps@pilotprotocol.network",
+    "agent_usage": "Agents create and run fast, isolated Linux microVMs locally via smol.exec (verbatim smolvm argv: machine run/create/exec, pack, serve, config) and smol.version. To use the cloud, smol.push sends a local VM or an OCI image to the smol cloud as the user (Pilot auto-provisions a per-user key on install / smol.help); smol.balance reports free credit and smol.list shows only that user's cloud machines. Cloud machines are isolated per user and metered; the master key stays in Pilot's broker.",
+    "capabilities": "Fast, hardware-isolated Linux microVMs (sub-second boot, real hypervisor isolation) via the smolvm engine — local and cloud. Locally: ephemeral or persistent VMs, portable .smolmachine artifacts (pack), GPU/Vulkan, headless-browser automation, networking off by default. Cloud: smol.push sends a local VM or an OCI image to the smol cloud as the user, with per-user provisioned keys, per-user isolation, and metered free credit — the master key stays in Pilot's broker. Apache-2.0."
+  },
+  "artifacts": [
+    {
+      "role": "binary",
+      "os": "darwin",
+      "arch": "arm64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.smolmachines/1.2.0/darwin-arm64/smolvm-1.2.0-darwin-arm64.tar.gz",
+      "sha256": "5f53abad672c57042b68a327b9038a759aefd070143e22658a35d400825b3319",
+      "unpack": "tar.gz",
+      "exec_path": "smolvm-1.2.0-darwin-arm64/smolvm",
+      "order": 0
+    },
+    {
+      "role": "binary",
+      "os": "linux",
+      "arch": "amd64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.smolmachines/1.2.0/linux-amd64/smolvm-1.2.0-linux-x86_64.tar.gz",
+      "sha256": "e0e3980d95b26362385767849f5652972378ec6e1e81ce2ec37104405698efe6",
+      "unpack": "tar.gz",
+      "exec_path": "smolvm-1.2.0-linux-x86_64/smolvm",
+      "order": 0
+    },
+    {
+      "role": "binary",
+      "os": "linux",
+      "arch": "arm64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.smolmachines/1.2.0/linux-arm64/smolvm-1.2.0-linux-arm64.tar.gz",
+      "sha256": "d5473cc9d5d1dbaafc0ee5bcfc98323d2246c476650e26b038761840b2fdc5a8",
+      "unpack": "tar.gz",
+      "exec_path": "smolvm-1.2.0-linux-arm64/smolvm",
+      "order": 0
+    }
+  ]
+}
