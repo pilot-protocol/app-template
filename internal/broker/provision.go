@@ -35,9 +35,27 @@ type CloudProvider interface {
 	Push(ctx context.Context, owner string, spec PushSpec, artifact []byte) (CloudResp, error)
 	// List returns ONLY the machines owned by owner (isolation).
 	List(ctx context.Context, owner string) (CloudResp, error)
+	// AllOwned returns EVERY tenant machine with its owner tag + resources, for
+	// the usage meter (which attributes real cost per owner).
+	AllOwned(ctx context.Context) ([]MachineInfo, error)
+	// Stop stops a machine (used to enforce credit exhaustion).
+	Stop(ctx context.Context, id string) error
 	// Name identifies the provider (logging / diagnostics).
 	Name() string
 }
+
+// MachineInfo is the metering view of a cloud machine.
+type MachineInfo struct {
+	ID       string
+	Owner    string
+	State    string
+	Cpus     float64
+	MemoryMb float64
+	DiskGb   float64
+}
+
+// Running reports whether the machine is billable (started).
+func (m MachineInfo) Running() bool { return m.State == "started" || m.State == "running" }
 
 // PushSpec carries the non-artifact push parameters.
 type PushSpec struct {
@@ -227,6 +245,48 @@ func (p *masterKeyProvider) List(ctx context.Context, owner string) (CloudResp, 
 	return CloudResp{Status: 200, Body: out}, nil
 }
 
+func (p *masterKeyProvider) AllOwned(ctx context.Context) ([]MachineInfo, error) {
+	resp, err := p.do(ctx, http.MethodGet, "/v1/machines", nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Status/100 != 2 {
+		return nil, fmt.Errorf("list machines: %d", resp.Status)
+	}
+	var raw []struct {
+		ID        string `json:"id"`
+		State     string `json:"state"`
+		Env       map[string]string
+		Resources struct {
+			Cpus     float64 `json:"cpus"`
+			MemoryMb float64 `json:"memoryMb"`
+			DiskGb   float64 `json:"diskGb"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(resp.Body, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]MachineInfo, 0, len(raw))
+	for _, m := range raw {
+		out = append(out, MachineInfo{
+			ID: m.ID, Owner: m.Env[p.ownerEnvKey], State: m.State,
+			Cpus: m.Resources.Cpus, MemoryMb: m.Resources.MemoryMb, DiskGb: m.Resources.DiskGb,
+		})
+	}
+	return out, nil
+}
+
+func (p *masterKeyProvider) Stop(ctx context.Context, id string) error {
+	resp, err := p.do(ctx, http.MethodPost, "/v1/machines/"+id+"/stop", nil)
+	if err != nil {
+		return err
+	}
+	if resp.Status/100 != 2 {
+		return fmt.Errorf("stop %s: %d", id, resp.Status)
+	}
+	return nil
+}
+
 // ---- tokenMintProvider: cloud-enforced isolation (dormant until an admin key) --
 
 type tokenMintProvider struct {
@@ -290,6 +350,10 @@ func (p *tokenMintProvider) Push(ctx context.Context, owner string, spec PushSpe
 func (p *tokenMintProvider) List(ctx context.Context, owner string) (CloudResp, error) {
 	return CloudResp{}, errProviderDormant
 }
+func (p *tokenMintProvider) AllOwned(ctx context.Context) ([]MachineInfo, error) {
+	return nil, errProviderDormant
+}
+func (p *tokenMintProvider) Stop(ctx context.Context, id string) error { return errProviderDormant }
 
 // ---- IP trust ----
 
@@ -434,6 +498,14 @@ func (b *Broker) servePush(w http.ResponseWriter, r *http.Request, app *AppEntry
 		return
 	}
 
+	// Credit must be positive to start a new machine — the metering loop then
+	// drains it by REAL usage (resources × rate card × time) and stops the
+	// machine at zero. An optional flat CostCredits reserve still applies (0 by
+	// default when metering is on).
+	if bal, _, gerr := ps.Get(app.ID, string(caller)); gerr == nil && bal.Credits <= 0 {
+		writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": "out of credit — top up to push"})
+		return
+	}
 	cost := creditCost(app, app.Provision.PushPath)
 	admitted, _, err := ps.Debit(app.ID, string(caller), cost)
 	if err != nil {

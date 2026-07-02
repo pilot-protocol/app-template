@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"log"
@@ -28,6 +29,7 @@ func main() {
 	addr := flag.String("addr", envOr("BROKER_ADDR", ":8099"), "listen address")
 	window := flag.Duration("window", 5*time.Minute, "signed-request freshness window")
 	ipHeader := flag.String("ip-header", envOr("BROKER_IP_HEADER", "X-Real-IP"), "header carrying the real source IP (set by the front proxy; client X-Forwarded-For is never trusted)")
+	meterInterval := flag.Duration("meter-interval", 60*time.Second, "usage-metering tick for provisioned apps")
 	flag.Parse()
 
 	reg, err := broker.LoadRegistry(*registryPath, os.Getenv)
@@ -59,6 +61,10 @@ func main() {
 	b := broker.New(reg, store)
 	b.Verify = broker.VerifyConfig{Window: *window}
 	b.IPTrust = broker.IPTrust{Header: *ipHeader}
+
+	// Usage meter: drain per-user credit by real machine usage, stopping machines
+	// at zero. Runs for provisioned apps whose registry entry carries a rate card.
+	go b.RunMeter(context.Background(), *meterInterval)
 
 	// Hot reload: `kill -HUP <pid>` re-reads the registry without dropping
 	// traffic, so a new app goes live without a restart.

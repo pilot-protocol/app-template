@@ -190,6 +190,7 @@ type Publisher struct {
 // credits and the underlying provider bills by the rate card.
 type Pricing struct {
 	Model         string            `yaml:"model"`           // one-line human summary of the cost model
+	CreditUnit    string            `yaml:"credit_unit"`     // unit for FreeCredits (e.g. "micro-USD (1000000 = $1.00)")
 	FreeCredits   int               `yaml:"free_credits"`    // credits granted to a new user
 	CreditCost    map[string]int    `yaml:"credit_cost"`     // method name → credits it debits
 	CloudRateCard map[string]string `yaml:"cloud_rate_card"` // resource → provider rate (e.g. "cpu_hour": "$0.0432")

@@ -7,12 +7,16 @@
       "provider": "master",
       "secret_env": "SMOL_DERIVE_SECRET",
       "key_version": 1,
-      "seed_credits": 5,
-      "cost_credits": { "/push": 1 },
+      "seed_credits": 5000000,
+      "cost_credits": { "/push": 0 },
       "max_identities_per_ip": 5,
       "mint_cooldown_ms": 0,
       "owner_env_key": "PILOT_OWNER",
-      "artifact_max_bytes": 268435456
+      "artifact_max_bytes": 268435456,
+      "meter_interval_ms": 60000,
+      "cpu_hour_micros": 43200,
+      "mem_gb_hour_micros": 16200,
+      "disk_gb_hour_micros": 100
     }
   }
 ]

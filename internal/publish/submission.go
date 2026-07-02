@@ -188,6 +188,7 @@ type SubParam struct {
 // SubPricing is the optional cost model surfaced in <ns>.help.
 type SubPricing struct {
 	Model         string            `json:"model"`           // one-line human summary
+	CreditUnit    string            `json:"credit_unit"`     // unit for free_credits
 	FreeCredits   int               `json:"free_credits"`    // credits a new user gets
 	CreditCost    map[string]int    `json:"credit_cost"`     // method name → credits it debits
 	CloudRateCard map[string]string `json:"cloud_rate_card"` // resource → provider rate (e.g. "cpu_hour": "$0.0432")
@@ -482,6 +483,7 @@ func (s Submission) ToConfig() *scaffold.Config {
 	if s.Pricing != nil {
 		cfg.Pricing = &scaffold.Pricing{
 			Model:         s.Pricing.Model,
+			CreditUnit:    s.Pricing.CreditUnit,
 			FreeCredits:   s.Pricing.FreeCredits,
 			CreditCost:    s.Pricing.CreditCost,
 			CloudRateCard: s.Pricing.CloudRateCard,

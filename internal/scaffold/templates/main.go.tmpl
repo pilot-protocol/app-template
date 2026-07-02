@@ -535,13 +535,15 @@ var helpMethods = []methodDoc{
 type pricingDoc struct {
 	Model         string            `json:"model"`
 	FreeCredits   int               `json:"free_credits"`
-	CreditCost    map[string]int    `json:"credit_cost"`
+	CreditUnit    string            `json:"credit_unit,omitempty"`
+	CreditCost    map[string]int    `json:"credit_cost,omitempty"`
 	CloudRateCard map[string]string `json:"cloud_rate_card"`
 }
 
 var pricing = &pricingDoc{
 	Model:       {{printf "%q" .Pricing.Model}},
 	FreeCredits: {{.Pricing.FreeCredits}},
+	CreditUnit:  {{printf "%q" .Pricing.CreditUnit}},
 	CreditCost: map[string]int{
 {{- range $k := .Pricing.CreditCostKeys}}
 		{{printf "%q" $k}}: {{index $.Pricing.CreditCost $k}},
