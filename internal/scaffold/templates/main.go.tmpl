@@ -360,6 +360,9 @@ func cloudHandler(c *backend.CloudClient, verb, path string, isProvision bool, t
 		if status/100 != 2 {
 			return nil, fmt.Errorf("%s %s: broker returned %d: %s", verb, path, status, string(out))
 		}
+		// A key/rotate response carries a (possibly rotated) key — keep the local
+		// cache current so the stored key always matches the broker.
+		c.RefreshKeyFromResponse(out)
 		return out, nil
 	}
 }
@@ -495,17 +498,22 @@ func dur(s string) time.Duration {
 
 type methodDoc struct {
 	Method    string            `json:"method"`
+	Plane     string            `json:"plane"` // "local" (runs on this host, free) | "cloud" (brokered, may cost credit)
 	Kind      string            `json:"kind"`
 	Summary   string            `json:"summary"`
 	Params    map[string]string `json:"params,omitempty"`
 	Duration  string            `json:"duration"`
+	Cost      string            `json:"cost,omitempty"` // what a cloud method debits (empty = free)
 	Roundtrip string            `json:"typical_roundtrip,omitempty"`
 }
 
 var helpMethods = []methodDoc{
 {{- range $m := .Methods}}
-	{Method: "{{$m.Name}}", Kind: "{{$m.Kind}}", Duration: "{{$m.Duration}}",
+	{Method: "{{$m.Name}}", Plane: "{{$m.Plane}}", Kind: "{{$m.Kind}}", Duration: "{{$m.Duration}}",
 		Summary: {{printf "%q" $m.Summary}},
+{{- if and $.Pricing (index $.Pricing.CreditCost $m.Name)}}
+		Cost: "{{index $.Pricing.CreditCost $m.Name}} credit(s)",
+{{- end}}
 {{- if $m.Params}}
 		Params: map[string]string{
 {{- range $k := $m.SortedParamKeys}}
@@ -518,10 +526,36 @@ var helpMethods = []methodDoc{
 {{- end}}
 	},
 {{- end}}
-	{Method: "{{.Namespace}}.help", Kind: "meta", Duration: "fast",
-		Summary: "This document — every method with params, kind, and duration class.",
+	{Method: "{{.Namespace}}.help", Plane: "local", Kind: "meta", Duration: "fast",
+		Summary: "This document — methods grouped by plane (local vs cloud), with params, latency, and cost.",
 		Roundtrip: "instant (local, no backend call)"},
 }
+
+{{- if .Pricing}}
+type pricingDoc struct {
+	Model         string            `json:"model"`
+	FreeCredits   int               `json:"free_credits"`
+	CreditUnit    string            `json:"credit_unit,omitempty"`
+	CreditCost    map[string]int    `json:"credit_cost,omitempty"`
+	CloudRateCard map[string]string `json:"cloud_rate_card"`
+}
+
+var pricing = &pricingDoc{
+	Model:       {{printf "%q" .Pricing.Model}},
+	FreeCredits: {{.Pricing.FreeCredits}},
+	CreditUnit:  {{printf "%q" .Pricing.CreditUnit}},
+	CreditCost: map[string]int{
+{{- range $k := .Pricing.CreditCostKeys}}
+		{{printf "%q" $k}}: {{index $.Pricing.CreditCost $k}},
+{{- end}}
+	},
+	CloudRateCard: map[string]string{
+{{- range $k := .Pricing.RateCardKeys}}
+		{{printf "%q" $k}}: {{printf "%q" (index $.Pricing.CloudRateCard $k)}},
+{{- end}}
+	},
+}
+{{- end}}
 
 type helpDoc struct {
 	App             string            `json:"app"`
@@ -530,8 +564,26 @@ type helpDoc struct {
 {{- if ne .Backend.Type "cli"}}
 	Backend         string            `json:"backend"`
 {{- end}}
+	Planes          map[string]string `json:"planes"`
 	DurationClasses map[string]string `json:"duration_classes"`
+{{- if .Pricing}}
+	Pricing         *pricingDoc       `json:"pricing"`
+{{- end}}
+	LocalMethods    []methodDoc       `json:"local_methods"`
+	CloudMethods    []methodDoc       `json:"cloud_methods"`
 	Methods         []methodDoc       `json:"methods"`
+}
+
+// splitPlanes groups methods into local vs cloud so <ns>.help reads clearly.
+func splitPlanes(ms []methodDoc) (local, cloud []methodDoc) {
+	for _, m := range ms {
+		if m.Plane == "cloud" {
+			cloud = append(cloud, m)
+		} else {
+			local = append(local, m)
+		}
+	}
+	return local, cloud
 }
 
 {{if ne .Backend.Type "cli"}}func helpHandler(version, backendURL string) ipc.Handler {{"{"}}{{else}}func helpHandler(version string) ipc.Handler {{"{"}}{{end}}
@@ -542,13 +594,21 @@ type helpDoc struct {
 {{- if ne .Backend.Type "cli"}}
 		Backend:     backendURL,
 {{- end}}
+		Planes: map[string]string{
+			"local": "runs on THIS host via the local CLI — free, offline, no account",
+			"cloud": "brokered to the {{.Namespace}} cloud as you — may debit credit; your resources are isolated per user",
+		},
 		DurationClasses: map[string]string{
 			"fast": "<~1s — status or cheap call",
 			"med":  "~1-5s — moderate work",
 			"slow": "~5-30s — heavy / multi-step",
 		},
+{{- if .Pricing}}
+		Pricing: pricing,
+{{- end}}
 		Methods: helpMethods,
 	}
+	doc.LocalMethods, doc.CloudMethods = splitPlanes(helpMethods)
 	raw, _ := json.Marshal(doc)
 	return func(ctx context.Context, _ *ipc.Envelope) (json.RawMessage, error) {
 		return append(json.RawMessage(nil), raw...), nil

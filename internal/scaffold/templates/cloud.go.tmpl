@@ -119,6 +119,41 @@ func (c *CloudClient) ensure(ctx context.Context) (json.RawMessage, error) {
 	return body, nil
 }
 
+// RefreshKeyFromResponse updates the cached key when a broker response carries a
+// new one (provision / key / rotate). It OVERWRITES, so a rotated key replaces
+// the old one in $APP/secrets.json.
+func (c *CloudClient) RefreshKeyFromResponse(body json.RawMessage) {
+	var r struct {
+		Key string `json:"key"`
+	}
+	if json.Unmarshal(body, &r) == nil && r.Key != "" {
+		c.writeKey(r.Key)
+	}
+}
+
+func (c *CloudClient) writeKey(key string) {
+	p := c.secretsPath()
+	if p == "" {
+		return
+	}
+	m := map[string]string{}
+	if b, err := os.ReadFile(p); err == nil {
+		_ = json.Unmarshal(b, &m)
+	}
+	if m[cloudKeyName] == key {
+		return
+	}
+	m[cloudKeyName] = key
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := p + ".tmp"
+	if os.WriteFile(tmp, append(out, '\n'), 0o600) == nil {
+		_ = os.Rename(tmp, p)
+	}
+}
+
 func (c *CloudClient) secretsPath() string {
 	if c.appDir == "" {
 		return ""

@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+// Per-user rotation: the derived key binds a per-user rotation counter (rot) in
+// addition to the version + caller id. Bumping a single user's rot (smol.rotate)
+// invalidates their old key WITHOUT touching anyone else and WITHOUT resetting
+// their credit (credit is keyed by the caller, not the key) — this is how a
+// leaked key is revoked.
+
 // Derived per-user cloud keys — the broker "piecemeals" the one master account
 // into a distinct, unforgeable key per Pilot user WITHOUT storing a secret per
 // user. The key is a MAC over the caller's VERIFIED identity, so:
@@ -33,26 +39,30 @@ const derivedPrefix = "sk-smol-"
 // the '.'-separated token is unambiguous.
 var b64 = base64.RawURLEncoding
 
-// macMessage is the exact byte string the MAC covers: the version byte followed
-// by the canonical callerID bytes. Binding the version prevents a token minted
-// under one secret from validating under another (rotation safety).
-func macMessage(version byte, caller CallerID) []byte {
-	msg := make([]byte, 0, 1+len(caller))
+// macMessage is the exact byte string the MAC covers: the version byte, the
+// per-user rotation counter, and the canonical callerID bytes. Binding the
+// version prevents a token minted under one secret from validating under another
+// (global rotation safety); binding rot lets a single user revoke their key.
+func macMessage(version byte, rot int, caller CallerID) []byte {
+	rotStr := strconv.Itoa(rot)
+	msg := make([]byte, 0, 1+len(rotStr)+1+len(caller))
 	msg = append(msg, version)
+	msg = append(msg, rotStr...)
+	msg = append(msg, '\n')
 	msg = append(msg, caller...)
 	return msg
 }
 
-func computeMAC(secret []byte, version byte, caller CallerID) []byte {
+func computeMAC(secret []byte, version byte, rot int, caller CallerID) []byte {
 	m := hmac.New(sha256.New, secret)
-	m.Write(macMessage(version, caller))
+	m.Write(macMessage(version, rot, caller))
 	return m.Sum(nil)
 }
 
-// DeriveKey mints the per-user token for a verified caller. secret must be the
-// broker's derive secret for the given version.
-func DeriveKey(secret []byte, version byte, caller CallerID) string {
-	mac := computeMAC(secret, version, caller)
+// DeriveKey mints the per-user token for a verified caller at rotation rot.
+// secret must be the broker's derive secret for the given version.
+func DeriveKey(secret []byte, version byte, rot int, caller CallerID) string {
+	mac := computeMAC(secret, version, rot, caller)
 	var sb strings.Builder
 	sb.WriteString(derivedPrefix)
 	sb.WriteString(strconv.Itoa(int(version)))
@@ -94,11 +104,13 @@ func ParseDerived(token string) (version byte, caller string, mac []byte, ok boo
 	return byte(v), string(callerBytes), macBytes, true
 }
 
-// ValidateDerived checks a token's MAC against the secret for its version and, on
-// success, returns the embedded (now-trusted) callerID. secretsByVersion holds
-// every currently-accepted {version: secret} (one entry normally; two during a
-// rotation grace window). Comparison is constant-time.
-func ValidateDerived(secretsByVersion map[byte][]byte, token string) (caller string, ok bool) {
+// ValidateDerived checks a token's MAC against the secret for its version AND the
+// given rotation counter, and on success returns the embedded (now-trusted)
+// callerID. The caller supplies rot — the broker looks up the user's CURRENT rot
+// (by the token's callerID) so an old (pre-rotation) key fails. secretsByVersion
+// holds every currently-accepted {version: secret} (one normally; two during a
+// global-secret grace window). Comparison is constant-time.
+func ValidateDerived(secretsByVersion map[byte][]byte, token string, rot int) (caller string, ok bool) {
 	version, callerStr, mac, parsed := ParseDerived(token)
 	if !parsed {
 		return "", false
@@ -107,7 +119,7 @@ func ValidateDerived(secretsByVersion map[byte][]byte, token string) (caller str
 	if !known || len(secret) == 0 {
 		return "", false
 	}
-	want := computeMAC(secret, version, CallerID(callerStr))
+	want := computeMAC(secret, version, rot, CallerID(callerStr))
 	if !hmac.Equal(mac, want) {
 		return "", false
 	}

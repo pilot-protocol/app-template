@@ -3,6 +3,7 @@ package broker
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no cgo)
@@ -58,10 +59,16 @@ func OpenSQLiteStore(path string) (*SQLiteStore, error) {
 		first_seen INTEGER NOT NULL,
 		last_mint  INTEGER NOT NULL,
 		credits    INTEGER NOT NULL DEFAULT 0,
+		rot        INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY (app, caller)
 	)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite migrate provision: %w", err)
+	}
+	// Add rot to a pre-existing table (older deployments); ignore "duplicate column".
+	if _, err := db.Exec(`ALTER TABLE provision ADD COLUMN rot INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		_ = db.Close()
+		return nil, fmt.Errorf("sqlite migrate provision.rot: %w", err)
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS provision_app_ip ON provision(app, ip)`); err != nil {
 		_ = db.Close()
@@ -123,9 +130,9 @@ func (s *SQLiteStore) Provision(app, caller, ip string, seed, maxPerIP int, cool
 	defer func() { _ = tx.Rollback() }()
 
 	var firstSeen, lastMint int64
-	var credits int
-	err = tx.QueryRow(`SELECT first_seen, last_mint, credits FROM provision WHERE app=? AND caller=?`, app, caller).
-		Scan(&firstSeen, &lastMint, &credits)
+	var credits, rot int
+	err = tx.QueryRow(`SELECT first_seen, last_mint, credits, rot FROM provision WHERE app=? AND caller=?`, app, caller).
+		Scan(&firstSeen, &lastMint, &credits, &rot)
 	switch {
 	case err == nil: // repeat: cooldown check, refresh last_mint, no re-seed
 		if cooldown > 0 && now.Sub(time.Unix(lastMint, 0)) < cooldown {
@@ -137,7 +144,7 @@ func (s *SQLiteStore) Provision(app, caller, ip string, seed, maxPerIP int, cool
 		if err := tx.Commit(); err != nil {
 			return ProvisionRecord{}, err
 		}
-		return ProvisionRecord{App: app, Caller: caller, IP: ip, FirstSeen: time.Unix(firstSeen, 0), LastMint: now, Credits: credits, New: false}, nil
+		return ProvisionRecord{App: app, Caller: caller, IP: ip, FirstSeen: time.Unix(firstSeen, 0), LastMint: now, Credits: credits, Rot: rot, New: false}, nil
 	case err == sql.ErrNoRows: // first time: cap check + insert + seed
 		if maxPerIP > 0 {
 			var distinct int
@@ -205,6 +212,44 @@ func (s *SQLiteStore) Refund(app, caller string, n int) {
 		return
 	}
 	_, _ = s.db.Exec(`UPDATE provision SET credits=credits+? WHERE app=? AND caller=?`, n, app, caller)
+}
+
+func (s *SQLiteStore) Get(app, caller string) (ProvisionRecord, bool, error) {
+	var ip string
+	var firstSeen, lastMint int64
+	var credits, rot int
+	err := s.db.QueryRow(`SELECT ip, first_seen, last_mint, credits, rot FROM provision WHERE app=? AND caller=?`, app, caller).
+		Scan(&ip, &firstSeen, &lastMint, &credits, &rot)
+	if err == sql.ErrNoRows {
+		return ProvisionRecord{}, false, nil
+	}
+	if err != nil {
+		return ProvisionRecord{}, false, err
+	}
+	return ProvisionRecord{App: app, Caller: caller, IP: ip, FirstSeen: time.Unix(firstSeen, 0), LastMint: time.Unix(lastMint, 0), Credits: credits, Rot: rot}, true, nil
+}
+
+func (s *SQLiteStore) Rotate(app, caller string) (ProvisionRecord, bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return ProvisionRecord{}, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.Exec(`UPDATE provision SET rot=rot+1 WHERE app=? AND caller=?`, app, caller)
+	if err != nil {
+		return ProvisionRecord{}, false, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ProvisionRecord{}, false, nil // unprovisioned caller
+	}
+	var credits, rot int
+	if err := tx.QueryRow(`SELECT credits, rot FROM provision WHERE app=? AND caller=?`, app, caller).Scan(&credits, &rot); err != nil {
+		return ProvisionRecord{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ProvisionRecord{}, false, err
+	}
+	return ProvisionRecord{App: app, Caller: caller, Credits: credits, Rot: rot}, true, nil
 }
 
 // Snapshot returns all usage cells keyed "app|caller" (for /gw/usage).

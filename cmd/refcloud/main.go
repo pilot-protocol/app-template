@@ -21,6 +21,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,6 +38,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/artifacts", c.requireMaster(c.artifacts))
 	mux.HandleFunc("/v1/machines", c.requireMaster(c.machines))
+	mux.HandleFunc("/v1/machines/", c.requireMaster(c.machineAction)) // <id>/start etc.
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
@@ -95,6 +97,32 @@ func (c *cloud) machines(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, 405, map[string]string{"error": "method not allowed"})
 	}
+}
+
+// machineAction handles /v1/machines/<id>/<action> — for the reference cloud we
+// implement "start" (state → started) so a pushed VM reflects as running.
+func (c *cloud) machineAction(w http.ResponseWriter, r *http.Request) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/v1/machines/"), "/")
+	if len(parts) < 2 {
+		writeJSON(w, 404, map[string]string{"error": "not found"})
+		return
+	}
+	id, action := parts[0], parts[1]
+	for _, m := range c.store {
+		if m["id"] == id {
+			switch action {
+			case "start":
+				m["state"] = "started"
+			case "stop":
+				m["state"] = "stopped"
+			}
+			writeJSON(w, 200, m)
+			return
+		}
+	}
+	writeJSON(w, 404, map[string]string{"error": "no such machine"})
 }
 
 func short(s string) string {

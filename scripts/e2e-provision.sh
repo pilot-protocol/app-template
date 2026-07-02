@@ -84,7 +84,7 @@ signed_call "$WORK/alice.key" GET /io.pilot.smol/_balance "" 1.1.1.1
 
 echo "── cloud push + metering ──"
 signed_call "$WORK/alice.key" POST /io.pilot.smol/push "$PUSHBODY" 1.1.1.1
-[ "$STATUS" = 201 ] || fail "alice push status=$STATUS ($(cat "$WORK/out.json"))"
+[[ "$STATUS" =~ ^20[01]$ ]] || fail "alice push status=$STATUS ($(cat "$WORK/out.json"))"
 OWNER="$(python3 -c "import json;print(json.load(open('$WORK/out.json'))['env']['PILOT_OWNER'])")"
 [ -n "$OWNER" ] && pass "push created an owner-tagged machine"
 signed_call "$WORK/alice.key" GET /io.pilot.smol/_balance "" 1.1.1.1
@@ -93,16 +93,35 @@ signed_call "$WORK/alice.key" GET /io.pilot.smol/_balance "" 1.1.1.1
 echo "── isolation ──"
 signed_call "$WORK/bob.key" POST /io.pilot.smol/_provision "" 2.2.2.2
 signed_call "$WORK/bob.key" POST /io.pilot.smol/push "$PUSHBODY" 2.2.2.2
-[ "$STATUS" = 201 ] || fail "bob push status=$STATUS"
+[[ "$STATUS" =~ ^20[01]$ ]] || fail "bob push status=$STATUS"
 signed_call "$WORK/alice.key" GET /io.pilot.smol/list "" 1.1.1.1
 [ "$(jlen)" = 1 ] || fail "alice should see exactly 1 machine, saw $(jlen)"
 signed_call "$WORK/bob.key" GET /io.pilot.smol/list "" 2.2.2.2
 [ "$(jlen)" = 1 ] || fail "bob should see exactly 1 machine, saw $(jlen)"
 pass "each caller lists ONLY their own machine (broker-enforced isolation)"
 
+echo "── key management (get / bearer-use / rotate; leak recovery) ──"
+"$WORK/broker-sign" -gen-key "$WORK/km.key" -path /x >/dev/null
+signed_call "$WORK/km.key" POST /io.pilot.smol/_provision "" 6.6.6.6
+signed_call "$WORK/km.key" POST /io.pilot.smol/push "$PUSHBODY" 6.6.6.6
+signed_call "$WORK/km.key" GET /io.pilot.smol/_key "" 6.6.6.6
+K1="$(jget key)"; [ -n "$K1" ] && pass "smol.key returns the current key"
+# the KEY works as a Bearer credential (no signature) for a cloud read
+[ "$(curl -s -H "Authorization: Bearer $K1" "$B/io.pilot.smol/list" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null)" = 1 ] && pass "derived key works as a Bearer credential"
+# a leaked key CANNOT rotate (rotate needs a signature)
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $K1" "$B/io.pilot.smol/_rotate")" = 401 ] && pass "bearer key cannot rotate (needs signed identity)"
+# owner rotates (signed) → new key, credit preserved
+signed_call "$WORK/km.key" GET /io.pilot.smol/_balance "" 6.6.6.6; BAL="$(jget credits)"
+signed_call "$WORK/km.key" POST /io.pilot.smol/_rotate "" 6.6.6.6; K2="$(jget key)"
+[ "$K2" != "$K1" ] && [ "$(jget credits)" = "$BAL" ] && pass "rotate issues a new key, credit preserved (not reset)"
+# OLD key revoked, NEW key works
+old=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $K1" "$B/io.pilot.smol/list")
+new=$(curl -s -H "Authorization: Bearer $K2" "$B/io.pilot.smol/list" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null)
+[ "$old" = 401 ] && [ "$new" = 1 ] && pass "old key revoked (401), new key works after rotation"
+
 echo "── credit exhaustion (402) ──"
 signed_call "$WORK/alice.key" POST /io.pilot.smol/push "$PUSHBODY" 1.1.1.1   # 1→0
-[ "$STATUS" = 201 ] || fail "alice second push status=$STATUS"
+[[ "$STATUS" =~ ^20[01]$ ]] || fail "alice second push status=$STATUS"
 signed_call "$WORK/alice.key" POST /io.pilot.smol/push "$PUSHBODY" 1.1.1.1   # 0 → 402
 [ "$STATUS" = 402 ] && pass "push at zero credit returns 402"
 

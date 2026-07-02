@@ -56,16 +56,30 @@ type ProvisionSpec struct {
 	MintCooldownMs     int            `json:"mint_cooldown_ms"`      // per-identity re-mint cooldown (0 = none)
 	ProvisionPath      string         `json:"provision_path"`        // reserved route, default "/_provision"
 	BalancePath        string         `json:"balance_path"`          // reserved route, default "/_balance"
+	KeyPath            string         `json:"key_path"`              // reserved: return current key, default "/_key"
+	RotatePath         string         `json:"rotate_path"`           // reserved: rotate the key, default "/_rotate"
 	PushPath           string         `json:"push_path"`             // cloud push route, default "/push" (debits credit)
 	ListPath           string         `json:"list_path"`             // owner-scoped list route, default "/list" (free read)
 	ArtifactMaxBytes   int64          `json:"artifact_max_bytes"`    // push body cap (0 = default 256MiB)
 	OwnerEnvKey        string         `json:"owner_env_key"`         // machine env key stamped with the owner (default "PILOT_OWNER")
 	AdminKeyEnv        string         `json:"admin_key_env"`         // tokenmint: env var holding the admin key
+
+	// Usage metering: credit is denominated in MICRO-DOLLARS and drains by REAL
+	// usage. A background loop attributes each running machine's cost
+	// (resources × rate-card × elapsed) to its owner and stops the owner's
+	// machines when their balance hits zero. Zero rates disable metering (the
+	// flat CostCredits path still applies).
+	MeterIntervalMs  int   `json:"meter_interval_ms"`   // metering tick (0 = default 60s; <0 = disabled)
+	CpuHourMicros    int64 `json:"cpu_hour_micros"`     // micro-$ per cpu-hour (e.g. 43200 = $0.0432)
+	MemGbHourMicros  int64 `json:"mem_gb_hour_micros"`  // micro-$ per GB-hour
+	DiskGbHourMicros int64 `json:"disk_gb_hour_micros"` // micro-$ per GB-hour
 }
 
 const (
 	defaultProvisionPath = "/_provision"
 	defaultBalancePath   = "/_balance"
+	defaultKeyPath       = "/_key"
+	defaultRotatePath    = "/_rotate"
 	defaultPushPath      = "/push"
 	defaultListPath      = "/list"
 	defaultArtifactMax   = 256 << 20
@@ -202,6 +216,12 @@ func resolveProvision(a *AppEntry, getenv func(string) string) error {
 	}
 	if p.ProvisionPath == "" {
 		p.ProvisionPath = defaultProvisionPath
+	}
+	if p.KeyPath == "" {
+		p.KeyPath = defaultKeyPath
+	}
+	if p.RotatePath == "" {
+		p.RotatePath = defaultRotatePath
 	}
 	if p.BalancePath == "" {
 		p.BalancePath = defaultBalancePath

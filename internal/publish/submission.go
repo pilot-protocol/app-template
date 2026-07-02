@@ -27,6 +27,7 @@ type Submission struct {
 	Methods []SubMethod `json:"methods"`
 	Listing SubListing  `json:"listing"`
 	Vendor  SubVendor   `json:"vendor"`
+	Pricing *SubPricing `json:"pricing"` // optional: shown in <ns>.help (cost model + rate card)
 
 	// Artifacts is the native-binary delivery set for a cli app: the
 	// platform-specific binaries the publisher uploaded to the Pilot R2 artifact
@@ -184,6 +185,15 @@ type SubParam struct {
 
 // SubListing is everything needed to display the app in the store, plus the
 // optional native-binary delivery info.
+// SubPricing is the optional cost model surfaced in <ns>.help.
+type SubPricing struct {
+	Model         string            `json:"model"`           // one-line human summary
+	CreditUnit    string            `json:"credit_unit"`     // unit for free_credits
+	FreeCredits   int               `json:"free_credits"`    // credits a new user gets
+	CreditCost    map[string]int    `json:"credit_cost"`     // method name → credits it debits
+	CloudRateCard map[string]string `json:"cloud_rate_card"` // resource → provider rate (e.g. "cpu_hour": "$0.0432")
+}
+
 type SubListing struct {
 	DisplayName    string   `json:"display_name"`
 	Tagline        string   `json:"tagline"`
@@ -469,6 +479,15 @@ func (s Submission) ToConfig() *scaffold.Config {
 			Keywords:       s.Listing.Keywords,
 			Vendor:         scaffold.Vendor{Name: s.Vendor.Name, URL: s.Vendor.URL, Contact: s.Vendor.Contact},
 		},
+	}
+	if s.Pricing != nil {
+		cfg.Pricing = &scaffold.Pricing{
+			Model:         s.Pricing.Model,
+			CreditUnit:    s.Pricing.CreditUnit,
+			FreeCredits:   s.Pricing.FreeCredits,
+			CreditCost:    s.Pricing.CreditCost,
+			CloudRateCard: s.Pricing.CloudRateCard,
+		}
 	}
 	// HTTP byo apps carry auth headers; managed apps are keyless (the broker
 	// holds the key) and cli apps have no HTTP headers at all.

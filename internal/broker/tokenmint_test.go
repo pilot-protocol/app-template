@@ -76,3 +76,19 @@ func TestTokenMint_MintUserToken(t *testing.T) {
 		t.Fatalf("unexpected minted token %q", tok)
 	}
 }
+
+func TestTokenMint_DataPlaneDormant(t *testing.T) {
+	p := newTokenMintProvider("https://api.smolmachines.com", "admin")
+	if p.Name() != "tokenmint" {
+		t.Fatal("name")
+	}
+	if _, err := p.List(context.Background(), "o"); err != errProviderDormant {
+		t.Fatal("List dormant")
+	}
+	if _, err := p.AllOwned(context.Background()); err != errProviderDormant {
+		t.Fatal("AllOwned dormant")
+	}
+	if err := p.Stop(context.Background(), "id"); err != errProviderDormant {
+		t.Fatal("Stop dormant")
+	}
+}

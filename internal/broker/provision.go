@@ -35,15 +35,34 @@ type CloudProvider interface {
 	Push(ctx context.Context, owner string, spec PushSpec, artifact []byte) (CloudResp, error)
 	// List returns ONLY the machines owned by owner (isolation).
 	List(ctx context.Context, owner string) (CloudResp, error)
+	// AllOwned returns EVERY tenant machine with its owner tag + resources, for
+	// the usage meter (which attributes real cost per owner).
+	AllOwned(ctx context.Context) ([]MachineInfo, error)
+	// Stop stops a machine (used to enforce credit exhaustion).
+	Stop(ctx context.Context, id string) error
 	// Name identifies the provider (logging / diagnostics).
 	Name() string
 }
+
+// MachineInfo is the metering view of a cloud machine.
+type MachineInfo struct {
+	ID       string
+	Owner    string
+	State    string
+	Cpus     float64
+	MemoryMb float64
+	DiskGb   float64
+}
+
+// Running reports whether the machine is billable (started).
+func (m MachineInfo) Running() bool { return m.State == "started" || m.State == "running" }
 
 // PushSpec carries the non-artifact push parameters.
 type PushSpec struct {
 	Name  string // machine/artifact name (broker prefixes with the owner)
 	Image string // optional: push from an existing OCI image ref instead of an artifact
 	Arch  string // optional target arch
+	Net   bool   // enable outbound networking (off by default, mirroring smolvm's --net)
 }
 
 // CloudResp is a raw cloud HTTP result the broker relays to the caller verbatim.
@@ -92,17 +111,36 @@ func (p *masterKeyProvider) do(ctx context.Context, method, path string, body []
 	return CloudResp{Status: resp.StatusCode, Body: rb}, nil
 }
 
-// ownerName namespaces a machine name by owner so listings/registry paths don't
-// collide between users and are visibly attributed.
+// ownerName namespaces a machine name by owner so listings don't collide between
+// users and are visibly attributed. The cloud restricts machine names to
+// [A-Za-z0-9_-], but a caller id is base64 (may contain '+' '/' '='), so the name
+// portions are sanitized. The ISOLATION tag (env.PILOT_OWNER) keeps the exact,
+// unsanitized caller id — only this cosmetic name is constrained.
 func ownerName(owner, name string) string {
-	short := owner
+	short := sanitizeMachineName(owner)
 	if len(short) > 8 {
 		short = short[:8]
 	}
+	name = sanitizeMachineName(name)
 	if name == "" {
 		name = "vm"
 	}
 	return "smol-" + short + "-" + name
+}
+
+// sanitizeMachineName maps a string to the cloud's allowed machine-name charset
+// (letters, digits, '-', '_'); every other rune becomes '-'.
+func sanitizeMachineName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
 }
 
 func (p *masterKeyProvider) Push(ctx context.Context, owner string, spec PushSpec, artifact []byte) (CloudResp, error) {
@@ -135,12 +173,32 @@ func (p *masterKeyProvider) Push(ctx context.Context, owner string, spec PushSpe
 	if spec.Arch != "" {
 		source["arch"] = spec.Arch
 	}
-	body, _ := json.Marshal(map[string]any{
+	create := map[string]any{
 		"source": source,
 		"name":   ownerName(owner, spec.Name),
 		"env":    map[string]string{p.ownerEnvKey: owner}, // the isolation tag
-	})
-	return p.do(ctx, http.MethodPost, "/v1/machines", body)
+	}
+	if spec.Net {
+		// Networking is OFF by default (like smolvm without --net); opt in per push.
+		create["network"] = map[string]string{"mode": "open"}
+	}
+	body, _ := json.Marshal(create)
+	created, err := p.do(ctx, http.MethodPost, "/v1/machines", body)
+	if err != nil || created.Status/100 != 2 {
+		return created, err
+	}
+	// Start the machine so a pushed VM actually RUNS in the cloud. A start failure
+	// is non-fatal — the machine exists and can be started later; we relay the
+	// created machine either way.
+	var m struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(created.Body, &m) == nil && m.ID != "" {
+		if started, serr := p.do(ctx, http.MethodPost, "/v1/machines/"+m.ID+"/start", nil); serr == nil && started.Status/100 == 2 {
+			return started, nil
+		}
+	}
+	return created, nil
 }
 
 func (p *masterKeyProvider) uploadArtifact(ctx context.Context, owner, name string, artifact []byte) (CloudResp, error) {
@@ -185,6 +243,48 @@ func (p *masterKeyProvider) List(ctx context.Context, owner string) (CloudResp, 
 	}
 	out, _ := json.Marshal(mine)
 	return CloudResp{Status: 200, Body: out}, nil
+}
+
+func (p *masterKeyProvider) AllOwned(ctx context.Context) ([]MachineInfo, error) {
+	resp, err := p.do(ctx, http.MethodGet, "/v1/machines", nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Status/100 != 2 {
+		return nil, fmt.Errorf("list machines: %d", resp.Status)
+	}
+	var raw []struct {
+		ID        string `json:"id"`
+		State     string `json:"state"`
+		Env       map[string]string
+		Resources struct {
+			Cpus     float64 `json:"cpus"`
+			MemoryMb float64 `json:"memoryMb"`
+			DiskGb   float64 `json:"diskGb"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(resp.Body, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]MachineInfo, 0, len(raw))
+	for _, m := range raw {
+		out = append(out, MachineInfo{
+			ID: m.ID, Owner: m.Env[p.ownerEnvKey], State: m.State,
+			Cpus: m.Resources.Cpus, MemoryMb: m.Resources.MemoryMb, DiskGb: m.Resources.DiskGb,
+		})
+	}
+	return out, nil
+}
+
+func (p *masterKeyProvider) Stop(ctx context.Context, id string) error {
+	resp, err := p.do(ctx, http.MethodPost, "/v1/machines/"+id+"/stop", nil)
+	if err != nil {
+		return err
+	}
+	if resp.Status/100 != 2 {
+		return fmt.Errorf("stop %s: %d", id, resp.Status)
+	}
+	return nil
 }
 
 // ---- tokenMintProvider: cloud-enforced isolation (dormant until an admin key) --
@@ -250,6 +350,10 @@ func (p *tokenMintProvider) Push(ctx context.Context, owner string, spec PushSpe
 func (p *tokenMintProvider) List(ctx context.Context, owner string) (CloudResp, error) {
 	return CloudResp{}, errProviderDormant
 }
+func (p *tokenMintProvider) AllOwned(ctx context.Context) ([]MachineInfo, error) {
+	return nil, errProviderDormant
+}
+func (p *tokenMintProvider) Stop(ctx context.Context, id string) error { return errProviderDormant }
 
 // ---- IP trust ----
 
@@ -297,33 +401,70 @@ type pushEnvelope struct {
 	Name     string `json:"name"`
 	Image    string `json:"image"`
 	Arch     string `json:"arch"`
+	Net      bool   `json:"net"`      // enable outbound networking (off by default)
 	Artifact string `json:"artifact"` // base64 of the packed VM (optional if Image is set)
 }
 
-// serveProvisioned routes a verified request for a provisioned app: reserved
-// identity/credit routes, plus cloud methods that debit credit and forward
-// through the CloudProvider. The master key never reaches the caller.
-func (b *Broker) serveProvisioned(w http.ResponseWriter, r *http.Request, app *AppEntry, mpath string, caller CallerID, body []byte) {
+// serveProvisioned routes a request for a provisioned app. Auth is per-route:
+//
+//   - identity/key routes (_provision, _balance, _key, _rotate) REQUIRE a valid
+//     Pilot SIGNATURE (sigOK) — so only the real identity can mint/rotate/read a
+//     key, and a leaked key alone can never rotate or lock out the owner;
+//   - cloud methods (push, list) accept EITHER a valid signature OR a valid
+//     derived key as a Bearer credential, so an agent can use its key directly.
+//
+// The master key never reaches the caller.
+func (b *Broker) serveProvisioned(w http.ResponseWriter, r *http.Request, app *AppEntry, mpath string, signedCaller CallerID, sigOK bool, body []byte) {
 	p := app.Provision
 	ip := clientIP(r.Header.Get, r.RemoteAddr, b.IPTrust)
 
 	switch mpath {
-	case p.ProvisionPath:
-		b.serveProvision(w, app, caller, ip)
+	case p.ProvisionPath, p.BalancePath, p.KeyPath, p.RotatePath:
+		if !sigOK {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "this route requires a signed Pilot request"})
+			return
+		}
+		switch mpath {
+		case p.ProvisionPath:
+			b.serveProvision(w, app, signedCaller, ip)
+		case p.BalancePath:
+			b.serveBalance(w, app, signedCaller)
+		case p.KeyPath:
+			b.serveKey(w, app, signedCaller)
+		case p.RotatePath:
+			b.serveRotate(w, app, signedCaller)
+		}
 		return
-	case p.BalancePath:
-		b.serveBalance(w, app, caller)
-		return
-	case p.PushPath:
-		b.servePush(w, r, app, caller, body)
-		return
-	case p.ListPath:
-		b.serveCloudList(w, r, app, caller)
+	case p.PushPath, p.ListPath:
+		caller, ok := b.authCloudCaller(app, signedCaller, sigOK, r.Header.Get)
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "cloud methods need a signed request or a valid key"})
+			return
+		}
+		if mpath == p.PushPath {
+			b.servePush(w, r, app, caller, body)
+		} else {
+			b.serveCloudList(w, r, app, caller)
+		}
 		return
 	default:
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "method not allowed for this app: " + mpath})
 		return
 	}
+}
+
+// authCloudCaller resolves the caller for a cloud method: the signed caller when
+// the request carried a valid signature, else the callerID sealed in a valid
+// derived key presented as `Authorization: Bearer <key>`.
+func (b *Broker) authCloudCaller(app *AppEntry, signedCaller CallerID, sigOK bool, h func(string) string) (CallerID, bool) {
+	if sigOK {
+		return signedCaller, true
+	}
+	auth := h("Authorization")
+	if tok, found := strings.CutPrefix(auth, "Bearer "); found {
+		return b.callerFromKey(app, strings.TrimSpace(tok))
+	}
+	return "", false
 }
 
 // servePush debits the caller's credit, then forwards the artifact to the cloud
@@ -357,6 +498,14 @@ func (b *Broker) servePush(w http.ResponseWriter, r *http.Request, app *AppEntry
 		return
 	}
 
+	// Credit must be positive to start a new machine — the metering loop then
+	// drains it by REAL usage (resources × rate card × time) and stops the
+	// machine at zero. An optional flat CostCredits reserve still applies (0 by
+	// default when metering is on).
+	if bal, _, gerr := ps.Get(app.ID, string(caller)); gerr == nil && bal.Credits <= 0 {
+		writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": "out of credit — top up to push"})
+		return
+	}
 	cost := creditCost(app, app.Provision.PushPath)
 	admitted, _, err := ps.Debit(app.ID, string(caller), cost)
 	if err != nil {
@@ -374,7 +523,7 @@ func (b *Broker) servePush(w http.ResponseWriter, r *http.Request, app *AppEntry
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(app.TimeoutMs)*time.Millisecond)
 		defer cancel()
 	}
-	resp, err := app.provider.Push(ctx, string(caller), PushSpec{Name: env.Name, Image: env.Image, Arch: env.Arch}, artifact)
+	resp, err := app.provider.Push(ctx, string(caller), PushSpec{Name: env.Name, Image: env.Image, Arch: env.Arch, Net: env.Net}, artifact)
 	if err != nil {
 		app.breaker.Record(false)
 		ps.Refund(app.ID, string(caller), cost)
@@ -439,13 +588,88 @@ func (b *Broker) serveProvision(w http.ResponseWriter, app *AppEntry, caller Cal
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "provision: " + err.Error()})
 		return
 	}
-	key := DeriveKey(app.deriveSecret, byte(p.KeyVersion), caller)
+	key := DeriveKey(app.deriveSecret, byte(p.KeyVersion), rec.Rot, caller)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"key":     key,
 		"credits": rec.Credits,
 		"caller":  string(caller),
 		"new":     rec.New,
 	})
+}
+
+// serveKey handles GET /<app>/_key: return the caller's CURRENT key (idempotent
+// get — the deterministic key for their current rotation). Signature-authed.
+func (b *Broker) serveKey(w http.ResponseWriter, app *AppEntry, caller CallerID) {
+	ps, ok := b.provStore()
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store does not support provisioning"})
+		return
+	}
+	rec, exists, err := ps.Get(app.ID, string(caller))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "key: " + err.Error()})
+		return
+	}
+	if !exists {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not provisioned; call provision first"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"key":     DeriveKey(app.deriveSecret, byte(app.Provision.KeyVersion), rec.Rot, caller),
+		"credits": rec.Credits,
+		"caller":  string(caller),
+	})
+}
+
+// serveRotate handles POST /<app>/_rotate: bump the caller's rotation counter so
+// their OLD key stops working (leak recovery) and return the new key. Credit is
+// NOT reset — it stays with the caller. Signature-authed, so a leaked key alone
+// cannot rotate (only the real Pilot identity can).
+func (b *Broker) serveRotate(w http.ResponseWriter, app *AppEntry, caller CallerID) {
+	ps, ok := b.provStore()
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store does not support provisioning"})
+		return
+	}
+	rec, exists, err := ps.Rotate(app.ID, string(caller))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "rotate: " + err.Error()})
+		return
+	}
+	if !exists {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not provisioned; call provision first"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"key":     DeriveKey(app.deriveSecret, byte(app.Provision.KeyVersion), rec.Rot, caller),
+		"credits": rec.Credits, // unchanged by rotation
+		"caller":  string(caller),
+		"rotated": true,
+	})
+}
+
+// callerFromKey validates a presented derived key (Bearer) against the caller's
+// CURRENT rotation counter and returns the trusted callerID. This lets an agent
+// use the key directly (outside the daemon-signed path). An old (pre-rotation)
+// key fails because its MAC binds the previous rot.
+func (b *Broker) callerFromKey(app *AppEntry, token string) (CallerID, bool) {
+	_, callerStr, _, parsed := ParseDerived(token)
+	if !parsed {
+		return "", false
+	}
+	ps, ok := b.provStore()
+	if !ok {
+		return "", false
+	}
+	rec, exists, err := ps.Get(app.ID, callerStr)
+	if err != nil || !exists {
+		return "", false
+	}
+	got, ok := ValidateDerived(app.secretsByVersion, token, rec.Rot)
+	if !ok || got != callerStr {
+		return "", false
+	}
+	return CallerID(callerStr), true
 }
 
 // serveBalance handles GET /<app>/_balance → the caller's credit balance.
