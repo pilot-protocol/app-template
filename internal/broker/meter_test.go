@@ -2,12 +2,16 @@ package broker
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
 
-// fakeProvider is a metering-only CloudProvider for the meter tests.
+// fakeProvider is a metering-only CloudProvider for the meter tests. It is
+// concurrency-safe because RunMeter drives it from its own goroutine while the
+// test observes it.
 type fakeProvider struct {
+	mu       sync.Mutex
 	machines []MachineInfo
 	stopped  map[string]bool
 }
@@ -16,8 +20,14 @@ func (f *fakeProvider) Push(context.Context, string, PushSpec, []byte) (CloudRes
 	return CloudResp{}, nil
 }
 func (f *fakeProvider) List(context.Context, string) (CloudResp, error) { return CloudResp{}, nil }
-func (f *fakeProvider) AllOwned(context.Context) ([]MachineInfo, error) { return f.machines, nil }
+func (f *fakeProvider) AllOwned(context.Context) ([]MachineInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]MachineInfo(nil), f.machines...), nil
+}
 func (f *fakeProvider) Stop(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.stopped[id] = true
 	for i := range f.machines {
 		if f.machines[i].ID == id {
@@ -25,6 +35,11 @@ func (f *fakeProvider) Stop(_ context.Context, id string) error {
 		}
 	}
 	return nil
+}
+func (f *fakeProvider) wasStopped(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stopped[id]
 }
 func (f *fakeProvider) Name() string { return "fake" }
 
@@ -56,7 +71,7 @@ func TestMeter_DrainsByRealUsageAndStops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stopped != 1 || !fp.stopped["mach-1"] {
+	if stopped != 1 || !fp.wasStopped("mach-1") {
 		t.Fatalf("exhausted machine must be stopped, stopped=%d map=%v", stopped, fp.stopped)
 	}
 	if c, _ := st.Credit("io.pilot.smol", "alice"); c != 0 {
@@ -96,13 +111,13 @@ func TestRunMeter_OneTick(t *testing.T) {
 	// wait for at least one tick to drain + stop the exhausted machine
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if fp.stopped["m1"] {
+		if fp.wasStopped("m1") {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	cancel()
-	if !fp.stopped["m1"] {
+	if !fp.wasStopped("m1") {
 		t.Fatal("RunMeter should have drained + stopped the exhausted machine")
 	}
 }
