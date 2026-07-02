@@ -13,7 +13,7 @@
 set -euo pipefail
 
 GO_VERSION=1.25.0
-BRANCH="${BROKER_BRANCH:-feat/smol-provisioning-broker}"
+BRANCH="${BROKER_BRANCH:-main}"
 HOSTNAME_FQDN="smol-broker.pilotprotocol.network"
 
 apt-get update -y
