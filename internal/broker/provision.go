@@ -44,6 +44,7 @@ type PushSpec struct {
 	Name  string // machine/artifact name (broker prefixes with the owner)
 	Image string // optional: push from an existing OCI image ref instead of an artifact
 	Arch  string // optional target arch
+	Net   bool   // enable outbound networking (off by default, mirroring smolvm's --net)
 }
 
 // CloudResp is a raw cloud HTTP result the broker relays to the caller verbatim.
@@ -154,11 +155,16 @@ func (p *masterKeyProvider) Push(ctx context.Context, owner string, spec PushSpe
 	if spec.Arch != "" {
 		source["arch"] = spec.Arch
 	}
-	body, _ := json.Marshal(map[string]any{
+	create := map[string]any{
 		"source": source,
 		"name":   ownerName(owner, spec.Name),
 		"env":    map[string]string{p.ownerEnvKey: owner}, // the isolation tag
-	})
+	}
+	if spec.Net {
+		// Networking is OFF by default (like smolvm without --net); opt in per push.
+		create["network"] = map[string]string{"mode": "open"}
+	}
+	body, _ := json.Marshal(create)
 	created, err := p.do(ctx, http.MethodPost, "/v1/machines", body)
 	if err != nil || created.Status/100 != 2 {
 		return created, err
@@ -331,6 +337,7 @@ type pushEnvelope struct {
 	Name     string `json:"name"`
 	Image    string `json:"image"`
 	Arch     string `json:"arch"`
+	Net      bool   `json:"net"`      // enable outbound networking (off by default)
 	Artifact string `json:"artifact"` // base64 of the packed VM (optional if Image is set)
 }
 
@@ -408,7 +415,7 @@ func (b *Broker) servePush(w http.ResponseWriter, r *http.Request, app *AppEntry
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(app.TimeoutMs)*time.Millisecond)
 		defer cancel()
 	}
-	resp, err := app.provider.Push(ctx, string(caller), PushSpec{Name: env.Name, Image: env.Image, Arch: env.Arch}, artifact)
+	resp, err := app.provider.Push(ctx, string(caller), PushSpec{Name: env.Name, Image: env.Image, Arch: env.Arch, Net: env.Net}, artifact)
 	if err != nil {
 		app.breaker.Record(false)
 		ps.Refund(app.ID, string(caller), cost)
