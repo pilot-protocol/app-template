@@ -204,6 +204,12 @@ type Backend struct {
 	//   headers: { x-api-key: "${MYAPP_API_KEY}" }
 	Headers map[string]string `yaml:"headers"`
 
+	// BrokerURL overrides the default Pilot broker base a managed/provisioned
+	// adapter dials (BrokerBaseURL). Set it when an app is fronted by its OWN
+	// broker deployment (e.g. io.pilot.smol on a dedicated host) rather than the
+	// shared broker.pilotprotocol.network. Empty ⇒ the shared broker.
+	BrokerURL string `yaml:"broker_url"`
+
 	// Auth selects how the adapter authenticates to the backend:
 	//   "" / "byo"   — each user supplies their own key (the ${TOKEN} headers above)
 	//   "managed"    — Pilot holds ONE master key and meters per user. The generated
@@ -272,9 +278,18 @@ func (c *Config) ProvisionPath() string { return DefaultProvisionPath }
 // partner base_url is registered with the broker, never baked into user hosts.
 func (c *Config) AdapterBackendURL() string {
 	if c.Managed() {
-		return strings.TrimRight(BrokerBaseURL, "/") + "/" + c.ID
+		return strings.TrimRight(c.brokerBase(), "/") + "/" + c.ID
 	}
 	return c.Backend.BaseURL
+}
+
+// brokerBase is the broker host this app's adapter dials — its own BrokerURL
+// override when set, else the shared Pilot broker.
+func (c *Config) brokerBase() string {
+	if c.Backend.BrokerURL != "" {
+		return c.Backend.BrokerURL
+	}
+	return BrokerBaseURL
 }
 
 // AdapterBackendHost is the net.dial grant target for the generated adapter:
@@ -283,7 +298,7 @@ func (c *Config) AdapterBackendURL() string {
 func (c *Config) AdapterBackendHost() string {
 	raw := c.Backend.BaseURL
 	if c.Managed() {
-		raw = BrokerBaseURL
+		raw = c.brokerBase()
 	}
 	u, err := url.Parse(raw)
 	if err != nil {

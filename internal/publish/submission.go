@@ -89,6 +89,7 @@ type SubBackend struct {
 	// --- provisioned fields (Auth "provisioned") ---
 	Provider           string         `json:"provider"`              // "master" (default) | "tokenmint"
 	CloudBaseURL       string         `json:"cloud_base_url"`        // the cloud API base the broker forwards to (defaults to BaseURL)
+	BrokerURL          string         `json:"broker_url"`            // override the broker base the adapter dials (own broker deployment); empty ⇒ shared broker
 	SeedCredits        int            `json:"seed_credits"`          // free credits granted per new user
 	CostCredits        map[string]int `json:"cost_credits"`          // cloud method-path → credits to debit (default 1)
 	MaxIdentitiesPerIP int            `json:"max_identities_per_ip"` // per-IP distinct-caller cap (0 = unlimited)
@@ -450,7 +451,7 @@ func (s Submission) ToConfig() *scaffold.Config {
 	if s.Backend.IsHybrid() {
 		// Hybrid: local cli command + keyless broker auth (the broker URL is
 		// derived from the app id, so no base_url is baked into the adapter).
-		backend = scaffold.Backend{Type: "hybrid", Command: s.Backend.Command, EnvPassthrough: s.Backend.EnvPassthrough, Auth: s.Backend.Auth}
+		backend = scaffold.Backend{Type: "hybrid", Command: s.Backend.Command, EnvPassthrough: s.Backend.EnvPassthrough, Auth: s.Backend.Auth, BrokerURL: s.Backend.BrokerURL}
 	}
 	cfg := &scaffold.Config{
 		ID:          s.ID,
