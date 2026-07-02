@@ -1,0 +1,18 @@
+[
+  {
+    "id": "io.pilot.smol",
+    "upstream": "https://api.smolmachines.com",
+    "key_env": "SMOL_MASTER_KEY",
+    "provision": {
+      "provider": "master",
+      "secret_env": "SMOL_DERIVE_SECRET",
+      "key_version": 1,
+      "seed_credits": 5,
+      "cost_credits": { "/push": 1 },
+      "max_identities_per_ip": 5,
+      "mint_cooldown_ms": 0,
+      "owner_env_key": "PILOT_OWNER",
+      "artifact_max_bytes": 268435456
+    }
+  }
+]
