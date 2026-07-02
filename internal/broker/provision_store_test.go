@@ -171,3 +171,18 @@ func TestConcurrentFirstUse_SingleSeed(t *testing.T) {
 		})
 	}
 }
+
+func TestOwnerNameSanitizesCloudInvalidChars(t *testing.T) {
+	// A base64 caller id with '+' and '/' must yield a cloud-valid machine name
+	// (letters, digits, '-', '_' only) while the owner tag keeps the exact id.
+	got := ownerName("zKg+3BS8/bt7", "my+vm/1")
+	for _, r := range got {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_'
+		if !ok {
+			t.Fatalf("machine name %q contains cloud-invalid char %q", got, r)
+		}
+	}
+	if got != "smol-zKg-3BS8-my-vm-1" {
+		t.Fatalf("unexpected sanitized name: %q", got)
+	}
+}

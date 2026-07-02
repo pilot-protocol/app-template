@@ -92,17 +92,36 @@ func (p *masterKeyProvider) do(ctx context.Context, method, path string, body []
 	return CloudResp{Status: resp.StatusCode, Body: rb}, nil
 }
 
-// ownerName namespaces a machine name by owner so listings/registry paths don't
-// collide between users and are visibly attributed.
+// ownerName namespaces a machine name by owner so listings don't collide between
+// users and are visibly attributed. The cloud restricts machine names to
+// [A-Za-z0-9_-], but a caller id is base64 (may contain '+' '/' '='), so the name
+// portions are sanitized. The ISOLATION tag (env.PILOT_OWNER) keeps the exact,
+// unsanitized caller id — only this cosmetic name is constrained.
 func ownerName(owner, name string) string {
-	short := owner
+	short := sanitizeMachineName(owner)
 	if len(short) > 8 {
 		short = short[:8]
 	}
+	name = sanitizeMachineName(name)
 	if name == "" {
 		name = "vm"
 	}
 	return "smol-" + short + "-" + name
+}
+
+// sanitizeMachineName maps a string to the cloud's allowed machine-name charset
+// (letters, digits, '-', '_'); every other rune becomes '-'.
+func sanitizeMachineName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
 }
 
 func (p *masterKeyProvider) Push(ctx context.Context, owner string, spec PushSpec, artifact []byte) (CloudResp, error) {
