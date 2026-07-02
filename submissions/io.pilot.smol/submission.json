@@ -55,7 +55,8 @@
         { "name": "image", "type": "string", "required": false, "description": "An OCI image reference the cloud pulls to create the machine, e.g. \"alpine:3.20\". Use this OR artifact." },
         { "name": "artifact", "type": "string", "required": false, "description": "Base64 of a locally packed VM (`smolvm pack` output) to publish and boot in the cloud. Use this OR image." },
         { "name": "name", "type": "string", "required": false, "description": "A short name for the cloud machine (namespaced to you). Defaults to a generated name." },
-        { "name": "arch", "type": "string", "required": false, "description": "Target architecture for the cloud machine, e.g. \"amd64\" or \"arm64\"." }
+        { "name": "arch", "type": "string", "required": false, "description": "Target architecture for the cloud machine, e.g. \"amd64\" or \"arm64\"." },
+        { "name": "net", "type": "boolean", "required": false, "description": "Enable outbound networking for the cloud VM. Off by default (like smolvm without --net); set true for internet access." }
       ],
       "http": { "verb": "POST", "path": "/push" }
     },
@@ -65,8 +66,33 @@
       "latency": "fast",
       "params": [],
       "http": { "verb": "GET", "path": "/list" }
+    },
+    {
+      "name": "smol.key",
+      "description": "Get your current smol cloud key (the per-user credential bound to your Pilot identity). Idempotent — safe to call anytime. The key is also cached in your app's private secrets. Returns {key, credits}.",
+      "latency": "fast",
+      "params": [],
+      "http": { "verb": "GET", "path": "/_key" }
+    },
+    {
+      "name": "smol.rotate",
+      "description": "Rotate your smol cloud key if it leaked. Your OLD key stops working immediately and a NEW key is issued — your credit and cloud machines are NOT affected (only the key changes). Returns {key, credits, rotated}.",
+      "latency": "fast",
+      "params": [],
+      "http": { "verb": "POST", "path": "/_rotate" }
     }
   ],
+  "pricing": {
+    "model": "Local methods (smol.exec/version) are free and run on your machine. Cloud methods run in the smol cloud AS YOU: smol.push costs 1 credit and new users get 5 free credits; smol.provision/key/rotate/balance/list are free. Running cloud VMs are billed by the smol cloud at the rates below (credit covers usage).",
+    "free_credits": 5,
+    "credit_cost": { "smol.push": 1 },
+    "cloud_rate_card": {
+      "cpu_hour": "$0.0432",
+      "memory_gb_hour": "$0.0162",
+      "disk_gb_hour": "$0.0001",
+      "egress_gb": "$0.05"
+    }
+  },
   "listing": {
     "display_name": "Smol Machines",
     "tagline": "Fast, hardware-isolated microVMs — local and cloud",

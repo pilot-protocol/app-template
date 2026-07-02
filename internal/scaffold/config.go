@@ -43,6 +43,7 @@ type Config struct {
 	Methods   []Method  `yaml:"methods"`
 	Grants    Grants    `yaml:"grants"`
 	Listing   Listing   `yaml:"listing"` // store-page metadata (catalogue v2)
+	Pricing   *Pricing  `yaml:"pricing"` // optional: shown in <ns>.help so an agent sees cost before a paid call
 
 	// Assets is the native-binary delivery set for a cli backend: the
 	// platform-specific binaries the publisher uploaded to the Pilot R2 artifact
@@ -183,6 +184,39 @@ type ChangelogRel struct {
 type Publisher struct {
 	KeyFile string `yaml:"key_file"`
 }
+
+// Pricing is the cost information surfaced in <ns>.help so an agent can see what
+// a call costs before spending. Local methods are free; cloud methods debit
+// credits and the underlying provider bills by the rate card.
+type Pricing struct {
+	Model         string            `yaml:"model"`           // one-line human summary of the cost model
+	FreeCredits   int               `yaml:"free_credits"`    // credits granted to a new user
+	CreditCost    map[string]int    `yaml:"credit_cost"`     // method name → credits it debits
+	CloudRateCard map[string]string `yaml:"cloud_rate_card"` // resource → provider rate (e.g. "cpu_hour": "$0.0432")
+}
+
+// sortedKeys returns a map's keys sorted, so generated help is deterministic.
+func sortedStringIntKeys(m map[string]int) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedStringKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// CreditCostKeys / RateCardKeys give the template deterministic iteration order.
+func (p *Pricing) CreditCostKeys() []string { return sortedStringIntKeys(p.CreditCost) }
+func (p *Pricing) RateCardKeys() []string   { return sortedStringKeys(p.CloudRateCard) }
 
 // Backend selects and configures the data plane the adapter forwards to.
 type Backend struct {
@@ -978,6 +1012,15 @@ func (m Method) TimeoutFor() string {
 }
 
 // SortedParamKeys gives deterministic param ordering for generated code.
+// Plane reports whether a method runs locally (cli route) or in the cloud (http
+// route) — used by <ns>.help to group and price methods.
+func (m Method) Plane() string {
+	if m.HTTP != nil {
+		return "cloud"
+	}
+	return "local"
+}
+
 func (m Method) SortedParamKeys() []string {
 	keys := make([]string, 0, len(m.Params))
 	for k := range m.Params {
