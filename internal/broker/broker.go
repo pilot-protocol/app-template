@@ -18,8 +18,12 @@ type Broker struct {
 	Store  Store
 	Verify VerifyConfig
 	Client *http.Client
-	// MaxBody caps the request body the broker will buffer/forward.
+	// MaxBody caps the request body the broker will buffer/forward. Provisioned
+	// push routes use the app's ArtifactMaxBytes instead.
 	MaxBody int64
+	// IPTrust says which header carries the real source IP (set by the front
+	// proxy). Client-supplied X-Forwarded-For is never trusted.
+	IPTrust IPTrust
 
 	reg atomic.Pointer[Registry] // hot-swappable so the registry can reload without dropping traffic
 }
@@ -61,7 +65,19 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	mpath = "/" + mpath
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, b.MaxBody))
+	// WHICH app first — so a provisioned push can lift the in-memory body cap to
+	// the app's artifact limit before reading.
+	app := b.reg.Load().Get(appID)
+	if app == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown app: " + appID})
+		return
+	}
+
+	maxBody := b.MaxBody
+	if app.Provision != nil && mpath == app.Provision.PushPath {
+		maxBody = app.Provision.ArtifactMaxBytes
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body"})
 		return
@@ -74,10 +90,10 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. WHICH app.
-	app := b.reg.Load().Get(appID)
-	if app == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown app: " + appID})
+	// 2. Provisioned apps take a distinct path: mint per-user keys, meter a credit
+	//    ledger, and forward through the CloudProvider (owner-tagged isolation).
+	if app.Provision != nil {
+		b.serveProvisioned(w, r, app, mpath, caller, body)
 		return
 	}
 

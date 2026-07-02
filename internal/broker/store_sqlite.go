@@ -3,6 +3,7 @@ package broker
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no cgo)
 )
@@ -48,6 +49,24 @@ func OpenSQLiteStore(path string) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite migrate: %w", err)
 	}
+	// provision: one row per (app, caller). ip + timestamps drive spam controls;
+	// credits is the broker's own ledger (the master key can't read cloud usage).
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS provision (
+		app        TEXT NOT NULL,
+		caller     TEXT NOT NULL,
+		ip         TEXT NOT NULL,
+		first_seen INTEGER NOT NULL,
+		last_mint  INTEGER NOT NULL,
+		credits    INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (app, caller)
+	)`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("sqlite migrate provision: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS provision_app_ip ON provision(app, ip)`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("sqlite migrate provision index: %w", err)
+	}
 	return &SQLiteStore{db: db}, nil
 }
 
@@ -91,6 +110,101 @@ func (s *SQLiteStore) Usage(app, caller string) (int, float64) {
 		return 0, 0
 	}
 	return calls, cents
+}
+
+// Provision is idempotent by (app, caller) and enforces the per-IP identity cap
+// + per-identity cooldown. The single-conn pool serializes the whole tx, so the
+// concurrent-first-use race resolves to exactly one seed.
+func (s *SQLiteStore) Provision(app, caller, ip string, seed, maxPerIP int, cooldown time.Duration, now time.Time) (ProvisionRecord, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return ProvisionRecord{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var firstSeen, lastMint int64
+	var credits int
+	err = tx.QueryRow(`SELECT first_seen, last_mint, credits FROM provision WHERE app=? AND caller=?`, app, caller).
+		Scan(&firstSeen, &lastMint, &credits)
+	switch {
+	case err == nil: // repeat: cooldown check, refresh last_mint, no re-seed
+		if cooldown > 0 && now.Sub(time.Unix(lastMint, 0)) < cooldown {
+			return ProvisionRecord{}, ErrCooldown
+		}
+		if _, err := tx.Exec(`UPDATE provision SET last_mint=? WHERE app=? AND caller=?`, now.Unix(), app, caller); err != nil {
+			return ProvisionRecord{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return ProvisionRecord{}, err
+		}
+		return ProvisionRecord{App: app, Caller: caller, IP: ip, FirstSeen: time.Unix(firstSeen, 0), LastMint: now, Credits: credits, New: false}, nil
+	case err == sql.ErrNoRows: // first time: cap check + insert + seed
+		if maxPerIP > 0 {
+			var distinct int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM provision WHERE app=? AND ip=?`, app, ip).Scan(&distinct); err != nil {
+				return ProvisionRecord{}, err
+			}
+			if distinct >= maxPerIP {
+				return ProvisionRecord{}, ErrIPCap
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO provision (app, caller, ip, first_seen, last_mint, credits) VALUES (?,?,?,?,?,?)`,
+			app, caller, ip, now.Unix(), now.Unix(), seed); err != nil {
+			return ProvisionRecord{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return ProvisionRecord{}, err
+		}
+		return ProvisionRecord{App: app, Caller: caller, IP: ip, FirstSeen: now, LastMint: now, Credits: seed, New: true}, nil
+	default:
+		return ProvisionRecord{}, err
+	}
+}
+
+func (s *SQLiteStore) Credit(app, caller string) (int, error) {
+	var credits int
+	err := s.db.QueryRow(`SELECT credits FROM provision WHERE app=? AND caller=?`, app, caller).Scan(&credits)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return credits, err
+}
+
+func (s *SQLiteStore) Debit(app, caller string, n int) (bool, int, error) {
+	if n <= 0 {
+		c, err := s.Credit(app, caller)
+		return true, c, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var credits int
+	err = tx.QueryRow(`SELECT credits FROM provision WHERE app=? AND caller=?`, app, caller).Scan(&credits)
+	if err == sql.ErrNoRows {
+		return false, 0, nil
+	}
+	if err != nil {
+		return false, 0, err
+	}
+	if credits < n {
+		return false, credits, nil
+	}
+	if _, err := tx.Exec(`UPDATE provision SET credits=credits-? WHERE app=? AND caller=?`, n, app, caller); err != nil {
+		return false, credits, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, credits, err
+	}
+	return true, credits - n, nil
+}
+
+func (s *SQLiteStore) Refund(app, caller string, n int) {
+	if n <= 0 {
+		return
+	}
+	_, _ = s.db.Exec(`UPDATE provision SET credits=credits+? WHERE app=? AND caller=?`, n, app, caller)
 }
 
 // Snapshot returns all usage cells keyed "app|caller" (for /gw/usage).

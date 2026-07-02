@@ -27,6 +27,7 @@ func main() {
 	registryPath := flag.String("registry", "apps.json", "path to the managed-app registry (JSON)")
 	addr := flag.String("addr", envOr("BROKER_ADDR", ":8099"), "listen address")
 	window := flag.Duration("window", 5*time.Minute, "signed-request freshness window")
+	ipHeader := flag.String("ip-header", envOr("BROKER_IP_HEADER", "X-Real-IP"), "header carrying the real source IP (set by the front proxy; client X-Forwarded-For is never trusted)")
 	flag.Parse()
 
 	reg, err := broker.LoadRegistry(*registryPath, os.Getenv)
@@ -57,6 +58,7 @@ func main() {
 
 	b := broker.New(reg, store)
 	b.Verify = broker.VerifyConfig{Window: *window}
+	b.IPTrust = broker.IPTrust{Header: *ipHeader}
 
 	// Hot reload: `kill -HUP <pid>` re-reads the registry without dropping
 	// traffic, so a new app goes live without a restart.
