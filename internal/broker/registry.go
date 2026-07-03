@@ -33,11 +33,24 @@ type AppEntry struct {
 	// the classic managed app (shared master key injected for everyone).
 	Provision *ProvisionSpec `json:"provision,omitempty"`
 
+	// Credit, when set on a classic managed (HTTP forward) app, gives each caller a
+	// per-user spending budget in micro-dollars: the broker seeds SeedCredits on
+	// first sight and debits per call; a call that would overdraw returns 402
+	// (only successful 2xx calls burn credit — a failed call is refunded). This is
+	// the plain-HTTP counterpart to Provision's cloud credit ledger, without key
+	// minting. nil ⇒ no budget (call-count Quota still applies).
+	Credit *CreditSpec `json:"credit,omitempty"`
+
 	master        string       // resolved from KeyEnv at load (managed: partner key; provisioned: cloud master, e.g. smk_)
 	injector      AuthInjector // built from AuthHeader/Scheme
 	allowSet      map[string]bool
 	allowPatterns [][]string // templated allow entries split on "/" ("{x}" matches any one segment)
 	breaker       *Breaker
+
+	creditSeed     int            // Credit.SeedCredits (0 ⇒ no budget)
+	creditDefault  int            // Credit.DefaultCost (micro-$ per call for un-listed paths)
+	creditExact    map[string]int // exact method-path → micro-$ cost
+	creditPatterns []costPattern  // templated method-path → micro-$ cost
 
 	deriveSecret     []byte          // provisioned: HMAC secret (current version) resolved from Provision.SecretEnv
 	secretsByVersion map[byte][]byte // provisioned: {version: secret} accepted during a rotation grace window
@@ -86,6 +99,44 @@ const (
 	defaultOwnerEnvKey   = "PILOT_OWNER"
 	defaultCostCredits   = 1
 )
+
+// CreditSpec gives a classic managed (HTTP forward) app a per-caller spending
+// budget in MICRO-DOLLARS. Each caller is seeded SeedCredits on first sight and a
+// per-call cost is debited; when the balance can't cover a call the broker
+// returns 402. Costs are keyed by method-path (templated paths like
+// "/v1/calls/{id}" allowed, matched the same way as the allow-list); a path not
+// listed costs DefaultCost.
+type CreditSpec struct {
+	SeedCredits int            `json:"seed_credits"` // per-caller starting balance in micro-$ (e.g. 5000000 = $5)
+	CostCredits map[string]int `json:"cost_credits"` // method-path → micro-$ debited per successful call
+	DefaultCost int            `json:"default_cost"` // debit for paths not in CostCredits (default 1)
+}
+
+// costPattern is a templated cost key split into segments (like allowPatterns).
+type costPattern struct {
+	segs []string
+	cost int
+}
+
+// creditEnabled reports whether this app meters a per-caller micro-dollar budget.
+func (a *AppEntry) creditEnabled() bool { return a.creditSeed > 0 }
+
+// costForPath returns the micro-dollar cost of a call to path: an exact cost
+// entry wins, else the first matching templated pattern, else DefaultCost.
+func (a *AppEntry) costForPath(path string) int {
+	if c, ok := a.creditExact[path]; ok {
+		return c
+	}
+	if len(a.creditPatterns) > 0 {
+		segs := strings.Split(path, "/")
+		for _, p := range a.creditPatterns {
+			if segmentsMatch(p.segs, segs) {
+				return p.cost
+			}
+		}
+	}
+	return a.creditDefault
+}
 
 // allowed reports whether a request path is permitted. Exact entries match
 // literally (fast map hit); templated entries (containing a {name} segment, e.g.
@@ -196,6 +247,25 @@ func ParseRegistry(raw []byte, getenv func(string) string) (*Registry, error) {
 		if a.Provision != nil {
 			if err := resolveProvision(a, getenv); err != nil {
 				return nil, err
+			}
+		}
+		if a.Credit != nil {
+			if a.Provision != nil {
+				return nil, fmt.Errorf("registry: app %s: `credit` (HTTP budget) and `provision` (cloud) are mutually exclusive", a.ID)
+			}
+			a.creditSeed = a.Credit.SeedCredits
+			a.creditDefault = a.Credit.DefaultCost
+			if a.creditDefault <= 0 {
+				a.creditDefault = defaultCostCredits
+			}
+			a.creditExact = map[string]int{}
+			a.creditPatterns = nil
+			for p, c := range a.Credit.CostCredits {
+				if strings.Contains(p, "{") {
+					a.creditPatterns = append(a.creditPatterns, costPattern{segs: strings.Split(p, "/"), cost: c})
+				} else {
+					a.creditExact[p] = c
+				}
 			}
 		}
 		reg.apps[a.ID] = a
