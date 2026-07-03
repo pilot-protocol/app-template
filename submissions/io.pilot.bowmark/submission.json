@@ -1,0 +1,52 @@
+{
+  "id": "io.pilot.bowmark",
+  "version": "0.1.0",
+  "namespace": "bowmark",
+  "description": "Pre-computed navigation recipes for public websites — parameterized URL shortcuts and short UI procedures verified by prior crawls. Call before any browser action (navigate, click, search, fill) to skip explore-and-discover and cut agent tokens.",
+  "email": "alex@vulturelabs.io",
+  "backend": {
+    "base_url": "https://api.bowmark.ai",
+    "auth": "managed",
+    "quota": 0,
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer managed"
+      }
+    ]
+  },
+  "methods": [
+    {
+      "name": "bowmark.ask",
+      "description": "Look up a navigation recipe for a (site, task) pair. status=ok → execute the returned shortcut (URL template) if present, else ui_procedure.steps in order, then report the outcome. status=no_useful_data|site_not_supported → browse manually. Pass variants:{auth_state:'logged_in', role:'owner'} for signed-in surfaces. Do NOT put URLs in task — intent, not destination.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/ask"
+      },
+      "params": [
+        {"name": "site", "type": "string", "required": true, "description": "Registrable domain, optionally with a product-surface path (e.g. 'google.com', 'docs.stripe.com', 'google.com/maps'). No scheme/port.", "in": "body"},
+        {"name": "task", "type": "string", "required": true, "description": "Plain-English intent, e.g. 'find Apple's latest 10-K'. Intent, not a URL.", "in": "body"},
+        {"name": "variants", "type": "string", "required": false, "description": "Behavior facets object, most importantly {auth_state:'logged_out'|'logged_in', role:'owner'|'admin'|'member'} to request a signed-in surface.", "in": "body"},
+        {"name": "scopeHint", "type": "string", "required": false, "description": "Disambiguate a multi-surface site; one of error.scope_options[].pattern from a prior ambiguous_scope response.", "in": "body"}
+      ]
+    }
+  ],
+  "listing": {
+    "display_name": "Bowmark",
+    "tagline": "Navigation cheatsheets for every website — recipes that skip explore-and-discover",
+    "app_description": "Bowmark returns pre-computed **navigation recipes** for public websites: a parameterized URL `shortcut` or a short `ui_procedure` of steps, verified by prior crawls. An agent calls `ask({site, task})` before any browser action, then executes the recipe open-loop instead of exploring the DOM — cutting tokens and latency. Managed-key app: Pilot holds one shared Bowmark account behind the broker and meters each caller; you bring nothing and never see a key.\n\n- **ask** — one call per (site, task); returns `{status, shortcut?, ui_procedure?, ...}`.\n- Plain request/response REST — no websockets, no server-side browser, no async jobs. Your agent runs the recipe in its own browser.\n- Request the signed-in surface with `variants:{auth_state:\"logged_in\", role:\"owner\"}`.",
+    "license": "Apache-2.0",
+    "homepage": "https://bowmark.ai",
+    "source_url": "https://github.com/bowmark-ai/plugin",
+    "categories": ["web", "browser", "agents", "automation"],
+    "keywords": ["browser", "navigation", "recipes", "cheatsheets", "websites", "playwright", "puppeteer", "computer-use", "scraping"]
+  },
+  "vendor": {
+    "name": "Bowmark",
+    "url": "https://bowmark.ai",
+    "contact": "support@bowmark.ai",
+    "agent_usage": "Autonomous browsing agents call bowmark.ask before navigating a public site to fetch a known-good URL shortcut or UI procedure, skipping explore-and-discover and reducing token use ~5x. The recipe is executed by the agent's own browser; Bowmark only supplies the recipe.",
+    "capabilities": "ask (navigation-recipe lookup for a site+task, optional logged-in variant + scope hint)."
+  }
+}
