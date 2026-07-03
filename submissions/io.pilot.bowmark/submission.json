@@ -18,32 +18,103 @@
   "methods": [
     {
       "name": "bowmark.ask",
-      "description": "Look up a navigation recipe for a (site, task) pair. status=ok → execute the returned shortcut (URL template) if present, else ui_procedure.steps in order, then report the outcome. status=no_useful_data|site_not_supported → browse manually. Pass variants:{auth_state:'logged_in', role:'owner'} for signed-in surfaces. Do NOT put URLs in task — intent, not destination.",
+      "description": "Look up a pre-computed navigation recipe for a (site, task) pair — call it BEFORE any browser action (navigate, click, search, fill, URL guess). Returns {status, id?, shortcut?, ui_procedure?, verify_more?, variants_assumed?, error?}. status=ok → execute open-loop: fill the `shortcut.template` {name} slots from your task and navigate if present, else run `ui_procedure.steps` in order; then call report_outcome with the returned `id`. Each step may carry `precondition`, `irreversible` (confirm with the user first), or `requires_user_input` (stop and ask the user — password/payment/personal data). If `verify_more:true`, do one cheap sanity check first. status=no_useful_data | site_not_supported | synth_invalid → miss (no id); browse manually. status=ambiguous_scope → retry with `scopeHint` = one of error.scope_options[].pattern. status=rate_limited → back off until error.retry_after (only NEW recipe synthesis is capped; cached recipes still answer). 503 embedder_unavailable/synth_unavailable → retry once after Retry-After. Skip for localhost / RFC1918 IPs and open-ended search with no destination. Put intent in `task`, never a URL.",
       "latency": "med",
       "http": {
         "verb": "POST",
         "path": "/v1/ask"
       },
       "params": [
-        {"name": "site", "type": "string", "required": true, "description": "Registrable domain, optionally with a product-surface path (e.g. 'google.com', 'docs.stripe.com', 'google.com/maps'). No scheme/port.", "in": "body"},
-        {"name": "task", "type": "string", "required": true, "description": "Plain-English intent, e.g. 'find Apple's latest 10-K'. Intent, not a URL.", "in": "body"},
-        {"name": "variants", "type": "string", "required": false, "description": "Behavior facets object, most importantly {auth_state:'logged_out'|'logged_in', role:'owner'|'admin'|'member'} to request a signed-in surface.", "in": "body"},
-        {"name": "scopeHint", "type": "string", "required": false, "description": "Disambiguate a multi-surface site; one of error.scope_options[].pattern from a prior ambiguous_scope response.", "in": "body"}
+        {
+          "name": "site",
+          "type": "string",
+          "required": true,
+          "description": "Registrable domain, optionally followed by a product-surface path — 'google.com', 'docs.stripe.com', 'google.com/maps'. No scheme/port. A path is treated as an implicit scopeHint when it matches a known surface, letting you skip the ambiguous_scope round-trip.",
+          "in": "body"
+        },
+        {
+          "name": "task",
+          "type": "string",
+          "required": true,
+          "description": "Plain-English intent, e.g. 'find Apple's latest 10-K'. Intent, NOT a URL or destination.",
+          "in": "body"
+        },
+        {
+          "name": "variants",
+          "type": "string",
+          "required": false,
+          "description": "Optional behavior-facets object: {auth_state:'logged_out'|'logged_in', role:'owner'|'admin'|'member'|…, locale:'en-US', region:'EU', currency:'USD'}. Set auth_state:'logged_in' (+ role when privilege matters) to request the signed-in surface. Affects the cache key — omit when uncertain (you get the logged-out view). Echoed back on variants_assumed.",
+          "in": "body"
+        },
+        {
+          "name": "scopeHint",
+          "type": "string",
+          "required": false,
+          "description": "Optional; only after a prior ambiguous_scope. Pass one of error.scope_options[].pattern verbatim (leading slash, no trailing).",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "bowmark.report_outcome",
+      "description": "Report how a recipe executed, once after running one from bowmark.ask. Honest reports trigger re-crawls that keep recipes healthy; skipping them silently degrades recipes for every future agent. Report the RECIPE's behavior, not the task result. success=true ONLY if every step ran as written (no retries, no JS-eval fallbacks, no extra clicks) — even if the answer was wrong. success=false on ANY deviation — even if you got the right answer another way. Don't call it for a miss envelope (no id) or if you never executed a step. Returns 201 with {id}.",
+      "latency": "fast",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/outcomes"
+      },
+      "params": [
+        {
+          "name": "envelope_id",
+          "type": "string",
+          "required": true,
+          "description": "The `id` from a status:ok ask envelope (uuid). Miss envelopes have no id — don't report those.",
+          "in": "body"
+        },
+        {
+          "name": "success",
+          "type": "bool",
+          "required": true,
+          "description": "True ONLY if the recipe ran clean — every step as written, no retries, no JS-eval fallbacks, no extra clicks. False on ANY deviation, even if the user got the right answer another way.",
+          "in": "body"
+        },
+        {
+          "name": "evidence",
+          "type": "string",
+          "required": true,
+          "description": "REQUIRED object describing how the RECIPE behaved (not the task outcome): {what_happened: string (required), error?: string, screenshot_id?: string}. Name which steps ran clean vs needed retries/substitutions/JS-eval/extra clicks — the re-crawl reads this to decide what to fix.",
+          "in": "body"
+        }
       ]
     }
   ],
   "listing": {
     "display_name": "Bowmark",
     "tagline": "Navigation cheatsheets for every website — recipes that skip explore-and-discover",
-    "app_description": "Bowmark returns pre-computed **navigation recipes** for public websites: a parameterized URL `shortcut` or a short `ui_procedure` of steps, verified by prior crawls. An agent calls `ask({site, task})` before any browser action, then executes the recipe open-loop instead of exploring the DOM — cutting tokens and latency. Managed-key app: Pilot holds one shared Bowmark account behind the broker and meters each caller; you bring nothing and never see a key.\n\n- **ask** — one call per (site, task); returns `{status, shortcut?, ui_procedure?, ...}`.\n- Plain request/response REST — no websockets, no server-side browser, no async jobs. Your agent runs the recipe in its own browser.\n- Request the signed-in surface with `variants:{auth_state:\"logged_in\", role:\"owner\"}`.",
-    "license": "Apache-2.0",
+    "app_description": "Bowmark gives a browsing agent **pre-computed navigation recipes** for public websites — a parameterized URL `shortcut` or a short `ui_procedure` of UI steps, each verified by prior crawls. Instead of exploring and discovering a site's structure on every task (snapshotting the DOM, guessing selectors, burning tokens), the agent calls `ask({ site, task })` once and executes the returned recipe open-loop. On known sites that means roughly **5x fewer tokens** and far less latency.\n\nManaged-key app: Pilot holds one shared Bowmark account behind the broker and meters each caller, so you install it **keyless** and never handle an API key. It's plain request/response REST — no websockets, no server-side browser, no async jobs. Your agent runs the recipe in its own browser; Bowmark only supplies the recipe.\n\n## Methods\n\n- **bowmark.ask** `{ site, task, variants?, scopeHint? }` — look up a recipe. On `status: ok` you get an `id` plus a `shortcut` (a URL `template` with `{name}` slots + `parameters`) and/or a `ui_procedure.steps` list (`action`, `locator`, `value`, and flags like `irreversible` / `requires_user_input`). Fill the slots from your task, execute open-loop, and don't snapshot the DOM to re-verify what the recipe documents.\n- **bowmark.report_outcome** `{ envelope_id, success, evidence }` — after running a recipe, report whether it executed cleanly. This feeds the re-crawl loop that keeps recipes healthy, so it matters: report `success:false` on any deviation (a retry, a JS-eval fallback, an extra click) even if you still got the answer.\n\n## Syntax & edge cases\n\n- `site` is a registrable domain, optionally with a product surface: `google.com`, `docs.stripe.com`, `google.com/maps` — a matching path acts as an implicit scope hint.\n- `task` is plain-English intent, never a URL.\n- Request the signed-in surface with `variants: { auth_state: \"logged_in\", role: \"owner\" }` (also `locale` / `region` / `currency`). The assumed facets come back on `variants_assumed`.\n- Statuses that aren't `ok`: `no_useful_data` / `site_not_supported` / `synth_invalid` → browse manually; `ambiguous_scope` → retry with `scopeHint`; `rate_limited` → back off until `error.retry_after` (only NEW recipe synthesis is capped — cached recipes still answer). On a `503` (`embedder_unavailable` / `synth_unavailable`), retry once after `Retry-After`.\n- Skip Bowmark for localhost, RFC1918 IPs, and open-ended search with no destination.",
+    "license": "Proprietary",
     "homepage": "https://bowmark.ai",
     "source_url": "https://github.com/bowmark-ai/plugin",
-    "categories": ["web", "browser", "agents", "automation"],
-    "keywords": ["browser", "navigation", "recipes", "cheatsheets", "websites", "playwright", "puppeteer", "computer-use", "scraping"]
+    "categories": [
+      "web",
+      "browser",
+      "agents",
+      "automation"
+    ],
+    "keywords": [
+      "browser",
+      "navigation",
+      "recipes",
+      "cheatsheets",
+      "websites",
+      "playwright",
+      "puppeteer",
+      "computer-use",
+      "scraping"
+    ]
   },
   "vendor": {
-    "name": "Bowmark",
+    "name": "Bowmark AI",
     "url": "https://bowmark.ai",
     "contact": "support@bowmark.ai",
     "agent_usage": "Autonomous browsing agents call bowmark.ask before navigating a public site to fetch a known-good URL shortcut or UI procedure, skipping explore-and-discover and reducing token use ~5x. The recipe is executed by the agent's own browser; Bowmark only supplies the recipe.",
