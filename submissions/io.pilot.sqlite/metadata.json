@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "id": "io.pilot.sqlite",
+  "display_name": "SQLite",
+  "tagline": "SQLite 3.45.2 — zero-server, single-file transactional SQL, on-host for agents",
+  "description_md": "SQLite 3.45.2 as a native SQL database for agents: a zero-server, single-file, transactional (OLTP) SQL engine delivered to the host and fronted as typed methods. Run SQL against a .db file or an in-memory database and get rows back as JSON, execute multi-statement scripts over stdin, introspect the schema and table list, and reach the full sqlite3 CLI (every dot-command and flag — .dump, .import, .backup, .clone, CSV/table/markdown output, ...) via a verbatim-argv passthrough. The durable, on-disk complement to DuckDB's in-memory analytics — ideal for sandboxed agents that need real transactional SQL locally with no server, no provisioning, and no cloud account.",
+  "vendor": {
+    "name": "Pilot Protocol",
+    "url": "https://pilotprotocol.network",
+    "contact": "apps@pilotprotocol.network",
+    "publisher_pubkey": "ed25519:hwWVhfcM90EjXJhCL2D+4Ji4ngW2Hp8H7sjTPqGFgMs="
+  },
+  "homepage": "https://sqlite.org",
+  "source_url": "https://sqlite.org/src",
+  "license": "blessing",
+  "categories": [
+    "data",
+    "database",
+    "sql"
+  ],
+  "keywords": [
+    "sqlite",
+    "sql",
+    "database",
+    "embedded",
+    "oltp",
+    "query",
+    "local",
+    "transactional"
+  ],
+  "size": {
+    "bundle_bytes": 5066537,
+    "installed_bytes": 9206962
+  },
+  "compat": {
+    "min_pilot_version": "1.0.0",
+    "runtimes": [
+      "go"
+    ]
+  },
+  "methods": [
+    {
+      "name": "sqlite.query",
+      "summary": "Run SQL against a database file (or ':memory:') and return rows as JSON."
+    },
+    {
+      "name": "sqlite.script",
+      "summary": "Run a multi-statement SQL script (piped as stdin) against a database file."
+    },
+    {
+      "name": "sqlite.schema",
+      "summary": "Dump the CREATE statements (DDL) for every object in a database."
+    },
+    {
+      "name": "sqlite.tables",
+      "summary": "List the tables in a database."
+    },
+    {
+      "name": "sqlite.exec",
+      "summary": "Run any sqlite3 invocation verbatim. Payload {\"args\":[...],\"stdin\"?:\"...\"}."
+    },
+    {
+      "name": "sqlite.version",
+      "summary": "Report the sqlite3 engine version (liveness probe)."
+    },
+    {
+      "name": "sqlite.help",
+      "summary": "Discovery: every method with params, kind, and latency class."
+    }
+  ],
+  "changelog": [
+    {
+      "version": "3.45.2",
+      "date": "2026-07-03",
+      "notes": [
+        "Initial release: native sqlite3 3.45.2 CLI adapter, binary delivered from the Pilot artifact registry.",
+        "Methods: query (JSON rows), script (stdin), schema, tables, exec (verbatim passthrough), version.",
+        "Durable single-file OLTP complement to io.pilot.duckdb; platforms: darwin + linux, arm64 + amd64."
+      ]
+    }
+  ],
+  "links": [
+    {
+      "label": "Source",
+      "url": "https://sqlite.org/src"
+    },
+    {
+      "label": "Website",
+      "url": "https://sqlite.org"
+    }
+  ]
+}

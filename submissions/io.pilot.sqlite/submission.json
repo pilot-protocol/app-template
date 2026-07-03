@@ -1,0 +1,8 @@
+{
+  "id": "io.pilot.sqlite",
+  "version": "3.45.2",
+  "namespace": "sqlite",
+  "description": "SQLite 3.45.2 as a native SQL database for agents: a zero-server, single-file, transactional (OLTP) SQL engine delivered to the host and fronted as typed methods (query\u2192JSON rows, script, schema, tables, verbatim exec passthrough, version). The durable on-disk complement to io.pilot.duckdb.",
+  "bundle": "io.pilot.sqlite-3.45.2.tar.gz",
+  "bundle_sha256": "b162c15f7b439aac2087bd9eb8d06fe85d9576ddd95fac4ef80e8b3e1a4ba366"
+}
