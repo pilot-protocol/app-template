@@ -107,32 +107,65 @@ const (
 // "/v1/calls/{id}" allowed, matched the same way as the allow-list); a path not
 // listed costs DefaultCost.
 type CreditSpec struct {
-	SeedCredits int            `json:"seed_credits"` // per-caller starting balance in micro-$ (e.g. 5000000 = $5)
-	CostCredits map[string]int `json:"cost_credits"` // method-path → micro-$ debited per successful call
-	DefaultCost int            `json:"default_cost"` // debit for paths not in CostCredits (default 1)
+	SeedCredits int `json:"seed_credits"` // per-caller starting balance in micro-$ (e.g. 5000000 = $5)
+	// CostCredits maps a method-path to the micro-$ debited per successful call.
+	// A key may be method-specific ("POST /v1/numbers") or any-method ("/v1/usage");
+	// paths may be templated ("/v1/calls/{id}"). This matters when one path serves
+	// a free read and a paid write — e.g. GET /v1/numbers (list, free) vs
+	// POST /v1/numbers (buy, $3). Method-specific keys win over any-method keys.
+	CostCredits map[string]int `json:"cost_credits"`
+	DefaultCost int            `json:"default_cost"` // debit for calls not matched above (default 1)
 }
 
-// costPattern is a templated cost key split into segments (like allowPatterns).
+// costPattern is a templated cost key split into segments (like allowPatterns),
+// optionally scoped to one HTTP method ("" = any method).
 type costPattern struct {
-	segs []string
-	cost int
+	method string
+	segs   []string
+	cost   int
 }
 
 // creditEnabled reports whether this app meters a per-caller micro-dollar budget.
 func (a *AppEntry) creditEnabled() bool { return a.creditSeed > 0 }
 
-// costForPath returns the micro-dollar cost of a call to path: an exact cost
-// entry wins, else the first matching templated pattern, else DefaultCost.
-func (a *AppEntry) costForPath(path string) int {
-	if c, ok := a.creditExact[path]; ok {
+// costKey is the exact-map key for a (method, path) cost entry ("" method = any).
+func costKey(method, path string) string { return method + " " + path }
+
+// parseCostKey splits a cost_credits key into (method, path): "POST /v1/x" →
+// ("POST","/v1/x"); a bare "/v1/x" (leading slash) → ("","/v1/x") = any method.
+func parseCostKey(k string) (method, path string) {
+	if i := strings.IndexByte(k, ' '); i > 0 && k[0] != '/' {
+		return k[:i], k[i+1:]
+	}
+	return "", k
+}
+
+// costForCall returns the micro-$ cost of a METHOD call to path. Resolution order:
+// method-specific exact → any-method exact → method-specific pattern → any-method
+// pattern → DefaultCost.
+func (a *AppEntry) costForCall(method, path string) int {
+	if c, ok := a.creditExact[costKey(method, path)]; ok {
+		return c
+	}
+	if c, ok := a.creditExact[costKey("", path)]; ok {
 		return c
 	}
 	if len(a.creditPatterns) > 0 {
 		segs := strings.Split(path, "/")
+		anyCost, anyOK := 0, false
 		for _, p := range a.creditPatterns {
-			if segmentsMatch(p.segs, segs) {
-				return p.cost
+			if !segmentsMatch(p.segs, segs) {
+				continue
 			}
+			if p.method == method {
+				return p.cost // method-specific wins immediately
+			}
+			if p.method == "" && !anyOK {
+				anyCost, anyOK = p.cost, true
+			}
+		}
+		if anyOK {
+			return anyCost
 		}
 	}
 	return a.creditDefault
@@ -254,17 +287,21 @@ func ParseRegistry(raw []byte, getenv func(string) string) (*Registry, error) {
 				return nil, fmt.Errorf("registry: app %s: `credit` (HTTP budget) and `provision` (cloud) are mutually exclusive", a.ID)
 			}
 			a.creditSeed = a.Credit.SeedCredits
+			// default_cost 0 is meaningful: unlisted paths are FREE (e.g. reads),
+			// so only explicitly-priced method-paths debit. A negative value is a
+			// typo — clamp to 0.
 			a.creditDefault = a.Credit.DefaultCost
-			if a.creditDefault <= 0 {
-				a.creditDefault = defaultCostCredits
+			if a.creditDefault < 0 {
+				a.creditDefault = 0
 			}
 			a.creditExact = map[string]int{}
 			a.creditPatterns = nil
-			for p, c := range a.Credit.CostCredits {
-				if strings.Contains(p, "{") {
-					a.creditPatterns = append(a.creditPatterns, costPattern{segs: strings.Split(p, "/"), cost: c})
+			for k, c := range a.Credit.CostCredits {
+				method, path := parseCostKey(k)
+				if strings.Contains(path, "{") {
+					a.creditPatterns = append(a.creditPatterns, costPattern{method: method, segs: strings.Split(path, "/"), cost: c})
 				} else {
-					a.creditExact[p] = c
+					a.creditExact[costKey(method, path)] = c
 				}
 			}
 		}
