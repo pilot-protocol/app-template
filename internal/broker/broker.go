@@ -137,7 +137,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "provision: " + err.Error()})
 			return
 		}
-		creditCost = app.costForPath(mpath)
+		creditCost = app.costForCall(r.Method, mpath)
 		admittedCredit, remaining, derr := ps.Debit(appID, string(caller), creditCost)
 		if derr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "debit: " + derr.Error()})

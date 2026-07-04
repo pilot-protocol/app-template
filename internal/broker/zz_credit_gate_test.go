@@ -105,3 +105,44 @@ func TestCreditGate_MutuallyExclusiveWithProvision(t *testing.T) {
 		t.Fatal("expected credit+provision to be rejected")
 	}
 }
+
+// TestCreditGate_MethodSpecificCost: one path can be a free read AND a paid write
+// (GET /v1/numbers list = free, POST /v1/numbers buy = $3). A method-scoped cost
+// key prices only the write; the GET is not charged.
+func TestCreditGate_MethodSpecificCost(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(up.Close)
+	reg, err := ParseRegistry([]byte(`[{
+		"id":"io.pilot.test","upstream":"`+up.URL+`","key_env":"TEST_KEY",
+		"auth_header":"Authorization","auth_scheme":"Bearer","allow":["/v1/numbers"],
+		"credit":{"seed_credits":5000000,"default_cost":0,"cost_credits":{"POST /v1/numbers":3000000}}
+	}]`), func(string) string { return "MASTERKEY" })
+	if err != nil {
+		t.Fatalf("ParseRegistry: %v", err)
+	}
+	b := New(reg, NewMemStore())
+	b.Verify = VerifyConfig{Now: fixedClock(now)}
+	_, priv := newKey(t)
+
+	do := func(method string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		b.ServeHTTP(rec, signedReq(t, priv, method, "/io.pilot.test/v1/numbers", []byte(`{}`), now))
+		return rec
+	}
+	// GET is a free read → balance unchanged at 5000000.
+	if rec := do("GET"); rec.Code != 200 || rec.Header().Get("X-Pilot-Credits-Remaining") != "5000000" {
+		t.Fatalf("GET /v1/numbers: %d remaining %q, want 200/5000000 (free read)", rec.Code, rec.Header().Get("X-Pilot-Credits-Remaining"))
+	}
+	// POST buys a number → debit $3 → remaining $2.
+	if rec := do("POST"); rec.Code != 200 || rec.Header().Get("X-Pilot-Credits-Remaining") != "2000000" {
+		t.Fatalf("POST /v1/numbers: %d remaining %q, want 200/2000000 ($3 debited)", rec.Code, rec.Header().Get("X-Pilot-Credits-Remaining"))
+	}
+	// A second $3 buy can't fit in the remaining $2 → 402.
+	if rec := do("POST"); rec.Code != http.StatusPaymentRequired {
+		t.Fatalf("second POST: %d, want 402", rec.Code)
+	}
+}
