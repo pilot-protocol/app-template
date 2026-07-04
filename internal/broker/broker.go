@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -119,6 +120,45 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 5b. Credit budget (micro-dollars): seed the caller on first sight, then debit
+	//     this call's cost. A call that would overdraw is refused with 402 before
+	//     the master key is ever used. Only a successful (2xx) call keeps the debit;
+	//     a failed call is refunded below, so users are billed for value, not errors.
+	var ps ProvisionStore
+	var creditCost int
+	if app.creditEnabled() {
+		var ok bool
+		if ps, ok = b.provStore(); !ok {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store does not support credit metering"})
+			return
+		}
+		ip := clientIP(r.Header.Get, r.RemoteAddr, b.IPTrust)
+		if _, err := ps.Provision(appID, string(caller), ip, app.creditSeed, 0, 0, b.now()); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "provision: " + err.Error()})
+			return
+		}
+		creditCost = app.costForPath(mpath)
+		admittedCredit, remaining, derr := ps.Debit(appID, string(caller), creditCost)
+		if derr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "debit: " + derr.Error()})
+			return
+		}
+		if !admittedCredit {
+			w.Header().Set("X-Pilot-Credits-Remaining", strconv.Itoa(remaining))
+			writeJSON(w, http.StatusPaymentRequired, map[string]any{
+				"error": "insufficient credit — per-user budget exhausted", "credits_remaining": remaining, "credits_required": creditCost,
+			})
+			return
+		}
+	}
+	// refundCredit returns this call's debit (used on any non-success) so failures
+	// never burn budget.
+	refundCredit := func() {
+		if app.creditEnabled() && creditCost > 0 {
+			ps.Refund(appID, string(caller), creditCost)
+		}
+	}
+
 	// 6. Forward to the partner with the master key (fresh request — caller
 	//    headers are NOT carried over).
 	target := app.Upstream + mpath
@@ -133,6 +173,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ureq, err := http.NewRequestWithContext(ctx, r.Method, target, bytes.NewReader(body))
 	if err != nil {
+		refundCredit()
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "build upstream: " + err.Error()})
 		return
 	}
@@ -142,6 +183,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := b.Client.Do(ureq)
 	if err != nil {
 		app.breaker.Record(false)
+		refundCredit()
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "upstream: " + err.Error()})
 		return
 	}
@@ -149,9 +191,19 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rb, _ := io.ReadAll(resp.Body)
 	app.breaker.Record(resp.StatusCode < 500) // 5xx counts as a failure
 
-	// 7. Meter the partner-reported cost.
-	if c := extractCost(rb, app.CostField); c > 0 {
+	// A non-2xx call produced no value → refund its debit so only successful calls
+	// burn budget. Metering (partner-reported cost) still applies on success.
+	if resp.StatusCode/100 != 2 {
+		refundCredit()
+	} else if c := extractCost(rb, app.CostField); c > 0 {
 		b.Store.AddCost(appID, string(caller), c)
+	}
+
+	// Surface the caller's remaining budget on every metered response.
+	if app.creditEnabled() {
+		if bal, err := ps.Credit(appID, string(caller)); err == nil {
+			w.Header().Set("X-Pilot-Credits-Remaining", strconv.Itoa(bal))
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
