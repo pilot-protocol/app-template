@@ -143,8 +143,19 @@ type SubMethod struct {
 	Timeout     string      `json:"timeout"`     // optional Go duration (e.g. "280s") overriding the latency-class default
 	HTTP        SubRoute    `json:"http"`        // http backend route
 	CLI         SubCLIRoute `json:"cli"`         // cli backend route
+	Local       *SubLocal   `json:"local"`       // local metadata route (no backend call)
 	Params      []SubParam  `json:"params"`
 }
+
+// SubLocal makes a method read a local JSON metadata file (no backend call) —
+// the read side of SubRoute.CaptureTo. e.g. agentphone.mynumber reads the number
+// this daemon provisioned.
+type SubLocal struct {
+	Store string `json:"store"` // metadata file path, e.g. ~/.pilot/.agentphone
+}
+
+// HasLocal reports whether this method is a local metadata read.
+func (m SubMethod) HasLocal() bool { return m.Local != nil && strings.TrimSpace(m.Local.Store) != "" }
 
 // HasHTTP / HasCLI report which route a hybrid method declares (exactly one).
 func (m SubMethod) HasHTTP() bool { return strings.TrimSpace(m.HTTP.Path) != "" }
@@ -156,6 +167,10 @@ func (m SubMethod) HasCLI() bool {
 type SubRoute struct {
 	Verb string `json:"verb"` // GET | POST
 	Path string `json:"path"` // e.g. /current
+	// CaptureTo, when set, persists this method's successful response into a local
+	// metadata file so a SubLocal method can recall it (e.g. buy_number →
+	// ~/.pilot/.agentphone). Best-effort; never fails the call.
+	CaptureTo string `json:"capture_to"`
 }
 
 // SubCLIRoute is the backend CLI mapping for a method. Enumerated methods bake
@@ -315,8 +330,25 @@ func (s Submission) Validate() []string {
 		case s.Backend.IsCLI():
 			e = append(e, validateSubCLIMethod(n, m)...)
 		default:
-			e = append(e, validateSubHTTPMethod(n, m)...)
+			if m.HasLocal() {
+				e = append(e, validateSubLocalMethod(n, m)...)
+			} else {
+				e = append(e, validateSubHTTPMethod(n, m)...)
+			}
 		}
+	}
+	return e
+}
+
+// validateSubLocalMethod checks one method's local metadata route: a store path
+// is required and it must not also declare an http/cli route.
+func validateSubLocalMethod(n string, m SubMethod) []string {
+	var e []string
+	if m.Local == nil || strings.TrimSpace(m.Local.Store) == "" {
+		e = append(e, fmt.Sprintf("Method %q: a local method needs local.store (the metadata file path)", n))
+	}
+	if m.HasHTTP() || m.HasCLI() {
+		e = append(e, fmt.Sprintf("Method %q: a local method must not also declare an http/cli route", n))
 	}
 	return e
 }
@@ -525,16 +557,20 @@ func (s Submission) ToConfig() *scaffold.Config {
 			Params:   params,
 		}
 		// A hybrid app routes per method by which route it declares; cli/http apps
-		// route every method the same way.
+		// route every method the same way. A local method (metadata read) has no
+		// backend route at all.
 		methodIsCLI := s.Backend.IsCLI() || (s.Backend.IsHybrid() && m.HasCLI())
-		if methodIsCLI {
+		switch {
+		case m.HasLocal():
+			method.Local = &scaffold.LocalRoute{Store: m.Local.Store}
+		case methodIsCLI:
 			method.CLI = &scaffold.CLIRoute{
 				Args:          m.CLI.Args,
 				ParamsAsFlags: m.CLI.ParamsAsFlags,
 				Passthrough:   m.CLI.Passthrough,
 			}
-		} else {
-			route := &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path}
+		default:
+			route := &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path, CaptureTo: m.HTTP.CaptureTo}
 			// Carry each param's explicit request location so the generator can
 			// resolve query/path/path_raw/body/header placement. Omitted `in`
 			// keeps the verb/path default (back-compat).
