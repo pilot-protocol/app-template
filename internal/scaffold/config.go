@@ -300,6 +300,54 @@ func (c *Config) HasHTTPMethods() bool {
 	return false
 }
 
+// HasLocalMethods reports whether any method reads a local metadata store.
+func (c *Config) HasLocalMethods() bool {
+	for _, m := range c.Methods {
+		if m.Local != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// LocalStoreGrant is one metadata-file path the adapter touches, with whether it
+// writes it (a capture target) in addition to reading it. Grant is the manifest
+// grant target (leading ~ normalized to $HOME) — the adapter expands ~ to $HOME
+// at runtime, so the grant and the opened path agree.
+type LocalStoreGrant struct {
+	Path  string
+	Grant string
+	Write bool
+}
+
+// LocalStores returns the distinct local metadata files the adapter reads
+// (LocalRoute.Store) or writes (HTTPRoute.CaptureTo), for the manifest fs grants.
+// Sorted for deterministic generation; a path that is both read and written is
+// emitted once with Write=true.
+func (c *Config) LocalStores() []LocalStoreGrant {
+	write := map[string]bool{}
+	seen := map[string]bool{}
+	for _, m := range c.Methods {
+		if m.Local != nil && m.Local.Store != "" {
+			seen[m.Local.Store] = true
+		}
+		if m.HTTP != nil && m.HTTP.CaptureTo != "" {
+			seen[m.HTTP.CaptureTo] = true
+			write[m.HTTP.CaptureTo] = true
+		}
+	}
+	out := make([]LocalStoreGrant, 0, len(seen))
+	for p := range seen {
+		grant := p
+		if strings.HasPrefix(grant, "~/") {
+			grant = "$HOME/" + grant[2:]
+		}
+		out = append(out, LocalStoreGrant{Path: p, Grant: grant, Write: write[p]})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
 // DefaultProvisionPath is the broker's reserved auto-provision route. A hybrid
 // app's provision method uses this path; the generated dispatch treats a method
 // whose http.path equals it as the provisioning call (no request body forwarded).
@@ -398,8 +446,18 @@ type Method struct {
 	Timeout   string            `yaml:"timeout"`   // Go duration; default from duration class
 	HTTP      *HTTPRoute        `yaml:"http"`      // http backend route
 	CLI       *CLIRoute         `yaml:"cli"`       // cli backend route
+	Local     *LocalRoute       `yaml:"local"`     // local metadata route (no backend call)
 	Params    map[string]string `yaml:"params"`    // name -> human description, for help
 	Roundtrip string            `yaml:"roundtrip"` // measured warm roundtrip, for help
+}
+
+// LocalRoute makes a method run entirely on the host with NO backend call: it
+// reads a local JSON metadata file (see HTTPRoute.CaptureTo, which writes it) and
+// returns its contents. Used for host-local state an agent should recall without
+// a round-trip — e.g. agentphone.mynumber reads the number this daemon
+// provisioned. `store` may start with ~ (expanded to $HOME at runtime).
+type LocalRoute struct {
+	Store string `yaml:"store"` // path to the JSON metadata file, e.g. ~/.pilot/.agentphone
 }
 
 // HTTPRoute maps a method to one backend HTTP endpoint. The path may contain
@@ -421,6 +479,14 @@ type Method struct {
 type HTTPRoute struct {
 	Verb string `yaml:"verb"` // GET (default) | POST | PATCH | PUT | DELETE
 	Path string `yaml:"path"` // e.g. /current or /v1/calls/{call_id}
+
+	// CaptureTo, when set, persists this method's successful (2xx) JSON response
+	// into a local metadata file (a LocalRoute method reads it back). Best-effort:
+	// a capture failure never fails the call. The response object is appended to
+	// the file's "entries" array (deduped by "id" when present). Path may start
+	// with ~ (expanded to $HOME at runtime). e.g. agentphone.buy_number captures
+	// the provisioned number to ~/.pilot/.agentphone.
+	CaptureTo string `yaml:"capture_to"`
 
 	// ParamIn carries each param's explicit location (one of the five values
 	// above); a param absent from the map takes the verb/path default. Set from
@@ -753,7 +819,14 @@ func (c *Config) Validate() []error {
 		}
 		switch c.Backend.Type {
 		case "http":
-			errs = append(errs, c.validateHTTPMethod(i, m)...)
+			switch {
+			case m.Local != nil && m.HTTP != nil:
+				errs = append(errs, fmt.Errorf("methods[%d] (%s): a method cannot declare both a local and an http route", i, m.Name))
+			case m.Local != nil:
+				errs = append(errs, c.validateLocalMethod(i, m)...)
+			default:
+				errs = append(errs, c.validateHTTPMethod(i, m)...)
+			}
 		case "cli":
 			errs = append(errs, c.validateCLIMethod(i, m)...)
 		case "hybrid":
@@ -771,6 +844,19 @@ func (c *Config) Validate() []error {
 				errs = append(errs, fmt.Errorf("methods[%d] (%s): a hybrid method needs an http: (cloud) or cli: (local) route", i, m.Name))
 			}
 		}
+	}
+	return errs
+}
+
+// validateLocalMethod checks one method's local metadata route: it needs a
+// store path and must not also declare an http/cli route.
+func (c *Config) validateLocalMethod(i int, m Method) []error {
+	var errs []error
+	if m.Local == nil || strings.TrimSpace(m.Local.Store) == "" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): a local method needs local.store (the metadata file path)", i, m.Name))
+	}
+	if m.HTTP != nil || m.CLI != nil {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): a local method must not also declare an http/cli route", i, m.Name))
 	}
 	return errs
 }
