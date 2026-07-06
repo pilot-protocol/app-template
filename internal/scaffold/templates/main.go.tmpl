@@ -684,7 +684,11 @@ func splitPlanes(ms []methodDoc) (local, cloud []methodDoc) {
 {{- end}}
 		Planes: map[string]string{
 			"local": "runs on THIS host via the local CLI — free, offline, no account",
+{{- if .Pricing}}
 			"cloud": "brokered to the {{.Namespace}} cloud as you — may debit credit; your resources are isolated per user",
+{{- else}}
+			"cloud": "brokered to the {{.Namespace}} cloud as you; your resources are isolated per user",
+{{- end}}
 		},
 		DurationClasses: map[string]string{
 			"fast": "<~1s — status or cheap call",
