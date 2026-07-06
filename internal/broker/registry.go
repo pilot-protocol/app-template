@@ -47,10 +47,14 @@ type AppEntry struct {
 	allowPatterns [][]string // templated allow entries split on "/" ("{x}" matches any one segment)
 	breaker       *Breaker
 
-	creditSeed     int            // Credit.SeedCredits (0 ⇒ no budget)
-	creditDefault  int            // Credit.DefaultCost (micro-$ per call for un-listed paths)
-	creditExact    map[string]int // exact method-path → micro-$ cost
-	creditPatterns []costPattern  // templated method-path → micro-$ cost
+	creditSeed         int            // Credit.SeedCredits (0 ⇒ no budget)
+	creditDefault      int            // Credit.DefaultCost (micro-$ per call for un-listed paths)
+	creditExact        map[string]int // exact method-path → micro-$ cost
+	creditPatterns     []costPattern  // templated method-path → micro-$ cost
+	creditMaxPerIP     int            // Credit.MaxIdentitiesPerIP (0 ⇒ unlimited): distinct callers seedable per source IP
+	creditMintCooldown time.Duration  // Credit.MintCooldownMs: per-caller re-seed touch cooldown (0 ⇒ none)
+	creditRespCost     bool           // Credit.CostSource == "response": debit actual cost from the response, not a fixed pre-debit
+	creditCostScale    int            // Credit.CostScale: micro-$ per unit of CostField (response mode; default 1)
 
 	deriveSecret     []byte          // provisioned: HMAC secret (current version) resolved from Provision.SecretEnv
 	secretsByVersion map[byte][]byte // provisioned: {version: secret} accepted during a rotation grace window
@@ -115,6 +119,38 @@ type CreditSpec struct {
 	// POST /v1/numbers (buy, $3). Method-specific keys win over any-method keys.
 	CostCredits map[string]int `json:"cost_credits"`
 	DefaultCost int            `json:"default_cost"` // debit for calls not matched above (default 1)
+
+	// MaxIdentitiesPerIP caps how many DISTINCT callers may be seeded a fresh budget
+	// from one source IP (0 = unlimited). This is the anti-Sybil guard that makes the
+	// free per-user seed safe: once a caller depletes their budget they get 402, and
+	// they cannot farm a new $5 grant by minting a fresh pilot identity from the same
+	// machine — the (N+1)th distinct caller on an IP is refused (429) at first sight.
+	// Source IP is read only from the broker's trusted proxy header (never client
+	// X-Forwarded-For). Same enforcement as ProvisionSpec.MaxIdentitiesPerIP, applied
+	// to the plain-HTTP credit path.
+	MaxIdentitiesPerIP int `json:"max_identities_per_ip"`
+	// MintCooldownMs is a per-caller re-touch cooldown in ms (0 = none); mirrors
+	// ProvisionSpec.MintCooldownMs to slow rapid re-provision churn.
+	MintCooldownMs int `json:"mint_cooldown_ms"`
+
+	// CostSource selects how the per-call debit is computed:
+	//   ""         → FIXED (default): debit CostCredits[method-path] up front, refund
+	//                on a non-2xx (the classic pre-flight reservation).
+	//   "response" → RESPONSE-COST: the true cost is only known from the partner
+	//                response (e.g. a meta-API that returns the price of the sub-call
+	//                it dispatched, incl. "dynamic" endpoints priced only after the
+	//                fact). No up-front debit; instead, a call whose CostCredits entry
+	//                is > 0 is treated as BILLABLE and is refused with 402 when the
+	//                caller's balance is already <= 0 (free/unlisted paths always pass),
+	//                and after a 2xx the ACTUAL cost read from the response (AppEntry
+	//                CostField × CostScale, in micro-$) is settled against the budget,
+	//                clamped so the balance floors at zero. This keeps metering true to
+	//                real usage when per-endpoint prices can't be tabulated in advance.
+	CostSource string `json:"cost_source"`
+	// CostScale converts one unit of the response CostField into micro-dollars
+	// (response mode only). E.g. a CostField reporting whole cents → 10000
+	// (1¢ = $0.01 = 10000 micro-$); a field reporting dollars → 1000000. Default 1.
+	CostScale int `json:"cost_scale"`
 }
 
 // costPattern is a templated cost key split into segments (like allowPatterns),
@@ -293,6 +329,16 @@ func ParseRegistry(raw []byte, getenv func(string) string) (*Registry, error) {
 			a.creditDefault = a.Credit.DefaultCost
 			if a.creditDefault < 0 {
 				a.creditDefault = 0
+			}
+			a.creditMaxPerIP = a.Credit.MaxIdentitiesPerIP
+			if a.creditMaxPerIP < 0 {
+				a.creditMaxPerIP = 0
+			}
+			a.creditMintCooldown = time.Duration(a.Credit.MintCooldownMs) * time.Millisecond
+			a.creditRespCost = a.Credit.CostSource == "response"
+			a.creditCostScale = a.Credit.CostScale
+			if a.creditCostScale <= 0 {
+				a.creditCostScale = 1
 			}
 			a.creditExact = map[string]int{}
 			a.creditPatterns = nil
