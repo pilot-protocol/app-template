@@ -1,0 +1,44 @@
+[
+  {
+    "label": "version",
+    "vanilla": [
+      "-version"
+    ],
+    "method": "sqlite.version",
+    "payload": {}
+  },
+  {
+    "label": "cli_help",
+    "vanilla": [
+      "-help"
+    ],
+    "method": "sqlite.cli_help",
+    "payload": {}
+  },
+  {
+    "label": "query_scalar",
+    "vanilla": [
+      "-json",
+      ":memory:",
+      "SELECT 42 AS answer"
+    ],
+    "method": "sqlite.query",
+    "payload": {
+      "database": ":memory:",
+      "sql": "SELECT 42 AS answer"
+    }
+  },
+  {
+    "label": "query_rows",
+    "vanilla": [
+      "-json",
+      ":memory:",
+      "SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3"
+    ],
+    "method": "sqlite.query",
+    "payload": {
+      "database": ":memory:",
+      "sql": "SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3"
+    }
+  }
+]
