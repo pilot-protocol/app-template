@@ -126,8 +126,8 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//     the master key is ever used. Only a successful (2xx) call keeps the debit;
 	//     a failed call is refunded below, so users are billed for value, not errors.
 	var ps ProvisionStore
-	var creditCost int  // fixed mode: the amount pre-debited (refunded on failure)
-	var billable bool   // response mode: this method-path costs money (CostCredits > 0)
+	var creditCost int // fixed mode: the amount pre-debited (refunded on failure)
+	var billable bool  // response mode: this method-path costs money (CostCredits > 0)
 	if app.creditEnabled() {
 		var ok bool
 		if ps, ok = b.provStore(); !ok {
