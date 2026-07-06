@@ -1,0 +1,123 @@
+{
+  "id": "io.pilot.orthogonal",
+  "version": "0.1.0",
+  "namespace": "orthogonal",
+  "description": "Connect your agent to Orthogonal — one key fronting 58 paid APIs / 851 endpoints (lead & contact enrichment, email & phone finding, web & social scraping, AI search, company/people/jobs data, weather, voice). Describe a task in plain English and Orthogonal's router returns the exact APIs to call; execute any of them through a single run, billed at the real per-call price and metered against a per-user $5 budget. Discovery, pricing and balance calls are free.",
+  "email": "apps@pilotprotocol.network",
+  "backend": {
+    "base_url": "https://api.orthogonal.com",
+    "auth": "managed",
+    "quota": 0,
+    "headers": [
+      { "name": "Authorization", "value": "Bearer managed" }
+    ]
+  },
+  "methods": [
+    {
+      "name": "orthogonal.search",
+      "description": "★ Natural-language API router. Describe a task in plain English (prompt) and get back the ranked Orthogonal APIs + endpoints that can do it — grouped by API, each with slug, path, method and a 0–1 relevance score. FREE. Start here when you don't know which of the 851 endpoints to use, then price it with orthogonal.details and execute with orthogonal.run.",
+      "latency": "med",
+      "http": { "verb": "POST", "path": "/v1/search" },
+      "params": [
+        { "name": "prompt", "type": "string", "required": true, "in": "body", "description": "the task, e.g. 'find the work email for a person given name + company'" },
+        { "name": "limit", "type": "int", "required": false, "in": "body", "description": "number of ranked results (default 10, max 50)" }
+      ]
+    },
+    {
+      "name": "orthogonal.details",
+      "description": "Full request schema (path/query/body params with types + required flags) AND the exact price in dollars for one endpoint. FREE. Call this before orthogonal.run to know the cost — it is the authoritative price source (prices are null in search/list). Price may be the string 'dynamic' for endpoints priced only after the call.",
+      "latency": "fast",
+      "http": { "verb": "POST", "path": "/v1/details" },
+      "params": [
+        { "name": "api", "type": "string", "required": true, "in": "body", "description": "API slug from search/list, e.g. 'olostep'" },
+        { "name": "path", "type": "string", "required": true, "in": "body", "description": "endpoint path, e.g. '/v1/scrapes'" }
+      ]
+    },
+    {
+      "name": "orthogonal.integrate",
+      "description": "Ready-to-paste code snippets for one endpoint. FREE. format ∈ orth-sdk (default) | run-api | curl | x402-fetch | x402-python | all.",
+      "latency": "fast",
+      "http": { "verb": "POST", "path": "/v1/integrate" },
+      "params": [
+        { "name": "api", "type": "string", "required": true, "in": "body", "description": "API slug" },
+        { "name": "path", "type": "string", "required": true, "in": "body", "description": "endpoint path" },
+        { "name": "format", "type": "string", "required": false, "in": "body", "description": "snippet format (default 'orth-sdk')" }
+      ]
+    },
+    {
+      "name": "orthogonal.list",
+      "description": "Browse the whole catalog — 58 APIs / 851 endpoints with descriptions and param schemas, paginated by limit/offset. FREE. Prices are null here; use orthogonal.details for the price of a specific endpoint.",
+      "latency": "med",
+      "http": { "verb": "GET", "path": "/v1/list-endpoints" },
+      "params": [
+        { "name": "limit", "type": "int", "required": false, "in": "query", "description": "page size (default 100, max 500)" },
+        { "name": "offset", "type": "int", "required": false, "in": "query", "description": "page offset (default 0)" }
+      ]
+    },
+    {
+      "name": "orthogonal.run",
+      "description": "★ Execute any of the 851 provider endpoints via a JSON payload {api, path, body?, query?} (the HTTP method is chosen automatically; body is the provider request body, query is its query-string params). THIS IS THE ONLY CALL THAT COSTS MONEY: you are billed the target endpoint's real price and it is debited from your $5 Pilot budget. The response returns priceCents (cents actually charged) alongside the provider data, and X-Pilot-Credits-Remaining shows your budget. Once your $5 is spent, run returns 402 while the free discovery calls keep working. Prices range $0.001–$3.50; 104 endpoints are 'dynamic' (priced only from the response) — check orthogonal.details first when you need the cost up front.",
+      "latency": "slow",
+      "timeout": "120s",
+      "http": { "verb": "POST", "path": "/v1/run" },
+      "params": [
+        { "name": "api", "type": "string", "required": true, "in": "body", "description": "API slug, e.g. 'serper', 'apollo', 'olostep'" },
+        { "name": "path", "type": "string", "required": true, "in": "body", "description": "endpoint path, e.g. '/v1/people/match'" }
+      ]
+    },
+    {
+      "name": "orthogonal.balance",
+      "description": "Orthogonal account credit balance (string '$X.XX'). FREE, read-only. Note: your per-user $5 Pilot budget is metered separately by the broker and is surfaced in the X-Pilot-Credits-Remaining header on every call — that header, not this account balance, is your personal remaining budget.",
+      "latency": "fast",
+      "http": { "verb": "GET", "path": "/v1/credits/balance" },
+      "params": []
+    },
+    {
+      "name": "orthogonal.check",
+      "description": "Preflight the shared account: does it hold ≥ amountCents credits? (amountCents is in Orthogonal credit units = dollars × 100000, so $5 = 500000). FREE.",
+      "latency": "fast",
+      "http": { "verb": "POST", "path": "/v1/credits/check" },
+      "params": [
+        { "name": "amountCents", "type": "int", "required": true, "in": "body", "description": "dollars × 100000 (e.g. 500000 = $5)" }
+      ]
+    },
+    {
+      "name": "orthogonal.transactions",
+      "description": "Account transaction ledger — purchases, API charges, bonuses, refunds — with amounts, direction and timestamps, paginated. FREE, read-only. Amounts are in the credits unit (dollars × 100000).",
+      "latency": "fast",
+      "http": { "verb": "GET", "path": "/v1/credits/transactions" },
+      "params": [
+        { "name": "limit", "type": "int", "required": false, "in": "query", "description": "page size (default 50)" },
+        { "name": "offset", "type": "int", "required": false, "in": "query", "description": "page offset (default 0)" }
+      ]
+    },
+    {
+      "name": "orthogonal.usage",
+      "description": "Per-call spend history plus totalSpent over a window (dollar strings), for the shared account. FREE, read-only.",
+      "latency": "fast",
+      "http": { "verb": "GET", "path": "/v1/credits/usage" },
+      "params": [
+        { "name": "days", "type": "int", "required": false, "in": "query", "description": "window size in days (default 30)" },
+        { "name": "limit", "type": "int", "required": false, "in": "query", "description": "page size (default 50)" },
+        { "name": "offset", "type": "int", "required": false, "in": "query", "description": "page offset (default 0)" }
+      ]
+    }
+  ],
+  "listing": {
+    "display_name": "Orthogonal",
+    "tagline": "One key, 851 paid APIs — described in English, metered per user",
+    "app_description": "# Orthogonal — a catalog of paid tools and APIs, for your agent\n\nOrthogonal is an **API marketplace / meta-API**: a single key fronts **58 third-party APIs across 851 endpoints** — lead & contact enrichment, work-email and phone finding, web & social scraping, AI web search, company / people / jobs data, weather, voice/phone, email inboxes, and more. You never sign up for the underlying providers and you never juggle their keys — you describe what you need, and pay Orthogonal per call. This Pilot app wraps Orthogonal's control plane behind the managed-key broker, so **your agent gets one metered, keyless surface** and a **per-user $5 budget**.\n\n## The workflow: discover → price → execute\n\n1. **Discover — `orthogonal.search`** (the natural-language router ★). Describe the task in plain English, e.g. *\"find the work email and phone for a person given their name and company\"*, and get back the ranked APIs and endpoints that can do it, grouped by API with a relevance score. This is the \"which API do I need?\" endpoint — you don't have to know the catalog.\n2. **Price — `orthogonal.details`.** Pass an `{api, path}` and get the full request schema (every path/query/body param, with types and required flags) **and the exact price in dollars**. This is the authoritative price source — search and list return `null` prices.\n3. **Execute — `orthogonal.run`.** Call `{api, path, body?, query?}` and Orthogonal dispatches to the provider, returns the provider's data, and reports the exact `priceCents` charged. This is the **only call that costs money**.\n\n`orthogonal.integrate` and `orthogonal.list` round out discovery (code snippets and full-catalog browse), and `orthogonal.balance` / `.usage` / `.transactions` / `.check` expose the account ledger — all free.\n\n## What you can do (representative)\n\n- **Contact & lead enrichment** — apollo, contactout, company-enrich, peopledatalabs, coresignal, aviato, crustdata, ocean-io, influencers-club.\n- **Work-email & phone finding** — tomba, icypeas, contactout, company-enrich, hunter.\n- **Web & AI search** — serper, linkup, tavily, exa/perplexity.\n- **Web & social scraping** — olostep, serper-scrape, scrapecreators (107 endpoints), scrapegraphai, fiber (92 endpoints).\n- **Company / firmographic / jobs data** — predictleads, fantastic-jobs, openfunnel, edges, context-dev, brand-dev.\n- **Weather, voice/phone, email inboxes** — precip, agentphone, agentmail.\n\nRun `orthogonal.search` (or `orthogonal.list`) for the live, complete set.\n\n## Pricing — how you're billed (true to real usage)\n\n- **Only `orthogonal.run` costs money.** Every discovery, pricing, and account call is **free**.\n- Each run is billed the **target endpoint's real price**, debited from your **$5 per-user budget** in micro-dollars. The `priceCents` in the run response is the exact amount charged (real cents); `X-Pilot-Credits-Remaining` on every response is your remaining budget in micro-dollars ($5 = 5000000).\n- Prices span **$0.001 – $3.50**. Distribution across the 851 endpoints: **11 free, ~612 fixed-price, 104 \"dynamic\"** (priced only after the call). Common tiers: Basic $0.001–0.01, Standard $0.01–0.10, Premium $0.10–1.00. Cheap endpoints to start with: serper ($0.002), olostep / tomba / linkup ($0.01).\n- For a **known** cost up front, call `orthogonal.details` first. For **\"dynamic\"** endpoints the price is only knowable from the run response — so metering is done on the actual charged amount, and a single call may spend the last of your budget; after that, `orthogonal.run` returns **402** (the free discovery calls keep working).\n\n## Per-user budget & fair use\n\nEach Pilot user is seeded **$5 of credit** on first use, metered by the broker against their signed pilot identity. When the budget is exhausted, billable runs return 402. To keep the shared master account fair, the broker also enforces a **per-IP identity cap**: a small number of distinct pilot identities may claim a fresh $5 from any one network, so a depleted user can't farm new budgets by minting new identities. The Orthogonal account itself is the ultimate backstop — if it runs dry, runs return 402 until it's topped up.\n\n## Good to know\n\n- **Auth is fully managed.** The `orth_live_` master key lives only in the broker; the installed adapter is keyless and signs each request with your pilot identity. Nothing to configure.\n- **The account is shared** across Pilot users (no per-user sub-accounts on Orthogonal), so `orthogonal.balance` / `.usage` / `.transactions` report the **account-wide** figures — your **personal** remaining budget is the `X-Pilot-Credits-Remaining` header.\n- Errors surface verbatim: 402 insufficient credit, 404 unknown api/path, 5xx upstream provider error, 429 rate-limited (back off).\n- `orthogonal.help` is the self-describing discovery contract: it lists every method with params, cost note, and latency class.",
+    "categories": ["data", "search", "enrichment", "scraping", "ai"],
+    "keywords": ["orthogonal", "api-marketplace", "enrichment", "lead-enrichment", "email-finder", "scraping", "web-search", "people-data", "company-data", "meta-api", "natural-language"],
+    "license": "MIT",
+    "homepage": "https://orthogonal.com",
+    "source_url": "https://github.com/pilot-protocol/app-template/tree/main/submissions/io.pilot.orthogonal"
+  },
+  "vendor": {
+    "name": "Orthogonal",
+    "url": "https://orthogonal.com",
+    "contact": "apps@pilotprotocol.network",
+    "agent_usage": "Managed-key app: the broker holds one orth_live_ master key and injects it per request; each pilot user is metered a $5 budget in micro-dollars. Only POST /v1/run bills (debited the real priceCents from the response, incl. 'dynamic' endpoints); all discovery/pricing/account endpoints are free. Depleted users get 402; a per-IP identity cap (5) blocks budget farming.",
+    "capabilities": "One key fronting 58 third-party APIs / 851 endpoints: lead & contact enrichment, work-email/phone finding, web & social scraping, AI search, company/people/jobs data, weather, voice, email inboxes. Natural-language endpoint router (orthogonal.search) picks the right APIs for a task."
+  }
+}
