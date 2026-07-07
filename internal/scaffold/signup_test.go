@@ -1,0 +1,186 @@
+package scaffold
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// signupSpec is a byo http app whose first method is a no-broker self-signup
+// route: it mints a per-user key and caches it locally, and the other methods
+// resolve that key from ${DIDIT_API_KEY} in their auth header. It exercises
+// every generated signup code path plus the multi-host + secrets grants.
+const signupSpec = `
+id: io.pilot.didit
+app_version: 1.0.0
+description: "Identity verification over an HTTPS API with no-broker self-signup."
+backend:
+  type: http
+  base_url: https://verification.didit.me/v3
+  auth: byo
+  headers:
+    x-api-key: "${DIDIT_API_KEY}"
+methods:
+  - name: didit.signup
+    summary: "Register a Didit account with your email (sends a one-time code)."
+    duration: med
+    signup:
+      step: register
+      url: https://apx.didit.me/auth/v2/programmatic/register/
+  - name: didit.verify
+    summary: "Submit the emailed code to mint + cache the API key."
+    duration: med
+    signup:
+      step: verify
+      url: https://apx.didit.me/auth/v2/programmatic/verify-email/
+      secret_key: DIDIT_API_KEY
+  - name: didit.billing_balance
+    summary: "Check remaining credit balance."
+    duration: fast
+    http: {verb: GET, path: /billing/balance/}
+`
+
+func TestSignupConfigResolvesDefaults(t *testing.T) {
+	cfg := parseSpec(t, signupSpec)
+	if !cfg.HasSignup() {
+		t.Fatal("HasSignup() should be true")
+	}
+	var reg, ver *Method
+	for i := range cfg.Methods {
+		switch {
+		case cfg.Methods[i].Signup != nil && cfg.Methods[i].Signup.IsVerify():
+			ver = &cfg.Methods[i]
+		case cfg.Methods[i].Signup != nil:
+			reg = &cfg.Methods[i]
+		}
+	}
+	if reg == nil || ver == nil {
+		t.Fatal("expected a register + a verify signup method")
+	}
+	if reg.Signup.Step != "register" || ver.Signup.Step != "verify" {
+		t.Errorf("steps = %q / %q", reg.Signup.Step, ver.Signup.Step)
+	}
+	if ver.Signup.KeyPath != "application.api_key" {
+		t.Errorf("KeyPath default = %q, want application.api_key", ver.Signup.KeyPath)
+	}
+	if reg.Signup.EmailKey != "ACCOUNT_EMAIL" || reg.Signup.PasswordKey != "ACCOUNT_PASSWORD" {
+		t.Errorf("email/password key defaults = %q/%q", reg.Signup.EmailKey, reg.Signup.PasswordKey)
+	}
+	// The signup auth host is the extra dial target (base excluded).
+	hosts := strings.Join(cfg.SignupHosts(), ",")
+	if !strings.Contains(hosts, "apx.didit.me") {
+		t.Errorf("SignupHosts()=%q, want apx.didit.me", hosts)
+	}
+	if strings.Contains(hosts, "verification.didit.me") {
+		t.Errorf("SignupHosts() must exclude the base_url host, got %q", hosts)
+	}
+}
+
+func TestSignupValidationRejectsBadRoutes(t *testing.T) {
+	cases := map[string]string{
+		"verify missing secret_key": `
+id: io.pilot.x
+app_version: 1.0.0
+description: d
+backend: {type: http, base_url: https://x.example.com, auth: byo, headers: {x-api-key: "${X}"}}
+methods:
+  - {name: x.verify, summary: s, duration: med, signup: {step: verify, url: https://a.example.com/v}}
+`,
+		"bad step": `
+id: io.pilot.x
+app_version: 1.0.0
+description: d
+backend: {type: http, base_url: https://x.example.com, auth: byo, headers: {x-api-key: "${X}"}}
+methods:
+  - {name: x.signup, summary: s, duration: med, signup: {step: bogus, url: https://a.example.com/r}}
+`,
+		"http-scheme url": `
+id: io.pilot.x
+app_version: 1.0.0
+description: d
+backend: {type: http, base_url: https://x.example.com, auth: byo, headers: {x-api-key: "${X}"}}
+methods:
+  - {name: x.signup, summary: s, duration: med, signup: {step: register, url: http://a.example.com/r}}
+`,
+		"signup+http both": `
+id: io.pilot.x
+app_version: 1.0.0
+description: d
+backend: {type: http, base_url: https://x.example.com, auth: byo, headers: {x-api-key: "${X}"}}
+methods:
+  - {name: x.signup, summary: s, duration: med, http: {verb: GET, path: /a}, signup: {step: register, url: https://a.example.com/r}}
+`,
+	}
+	for name, spec := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Parse([]byte(spec))
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			cfg.Resolve()
+			if errs := cfg.Validate(); len(errs) == 0 {
+				t.Fatalf("expected a validation error for %q", name)
+			}
+		})
+	}
+}
+
+func TestSignupManifestGrants(t *testing.T) {
+	cfg := parseSpec(t, signupSpec)
+	dir := t.TempDir()
+	if _, err := Generate(cfg, dir); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	mf, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	s := string(mf)
+	for _, want := range []string{
+		`"cap": "fs.write", "target": "$APP/secrets.json"`,
+		`"cap": "fs.read", "target": "$APP/secrets.json"`,
+		`"target": "apx.didit.me"`,
+		`"target": "verification.didit.me"`,
+		`"didit.signup"`,
+		`"didit.verify"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("manifest missing %q\n%s", want, s)
+		}
+	}
+	// The generated signup runtime lands next to main.go.
+	if _, err := os.Stat(filepath.Join(dir, "cmd", cfg.BinaryName, "signup.go")); err != nil {
+		t.Errorf("expected generated signup.go: %v", err)
+	}
+}
+
+// TestGeneratedSignupProjectCompiles type-checks the generated signup adapter
+// with `go build ./...` — the load-bearing guard that the signup.go template
+// and its main.go wiring produce valid, compiling Go.
+func TestGeneratedSignupProjectCompiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile test in -short mode")
+	}
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not available")
+	}
+	cfg := parseSpec(t, signupSpec)
+	dir := t.TempDir()
+	if _, err := Generate(cfg, dir); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if sum, err := os.ReadFile(filepath.Join("..", "..", "go.sum")); err == nil {
+		if err := os.WriteFile(filepath.Join(dir, "go.sum"), sum, 0o644); err != nil {
+			t.Fatalf("seed go.sum: %v", err)
+		}
+	}
+	cmd := exec.Command(goBin, "build", "./...")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated signup project failed to compile: %v\n%s", err, out)
+	}
+}

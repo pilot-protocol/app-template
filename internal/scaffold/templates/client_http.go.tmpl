@@ -25,9 +25,10 @@ type httpDoer interface {
 
 // Client talks to one backend over HTTP.
 type Client struct {
-	baseURL string
-	headers map[string]string
-	http    httpDoer
+	baseURL    string
+	headers    map[string]string
+	headerFunc func() map[string]string // when set, re-resolved per request (see Config.HeaderFunc)
+	http       httpDoer
 {{- if .Managed}}
 	sign    Signer // managed: stamp the verified caller identity on every request
 {{- end}}
@@ -38,7 +39,13 @@ type Client struct {
 type Config struct {
 	BaseURL string
 	Headers map[string]string
-	Timeout time.Duration
+	// HeaderFunc, when set, is called on EVERY request to (re)resolve the auth
+	// headers, and takes precedence over Headers. It exists for apps whose secret
+	// is not present at startup but appears at runtime — e.g. a no-broker signup
+	// method that writes the key to $APP/secrets.json mid-life; a per-request
+	// re-read is the only way later calls see the freshly-minted key.
+	HeaderFunc func() map[string]string
+	Timeout    time.Duration
 	// DaemonAddr is the pilot daemon broker address (--addr), used by the x402
 	// payment layer to reach the wallet. Empty when x402 is disabled.
 	DaemonAddr string
@@ -88,7 +95,17 @@ func New(cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("backend: managed adapter requires a Signer")
 	}
 {{- end}}
-	return &Client{baseURL: base, headers: cfg.Headers, http: doer{{if .Managed}}, sign: cfg.Sign{{end}}}, nil
+	return &Client{baseURL: base, headers: cfg.Headers, headerFunc: cfg.HeaderFunc, http: doer{{if .Managed}}, sign: cfg.Sign{{end}}}, nil
+}
+
+// authHeaders returns the auth headers for one request: re-resolved via
+// HeaderFunc when set (so a runtime-minted key is picked up), else the static
+// set captured at New.
+func (c *Client) authHeaders() map[string]string {
+	if c.headerFunc != nil {
+		return c.headerFunc()
+	}
+	return c.headers
 }
 
 // Get issues GET <path>?<params> and returns the raw JSON body. Empty-valued
@@ -190,7 +207,7 @@ func (c *Client) applySig(req *http.Request, body []byte) {
 
 func (c *Client) do(req *http.Request) (json.RawMessage, error) {
 	req.Header.Set("Accept", "application/json")
-	for k, v := range c.headers {
+	for k, v := range c.authHeaders() {
 		if v != "" {
 			req.Header.Set(k, v)
 		}

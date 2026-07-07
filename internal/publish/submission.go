@@ -144,7 +144,29 @@ type SubMethod struct {
 	HTTP        SubRoute    `json:"http"`        // http backend route
 	CLI         SubCLIRoute `json:"cli"`         // cli backend route
 	Local       *SubLocal   `json:"local"`       // local metadata route (no backend call)
+	Signup      *SubSignup  `json:"signup"`      // no-broker self-signup route (mints + caches a per-user key)
 	Params      []SubParam  `json:"params"`
+}
+
+// SubSignup makes a method self-provision a per-user backend key with NO broker:
+// the adapter drives one leg of the backend's programmatic account-creation
+// handshake, keyed by the user's OWN email. It is a two-call flow — a "register"
+// method (POSTs {email,password}; the backend emails the user a one-time code)
+// and a "verify" method (POSTs {email,code}; the returned key is cached in
+// $APP/secrets.json under SecretKey, from which the byo ${TOKEN} headers resolve
+// it). One SubSignup describes one leg, selected by Step.
+type SubSignup struct {
+	Step        string `json:"step"`         // "register" (send OTP) | "verify" (redeem OTP → mint key)
+	URL         string `json:"url"`          // the endpoint POSTed for this step
+	KeyPath     string `json:"key_path"`     // verify: dotted path to the key in the response (default application.api_key)
+	SecretKey   string `json:"secret_key"`   // verify: secrets.json key the minted key is stored under
+	EmailKey    string `json:"email_key"`    // secrets.json key for the account email (optional)
+	PasswordKey string `json:"password_key"` // secrets.json key for the account password (optional)
+}
+
+// HasSignup reports whether this method is a no-broker self-signup route.
+func (m SubMethod) HasSignup() bool {
+	return m.Signup != nil && strings.TrimSpace(m.Signup.URL) != ""
 }
 
 // SubLocal makes a method read a local JSON metadata file (no backend call) —
@@ -330,9 +352,12 @@ func (s Submission) Validate() []string {
 		case s.Backend.IsCLI():
 			e = append(e, validateSubCLIMethod(n, m)...)
 		default:
-			if m.HasLocal() {
+			switch {
+			case m.HasSignup():
+				e = append(e, validateSubSignupMethod(n, m)...)
+			case m.HasLocal():
 				e = append(e, validateSubLocalMethod(n, m)...)
-			} else {
+			default:
 				e = append(e, validateSubHTTPMethod(n, m)...)
 			}
 		}
@@ -349,6 +374,29 @@ func validateSubLocalMethod(n string, m SubMethod) []string {
 	}
 	if m.HasHTTP() || m.HasCLI() {
 		e = append(e, fmt.Sprintf("Method %q: a local method must not also declare an http/cli route", n))
+	}
+	return e
+}
+
+// validateSubSignupMethod checks one no-broker signup route: https register +
+// verify URLs, a secrets key, and no conflicting http/cli/local route.
+func validateSubSignupMethod(n string, m SubMethod) []string {
+	var e []string
+	switch m.Signup.Step {
+	case "register", "verify":
+	default:
+		e = append(e, fmt.Sprintf("Method %q: signup.step must be register|verify", n))
+	}
+	if strings.TrimSpace(m.Signup.URL) == "" {
+		e = append(e, fmt.Sprintf("Method %q: signup.url is required", n))
+	} else if u, err := url.Parse(m.Signup.URL); err != nil || u.Scheme != "https" || u.Host == "" {
+		e = append(e, fmt.Sprintf("Method %q: signup.url must be an https URL", n))
+	}
+	if m.Signup.Step == "verify" && strings.TrimSpace(m.Signup.SecretKey) == "" {
+		e = append(e, fmt.Sprintf("Method %q: a verify signup step needs signup.secret_key", n))
+	}
+	if m.HasHTTP() || m.HasCLI() || m.HasLocal() {
+		e = append(e, fmt.Sprintf("Method %q: a signup method must not also declare an http/cli/local route", n))
 	}
 	return e
 }
@@ -561,6 +609,15 @@ func (s Submission) ToConfig() *scaffold.Config {
 		// backend route at all.
 		methodIsCLI := s.Backend.IsCLI() || (s.Backend.IsHybrid() && m.HasCLI())
 		switch {
+		case m.HasSignup():
+			method.Signup = &scaffold.SignupRoute{
+				Step:        m.Signup.Step,
+				URL:         m.Signup.URL,
+				KeyPath:     m.Signup.KeyPath,
+				SecretKey:   m.Signup.SecretKey,
+				EmailKey:    m.Signup.EmailKey,
+				PasswordKey: m.Signup.PasswordKey,
+			}
 		case m.HasLocal():
 			method.Local = &scaffold.LocalRoute{Store: m.Local.Store}
 		case methodIsCLI:
