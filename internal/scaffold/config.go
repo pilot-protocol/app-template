@@ -353,6 +353,13 @@ func (c *Config) LocalStores() []LocalStoreGrant {
 // whose http.path equals it as the provisioning call (no request body forwarded).
 const DefaultProvisionPath = "/_provision"
 
+// BalanceMetaPath is the broker's reserved credit-balance route for managed
+// (credit-metered) apps. A GET to this path returns the caller's remaining
+// per-user budget straight from the broker's credit ledger — no partner API
+// call, no debit, never a 402. Managed apps get a `<ns>.balance` method wired to
+// it automatically (see Resolve). MUST match the broker's pilotBalancePath.
+const BalanceMetaPath = "/_pilot/balance"
+
 // ProvisionPath is the reserved provision route the generated adapter recognizes.
 func (c *Config) ProvisionPath() string { return DefaultProvisionPath }
 
@@ -657,6 +664,31 @@ func (c *Config) Resolve() {
 		}
 		if x.Asset == "" {
 			x.Asset = "USDC"
+		}
+	}
+	// Managed (credit-metered) apps get a dedicated, free balance method wired to
+	// the broker's reserved credit-ledger route. It makes "how much budget do I
+	// have left?" a first-class call — not just a header on other responses — and
+	// it never costs anything. Injected before the normalization loop below so it
+	// picks up the same Kind/Duration/Timeout defaults as an authored method, and
+	// flows through registration, the manifest `exposes` list, and <ns>.help.
+	if c.Managed() {
+		balName := c.Namespace + ".balance"
+		has := false
+		for i := range c.Methods {
+			if c.Methods[i].Name == balName {
+				has = true
+				break
+			}
+		}
+		if !has {
+			c.Methods = append(c.Methods, Method{
+				Name:     balName,
+				Summary:  "Your remaining Pilot budget for this app, read free from the broker's per-user credit ledger — returns {\"balance\":\"$X.XX\",\"credits_remaining\":<micro-$>,\"credits_seed\":<micro-$>,\"unit\":\"micro_usd\",\"scope\":\"per-pilot-user\"}. This is YOUR budget, not the shared account's. No partner API call, no charge, and never a 402. The same figure also rides on the X-Pilot-Credits-Remaining header of every metered response; call this when you just want to check what's left before a spend.",
+				Kind:     "meta",
+				Duration: "fast",
+				HTTP:     &HTTPRoute{Verb: "GET", Path: BalanceMetaPath},
+			})
 		}
 	}
 	for i := range c.Methods {

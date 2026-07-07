@@ -205,6 +205,42 @@ and, once spent, return **`402 Payment Required`**. Add a `credit` block:
   with per-user key minting) are **mutually exclusive**. Both need a durable
   store in prod (`BROKER_DB`) so balances survive a restart.
 
+### Checking the balance: the `<ns>.balance` method
+
+The remaining budget rides on the `X-Pilot-Credits-Remaining` header of every
+metered response — but a keyless adapter only surfaces the response **body**, so
+that header is invisible to the agent. So every **managed** app also gets a
+dedicated, free balance method, wired automatically — no submission field needed:
+
+- The scaffolder injects **`<ns>.balance`** into any app with `auth: managed`
+  (see `Config.Resolve`). It is a `GET` to the broker's canonical
+  **`/_pilot/balance`** route (`scaffold.BalanceMetaPath` ==
+  `broker.pilotBalancePath`), and it shows up in the manifest `exposes` list and
+  in `<ns>.help` like any other method.
+- The broker answers `/_pilot/balance` for any **credit**-metered app **before**
+  the allow-list, seeds a first-seen caller so they see their full budget, and
+  returns the ledger read **without forwarding upstream, touching the master key,
+  or debiting** — a pure read that can **never** `402`, scoped to THIS caller (the
+  shared account's pooled balance is never disclosed):
+
+  ```json
+  { "balance": "$1.80", "credits_remaining": 1800000, "credits_seed": 5000000,
+    "unit": "micro_usd", "scope": "per-pilot-user" }
+  ```
+
+- `provision` apps keep their own `/_balance` route instead. A managed app may
+  additionally set `credit.balance_path` to **shadow a partner's own
+  account-balance endpoint** (so calling it returns the per-user budget instead of
+  leaking the pooled account) — that is answered by the same handler, alongside the
+  canonical `/_pilot/balance`.
+
+**Playbook — any broker app that meters a budget:** rely on this rather than
+hand-rolling a balance endpoint. Set the `credit` block, and the adapter exposes
+`<ns>.balance` for free; document in the app's `app_description` that agents should
+call `<ns>.balance` (or read `X-Pilot-Credits-Remaining`) to check funds before a
+spend op, and that spend ops return `402` with `credits_remaining` /
+`credits_required` when the budget is exhausted.
+
 ## Operating the broker
 
 ```bash

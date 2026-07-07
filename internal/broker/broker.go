@@ -67,6 +67,13 @@ func microUSD(micros int) string {
 	return fmt.Sprintf("$%d.%02d", micros/1_000_000, (micros%1_000_000)/10_000)
 }
 
+// pilotBalancePath is the canonical per-user credit-balance route: every credit
+// app answers it from the broker's own ledger (never forwarded), and the
+// generated `<ns>.balance` adapter method dials it. MUST match
+// scaffold.BalanceMetaPath. Always available on a credit app, in addition to any
+// creditBalancePath that shadows a partner's own account-balance endpoint.
+const pilotBalancePath = "/_pilot/balance"
+
 // serveCreditBalance answers a credit app's balance path from the per-caller
 // ledger. It NEVER contacts the partner, so the shared master account's pooled
 // balance is not exposed — only this caller's own remaining budget. The caller is
@@ -148,7 +155,11 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//     OWN ledger — never forwarding to the partner — so the shared account's
 	//     pooled balance is never disclosed. Returns only THIS caller's remaining
 	//     micro-$ budget (seeding on first sight, so the per-IP cap applies here too).
-	if app.creditEnabled() && app.creditBalancePath != "" && mpath == app.creditBalancePath {
+	//     Two paths reach it: the canonical /_pilot/balance (what the generated
+	//     <ns>.balance method dials — always available on a credit app) and an
+	//     optional creditBalancePath that SHADOWS a partner's account-balance
+	//     endpoint so it can't leak the pooled account.
+	if app.creditEnabled() && (mpath == pilotBalancePath || (app.creditBalancePath != "" && mpath == app.creditBalancePath)) {
 		b.serveCreditBalance(w, r, app, string(caller))
 		return
 	}
