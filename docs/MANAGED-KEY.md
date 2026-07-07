@@ -159,6 +159,52 @@ entry's `auth_style` (`internal/broker/inject.go`):
 - `query` — `auth_param` (`?apikey=<key>`)
 - `basic` — `auth_user` (HTTP Basic; key-as-username by default)
 
+## Per-user spending budget (credit → 402)
+
+`quota` caps the **number** of calls per user (→ `429`). For a paid partner you
+often want a **dollar** budget instead: give each user a fixed amount of credit
+and, once spent, return **`402 Payment Required`**. Add a `credit` block:
+
+```json
+[{
+  "id": "io.pilot.partner",
+  "upstream": "https://api.example.com",
+  "key_env": "PARTNER_MASTER_KEY",
+  "auth_header": "Authorization", "auth_scheme": "Bearer",
+  "allow": ["/v1/messages", "/v1/calls", "/v1/calls/{id}", "/v1/numbers"],
+  "credit": {
+    "seed_credits": 5000000,
+    "default_cost": 0,
+    "cost_credits": {
+      "POST /v1/numbers": 3000000,
+      "POST /v1/calls":    50000,
+      "POST /v1/messages": 10000
+    }
+  }
+}]
+```
+
+- **Unit is micro-dollars** (1 = $0.000001), so `5000000` = **$5**. Match the
+  `cost_credits` to the partner's real prices (here: $3 to buy a number, $0.05 a
+  call, $0.01 a text); any call not matched costs `default_cost`.
+- **`default_cost: 0` makes reads free** — only the priced calls debit, so polling
+  for status/replies never burns budget.
+- **Cost keys can be method-specific** (`"POST /v1/numbers"`) or any-method
+  (`"/v1/usage"`), and the path may be templated (`"/v1/calls/{id}"`). This matters
+  when one path is both a free read and a paid write — `GET /v1/numbers` (list,
+  free) vs `POST /v1/numbers` (buy, $3). A method-specific key wins over any-method.
+- **How it works:** on a caller's first call the broker seeds `seed_credits`,
+  then debits the call's cost **before** touching the master key. A call that
+  would overdraw is refused with `402` (the master key is never used).
+- **Only successful (2xx) calls burn credit** — a failed/`4xx`/`5xx` call is
+  refunded, so users pay for value, not errors.
+- **Every metered response carries `X-Pilot-Credits-Remaining`** (micro-dollars),
+  so an agent always knows its balance; the `402` body includes
+  `credits_remaining` + `credits_required`.
+- `credit` (plain HTTP budget) and `provision` (the cloud/machine credit ledger
+  with per-user key minting) are **mutually exclusive**. Both need a durable
+  store in prod (`BROKER_DB`) so balances survive a restart.
+
 ## Operating the broker
 
 ```bash

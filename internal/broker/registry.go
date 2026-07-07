@@ -33,11 +33,29 @@ type AppEntry struct {
 	// the classic managed app (shared master key injected for everyone).
 	Provision *ProvisionSpec `json:"provision,omitempty"`
 
+	// Credit, when set on a classic managed (HTTP forward) app, gives each caller a
+	// per-user spending budget in micro-dollars: the broker seeds SeedCredits on
+	// first sight and debits per call; a call that would overdraw returns 402
+	// (only successful 2xx calls burn credit — a failed call is refunded). This is
+	// the plain-HTTP counterpart to Provision's cloud credit ledger, without key
+	// minting. nil ⇒ no budget (call-count Quota still applies).
+	Credit *CreditSpec `json:"credit,omitempty"`
+
 	master        string       // resolved from KeyEnv at load (managed: partner key; provisioned: cloud master, e.g. smk_)
 	injector      AuthInjector // built from AuthHeader/Scheme
 	allowSet      map[string]bool
 	allowPatterns [][]string // templated allow entries split on "/" ("{x}" matches any one segment)
 	breaker       *Breaker
+
+	creditSeed         int            // Credit.SeedCredits (0 ⇒ no budget)
+	creditDefault      int            // Credit.DefaultCost (micro-$ per call for un-listed paths)
+	creditExact        map[string]int // exact method-path → micro-$ cost
+	creditPatterns     []costPattern  // templated method-path → micro-$ cost
+	creditMaxPerIP     int            // Credit.MaxIdentitiesPerIP (0 ⇒ unlimited): distinct callers seedable per source IP
+	creditMintCooldown time.Duration  // Credit.MintCooldownMs: per-caller re-seed touch cooldown (0 ⇒ none)
+	creditRespCost     bool           // Credit.CostSource == "response": debit actual cost from the response, not a fixed pre-debit
+	creditCostScale    int            // Credit.CostScale: micro-$ per unit of CostField (response mode; default 1)
+	creditBalancePath  string         // Credit.BalancePath: broker answers this path from the ledger (never forwarded)
 
 	deriveSecret     []byte          // provisioned: HMAC secret (current version) resolved from Provision.SecretEnv
 	secretsByVersion map[byte][]byte // provisioned: {version: secret} accepted during a rotation grace window
@@ -86,6 +104,120 @@ const (
 	defaultOwnerEnvKey   = "PILOT_OWNER"
 	defaultCostCredits   = 1
 )
+
+// CreditSpec gives a classic managed (HTTP forward) app a per-caller spending
+// budget in MICRO-DOLLARS. Each caller is seeded SeedCredits on first sight and a
+// per-call cost is debited; when the balance can't cover a call the broker
+// returns 402. Costs are keyed by method-path (templated paths like
+// "/v1/calls/{id}" allowed, matched the same way as the allow-list); a path not
+// listed costs DefaultCost.
+type CreditSpec struct {
+	SeedCredits int `json:"seed_credits"` // per-caller starting balance in micro-$ (e.g. 5000000 = $5)
+	// CostCredits maps a method-path to the micro-$ debited per successful call.
+	// A key may be method-specific ("POST /v1/numbers") or any-method ("/v1/usage");
+	// paths may be templated ("/v1/calls/{id}"). This matters when one path serves
+	// a free read and a paid write — e.g. GET /v1/numbers (list, free) vs
+	// POST /v1/numbers (buy, $3). Method-specific keys win over any-method keys.
+	CostCredits map[string]int `json:"cost_credits"`
+	DefaultCost int            `json:"default_cost"` // debit for calls not matched above (default 1)
+
+	// MaxIdentitiesPerIP caps how many DISTINCT callers may be seeded a fresh budget
+	// from one source IP (0 = unlimited). This is the anti-Sybil guard that makes the
+	// free per-user seed safe: once a caller depletes their budget they get 402, and
+	// they cannot farm a new $5 grant by minting a fresh pilot identity from the same
+	// machine — the (N+1)th distinct caller on an IP is refused (429) at first sight.
+	// Source IP is read only from the broker's trusted proxy header (never client
+	// X-Forwarded-For). Same enforcement as ProvisionSpec.MaxIdentitiesPerIP, applied
+	// to the plain-HTTP credit path.
+	MaxIdentitiesPerIP int `json:"max_identities_per_ip"`
+	// MintCooldownMs is a per-caller re-touch cooldown in ms (0 = none); mirrors
+	// ProvisionSpec.MintCooldownMs to slow rapid re-provision churn.
+	MintCooldownMs int `json:"mint_cooldown_ms"`
+
+	// CostSource selects how the per-call debit is computed:
+	//   ""         → FIXED (default): debit CostCredits[method-path] up front, refund
+	//                on a non-2xx (the classic pre-flight reservation).
+	//   "response" → RESPONSE-COST: the true cost is only known from the partner
+	//                response (e.g. a meta-API that returns the price of the sub-call
+	//                it dispatched, incl. "dynamic" endpoints priced only after the
+	//                fact). No up-front debit; instead, a call whose CostCredits entry
+	//                is > 0 is treated as BILLABLE and is refused with 402 when the
+	//                caller's balance is already <= 0 (free/unlisted paths always pass),
+	//                and after a 2xx the ACTUAL cost read from the response (AppEntry
+	//                CostField × CostScale, in micro-$) is settled against the budget,
+	//                clamped so the balance floors at zero. This keeps metering true to
+	//                real usage when per-endpoint prices can't be tabulated in advance.
+	CostSource string `json:"cost_source"`
+	// CostScale converts one unit of the response CostField into micro-dollars
+	// (response mode only). E.g. a CostField reporting whole cents → 10000
+	// (1¢ = $0.01 = 10000 micro-$); a field reporting dollars → 1000000. Default 1.
+	CostScale int `json:"cost_scale"`
+
+	// BalancePath, when set, is a request path the broker answers ITSELF from the
+	// per-caller ledger — it is NEVER forwarded to the partner. This exists to close
+	// a privacy leak: a shared-master-key app whose partner exposes an account-wide
+	// "balance"/"credits" endpoint would otherwise reveal the WHOLE account's balance
+	// (every pilot user's spend, pooled) to any single caller. Instead, the broker
+	// returns only that caller's own remaining micro-$ budget. The partner's account
+	// balance is never disclosed. The caller is seeded on first sight (same as a
+	// first call), so the per-IP cap applies here too. Keep the partner's real
+	// account-balance path OUT of the allow-list so it can't be forwarded.
+	BalancePath string `json:"balance_path"`
+}
+
+// costPattern is a templated cost key split into segments (like allowPatterns),
+// optionally scoped to one HTTP method ("" = any method).
+type costPattern struct {
+	method string
+	segs   []string
+	cost   int
+}
+
+// creditEnabled reports whether this app meters a per-caller micro-dollar budget.
+func (a *AppEntry) creditEnabled() bool { return a.creditSeed > 0 }
+
+// costKey is the exact-map key for a (method, path) cost entry ("" method = any).
+func costKey(method, path string) string { return method + " " + path }
+
+// parseCostKey splits a cost_credits key into (method, path): "POST /v1/x" →
+// ("POST","/v1/x"); a bare "/v1/x" (leading slash) → ("","/v1/x") = any method.
+func parseCostKey(k string) (method, path string) {
+	if i := strings.IndexByte(k, ' '); i > 0 && k[0] != '/' {
+		return k[:i], k[i+1:]
+	}
+	return "", k
+}
+
+// costForCall returns the micro-$ cost of a METHOD call to path. Resolution order:
+// method-specific exact → any-method exact → method-specific pattern → any-method
+// pattern → DefaultCost.
+func (a *AppEntry) costForCall(method, path string) int {
+	if c, ok := a.creditExact[costKey(method, path)]; ok {
+		return c
+	}
+	if c, ok := a.creditExact[costKey("", path)]; ok {
+		return c
+	}
+	if len(a.creditPatterns) > 0 {
+		segs := strings.Split(path, "/")
+		anyCost, anyOK := 0, false
+		for _, p := range a.creditPatterns {
+			if !segmentsMatch(p.segs, segs) {
+				continue
+			}
+			if p.method == method {
+				return p.cost // method-specific wins immediately
+			}
+			if p.method == "" && !anyOK {
+				anyCost, anyOK = p.cost, true
+			}
+		}
+		if anyOK {
+			return anyCost
+		}
+	}
+	return a.creditDefault
+}
 
 // allowed reports whether a request path is permitted. Exact entries match
 // literally (fast map hit); templated entries (containing a {name} segment, e.g.
@@ -196,6 +328,40 @@ func ParseRegistry(raw []byte, getenv func(string) string) (*Registry, error) {
 		if a.Provision != nil {
 			if err := resolveProvision(a, getenv); err != nil {
 				return nil, err
+			}
+		}
+		if a.Credit != nil {
+			if a.Provision != nil {
+				return nil, fmt.Errorf("registry: app %s: `credit` (HTTP budget) and `provision` (cloud) are mutually exclusive", a.ID)
+			}
+			a.creditSeed = a.Credit.SeedCredits
+			// default_cost 0 is meaningful: unlisted paths are FREE (e.g. reads),
+			// so only explicitly-priced method-paths debit. A negative value is a
+			// typo — clamp to 0.
+			a.creditDefault = a.Credit.DefaultCost
+			if a.creditDefault < 0 {
+				a.creditDefault = 0
+			}
+			a.creditMaxPerIP = a.Credit.MaxIdentitiesPerIP
+			if a.creditMaxPerIP < 0 {
+				a.creditMaxPerIP = 0
+			}
+			a.creditMintCooldown = time.Duration(a.Credit.MintCooldownMs) * time.Millisecond
+			a.creditRespCost = a.Credit.CostSource == "response"
+			a.creditCostScale = a.Credit.CostScale
+			if a.creditCostScale <= 0 {
+				a.creditCostScale = 1
+			}
+			a.creditBalancePath = a.Credit.BalancePath
+			a.creditExact = map[string]int{}
+			a.creditPatterns = nil
+			for k, c := range a.Credit.CostCredits {
+				method, path := parseCostKey(k)
+				if strings.Contains(path, "{") {
+					a.creditPatterns = append(a.creditPatterns, costPattern{method: method, segs: strings.Split(path, "/"), cost: c})
+				} else {
+					a.creditExact[costKey(method, path)] = c
+				}
 			}
 		}
 		reg.apps[a.ID] = a

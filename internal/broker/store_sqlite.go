@@ -214,6 +214,36 @@ func (s *SQLiteStore) Refund(app, caller string, n int) {
 	_, _ = s.db.Exec(`UPDATE provision SET credits=credits+? WHERE app=? AND caller=?`, n, app, caller)
 }
 
+// Settle debits n post-hoc, clamped to the balance (never below zero, never
+// rejects). Serialized by the single-conn pool like the other ledger ops.
+func (s *SQLiteStore) Settle(app, caller string, n int) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var credits int
+	err = tx.QueryRow(`SELECT credits FROM provision WHERE app=? AND caller=?`, app, caller).Scan(&credits)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if n > credits {
+		n = credits // clamp to floor at zero
+	}
+	if n > 0 {
+		if _, err := tx.Exec(`UPDATE provision SET credits=credits-? WHERE app=? AND caller=?`, n, app, caller); err != nil {
+			return credits, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return credits, err
+	}
+	return credits - n, nil
+}
+
 func (s *SQLiteStore) Get(app, caller string) (ProvisionRecord, bool, error) {
 	var ip string
 	var firstSeen, lastMint int64

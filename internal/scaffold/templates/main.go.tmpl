@@ -177,16 +177,104 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 {{- if eq .Backend.Type "http"}}
 func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL string) {
 {{- range .Methods}}
-	d.Register("{{.Name}}", forward(c, route{
+{{- if .Local}}
+	d.Register("{{.Name}}", localRead(expandHome("{{.Local.Store}}"))) // {{.Duration}} (local metadata)
+{{- else}}
+	d.Register("{{.Name}}", {{if .HTTP.CaptureTo}}captureWrap(expandHome("{{.HTTP.CaptureTo}}"), {{end}}forward(c, route{
 		method: "{{.HTTP.Verb}}", pathTmpl: "{{.HTTP.Path}}", bodyVerb: {{.HTTP.BodyVerb}},
 		pathParams:    []string{ {{- range $p := .HTTP.PathParams}}{{printf "%q" $p}}, {{end -}} },
 		rawPathParams: []string{ {{- range $p := .HTTP.RawPathParams}}{{printf "%q" $p}}, {{end -}} },
 		queryParams:   []string{ {{- range $p := .HTTP.QueryParams}}{{printf "%q" $p}}, {{end -}} },
 		bodyParams:    []string{ {{- range $p := .HTTP.BodyParams}}{{printf "%q" $p}}, {{end -}} },
 		headerParams:  []string{ {{- range $p := .HTTP.HeaderParams}}{{printf "%q" $p}}, {{end -}} },
-	}, dur("{{.TimeoutFor}}"))) // {{.Duration}}
+	}, dur("{{.TimeoutFor}}")){{if .HTTP.CaptureTo}}){{end}}) // {{.Duration}}
+{{- end}}
 {{- end}}
 	d.Register("{{.Namespace}}.help", helpHandler(version, backendURL))
+}
+
+// ── local metadata store (host-local number recall) ─────────────────────────
+//
+// expandHome resolves a leading ~ so a metadata path like ~/.pilot/.agentphone
+// points at this host's home. localRead returns the store's JSON (a LocalRoute
+// method); captureWrap persists a method's successful response into it so a
+// later localRead can recall it (e.g. buy_number → mynumber).
+
+func expandHome(p string) string {
+	if strings.HasPrefix(p, "~/") {
+		if h, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(h, p[2:])
+		}
+	}
+	return p
+}
+
+// localRead reads a JSON metadata store and returns it verbatim. A missing,
+// empty, or invalid file yields {"entries":[]} — never an error, so an agent can
+// always ask "what's mine?" without a backend round-trip.
+func localRead(store string) ipc.Handler {
+	return func(ctx context.Context, _ *ipc.Envelope) (json.RawMessage, error) {
+		b, err := os.ReadFile(store)
+		if err != nil || len(strings.TrimSpace(string(b))) == 0 || !json.Valid(b) {
+			return json.RawMessage(`{"entries":[]}`), nil
+		}
+		return append(json.RawMessage(nil), b...), nil
+	}
+}
+
+// captureWrap wraps an http handler: on a successful (non-error, non-empty) call
+// it best-effort appends the JSON response to the store's "entries" array. A
+// capture failure never fails the call.
+func captureWrap(store string, h ipc.Handler) ipc.Handler {
+	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
+		out, err := h(ctx, req)
+		if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+			appendEntry(store, out)
+		}
+		return out, err
+	}
+}
+
+// appendEntry merges one JSON-object response into the store's "entries" array,
+// deduped by "id" when present, creating the parent dir + file as needed. It only
+// captures JSON objects; anything else is ignored. Best-effort — errors swallowed.
+func appendEntry(store string, entry json.RawMessage) {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(entry, &obj) != nil {
+		return
+	}
+	var d struct {
+		Entries []json.RawMessage `json:"entries"`
+	}
+	if b, err := os.ReadFile(store); err == nil {
+		_ = json.Unmarshal(b, &d)
+	}
+	if idRaw, ok := obj["id"]; ok {
+		var id string
+		if json.Unmarshal(idRaw, &id) == nil && id != "" {
+			kept := d.Entries[:0]
+			for _, e := range d.Entries {
+				var eo map[string]json.RawMessage
+				var eid string
+				if json.Unmarshal(e, &eo) == nil {
+					_ = json.Unmarshal(eo["id"], &eid)
+				}
+				if eid != id {
+					kept = append(kept, e)
+				}
+			}
+			d.Entries = kept
+		}
+	}
+	d.Entries = append(d.Entries, entry)
+	out, err := json.MarshalIndent(d, "", "  ")
+	if err != nil {
+		return
+	}
+	if dir := filepath.Dir(store); dir != "" {
+		_ = os.MkdirAll(dir, 0o755)
+	}
+	_ = os.WriteFile(store, append(out, '\n'), 0o600)
 }
 
 // route is the resolved per-method request shape baked in at generation time:
@@ -596,7 +684,11 @@ func splitPlanes(ms []methodDoc) (local, cloud []methodDoc) {
 {{- end}}
 		Planes: map[string]string{
 			"local": "runs on THIS host via the local CLI — free, offline, no account",
+{{- if .Pricing}}
 			"cloud": "brokered to the {{.Namespace}} cloud as you — may debit credit; your resources are isolated per user",
+{{- else}}
+			"cloud": "brokered to the {{.Namespace}} cloud as you; your resources are isolated per user",
+{{- end}}
 		},
 		DurationClasses: map[string]string{
 			"fast": "<~1s — status or cheap call",
