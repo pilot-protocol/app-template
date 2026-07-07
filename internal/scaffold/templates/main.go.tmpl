@@ -49,8 +49,8 @@ func main() {
 	_ = flag.String("addr", "", "daemon address (unused by this app)")
 {{- end}}
 	_ = flag.String("db", "", "per-app sqlite path (unused: this app is stateless)")
-{{- if .Managed}}
-	identity := flag.String("identity", "", "per-app ed25519 identity path (used to sign managed-broker requests)")
+{{- if or .Managed .HasBrokerSignup}}
+	identity := flag.String("identity", "", "per-app ed25519 identity path (used to sign broker requests)")
 {{- else}}
 	_ = flag.String("identity", "", "per-app identity path (unused by this app)")
 {{- end}}
@@ -62,7 +62,7 @@ func main() {
 
 {{- if eq .Backend.Type "http"}}
 	cfg := resolveConfig(*manifestPath)
-{{- if .Managed}}
+{{- if or .Managed .HasBrokerSignup}}
 	signer, err := backend.NewSigner(*identity)
 	if err != nil {
 		log.Fatalf("{{.BinaryName}}: %v", err)
@@ -122,7 +122,7 @@ func main() {
 
 	d := ipc.NewDispatcher()
 {{- if eq .Backend.Type "http"}}
-	registerHandlers(d, client, readAppVersion(*manifestPath), cfg.BackendURL{{if .HasSignup}}, *manifestPath{{end}})
+	registerHandlers(d, client, readAppVersion(*manifestPath), cfg.BackendURL{{if .HasSignup}}, *manifestPath{{end}}{{if .HasBrokerSignup}}, signer{{end}})
 {{- else if eq .Backend.Type "hybrid"}}
 	registerHandlers(d, runner, cloudCli, readAppVersion(*manifestPath), cfg.BackendURL)
 {{- else}}
@@ -175,12 +175,23 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 // registerHandlers wires each IPC method to its backend call. Method names MUST
 // match the manifest's `exposes` list, or the daemon won't broker them.
 {{- if eq .Backend.Type "http"}}
-func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL{{if .HasSignup}}, manifestPath{{end}} string) {
+func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL string{{if .HasSignup}}, manifestPath string{{end}}{{if .HasBrokerSignup}}, signer backend.Signer{{end}}) {
 {{- range .Methods}}
 {{- if .Local}}
 	d.Register("{{.Name}}", localRead(expandHome("{{.Local.Store}}"))) // {{.Duration}} (local metadata)
 {{- else if .Signup}}
-{{- if .Signup.IsVerify}}
+{{- if eq .Signup.Step "account"}}
+	d.Register("{{.Name}}", accountHandler(accountConfig{
+		secretKey: {{printf "%q" .Signup.SecretKey}},
+		emailKey:  {{printf "%q" .Signup.EmailKey}},
+	}, manifestPath)) // {{.Duration}} (local: retrieve the cached account)
+{{- else if .Signup.IsBroker}}
+	d.Register("{{.Name}}", brokerSignupHandler(brokerSignupConfig{
+		brokerURL: {{printf "%q" .Signup.BrokerURL}},
+		secretKey: {{printf "%q" .Signup.SecretKey}},
+		emailKey:  {{printf "%q" .Signup.EmailKey}},
+	}, signer, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (broker self-signup: one call, no email)
+{{- else if .Signup.IsVerify}}
 	d.Register("{{.Name}}", signupVerifyHandler(signupVerifyConfig{
 		url:       {{printf "%q" .Signup.URL}},
 		keyPath:   {{printf "%q" .Signup.KeyPath}},

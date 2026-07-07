@@ -288,6 +288,18 @@ func (c *Config) HasSignup() bool {
 	return false
 }
 
+// HasBrokerSignup reports whether any signup route is the broker step — the
+// adapter then needs an ed25519 signer + identity (to sign the keyless broker
+// call) and key.sign + net.dial-broker grants, even though its ops stay byo.
+func (c *Config) HasBrokerSignup() bool {
+	for _, m := range c.Methods {
+		if m.Signup != nil && m.Signup.IsBroker() {
+			return true
+		}
+	}
+	return false
+}
+
 // SignupHosts returns the extra hosts a no-broker signup adapter must dial on
 // top of the backend base_url: the register/verify auth endpoints. Deduped,
 // excluding the base_url host (already granted via HasHTTPMethods).
@@ -295,14 +307,18 @@ func (c *Config) SignupHosts() []string {
 	base := c.AdapterBackendHost()
 	seen := map[string]bool{base: true}
 	var out []string
+	add := func(raw string) {
+		if u, err := url.Parse(raw); err == nil && u.Hostname() != "" && !seen[u.Hostname()] {
+			seen[u.Hostname()] = true
+			out = append(out, u.Hostname())
+		}
+	}
 	for _, m := range c.Methods {
 		if m.Signup == nil {
 			continue
 		}
-		if u, err := url.Parse(m.Signup.URL); err == nil && u.Hostname() != "" && !seen[u.Hostname()] {
-			seen[u.Hostname()] = true
-			out = append(out, u.Hostname())
-		}
+		add(m.Signup.URL)
+		add(m.Signup.BrokerURL)
 	}
 	sort.Strings(out)
 	return out
@@ -505,18 +521,29 @@ type Method struct {
 //
 // Both steps hit the backend's auth host (URL), which is typically distinct from
 // the byo base_url — SignupHosts adds the net.dial grant for it.
+// A signup route has one of three steps:
+//   - "register" / "verify": the no-broker, user-email flow (two calls) — the
+//     adapter drives the provider's register/verify itself.
+//   - "broker": the fully-autonomous flow — the adapter signs ONE keyless call
+//     to a Pilot broker (BrokerURL) that provisions a mailbox, drives the
+//     provider register→OTP→verify on our infrastructure, and returns
+//     {email, api_key}. The adapter caches BOTH to secrets.json; ops stay byo.
+//     No user email, no code, one call.
 type SignupRoute struct {
-	Step        string `yaml:"step"`         // "register" (send OTP) | "verify" (redeem OTP → mint key)
-	URL         string `yaml:"url"`          // the endpoint POSTed for this step
+	Step        string `yaml:"step"`         // "register" | "verify" | "broker"
+	URL         string `yaml:"url"`          // register/verify: the provider endpoint POSTed
+	BrokerURL   string `yaml:"broker_url"`   // broker: the Pilot broker /signup endpoint (signed)
 	KeyPath     string `yaml:"key_path"`     // verify: dotted path to the key in the response (default application.api_key)
-	SecretKey   string `yaml:"secret_key"`   // verify: secrets.json key the minted key is stored under (e.g. DIDIT_API_KEY)
-	EmailKey    string `yaml:"email_key"`    // secrets.json key for the account email (default DIDIT_ACCOUNT_EMAIL)
-	PasswordKey string `yaml:"password_key"` // secrets.json key for the account password (default DIDIT_ACCOUNT_PASSWORD)
+	SecretKey   string `yaml:"secret_key"`   // secrets.json key the minted key is stored under (e.g. DIDIT_API_KEY)
+	EmailKey    string `yaml:"email_key"`    // secrets.json key for the account email (default ACCOUNT_EMAIL)
+	PasswordKey string `yaml:"password_key"` // secrets.json key for the account password (default ACCOUNT_PASSWORD)
 }
 
-// SignupStep classifies a signup route. IsVerify is the leg that mints + caches
-// the key; the other leg only starts registration.
+// IsVerify is the no-broker leg that redeems the OTP + caches the key.
 func (s *SignupRoute) IsVerify() bool { return strings.EqualFold(s.Step, "verify") }
+
+// IsBroker is the fully-autonomous leg that signs a call to the Pilot broker.
+func (s *SignupRoute) IsBroker() bool { return strings.EqualFold(s.Step, "broker") }
 
 // LocalRoute makes a method run entirely on the host with NO backend call: it
 // reads a local JSON metadata file (see HTTPRoute.CaptureTo, which writes it) and
@@ -953,18 +980,37 @@ func (c *Config) validateLocalMethod(i int, m Method) []error {
 // headers then resolve).
 func (c *Config) validateSignupMethod(i int, m Method) []error {
 	var errs []error
+	httpsURL := func(field, raw string) {
+		if u, err := url.Parse(raw); err != nil || u.Scheme != "https" || u.Host == "" {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.%s %q must be an https URL", i, m.Name, field, raw))
+		}
+	}
 	switch m.Signup.Step {
 	case "register", "verify":
+		if strings.TrimSpace(m.Signup.URL) == "" {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.url is required", i, m.Name))
+		} else {
+			httpsURL("url", m.Signup.URL)
+		}
+		if m.Signup.IsVerify() && strings.TrimSpace(m.Signup.SecretKey) == "" {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): a verify signup step needs signup.secret_key", i, m.Name))
+		}
+	case "broker":
+		if strings.TrimSpace(m.Signup.BrokerURL) == "" {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): a broker signup step needs signup.broker_url", i, m.Name))
+		} else {
+			httpsURL("broker_url", m.Signup.BrokerURL)
+		}
+		if strings.TrimSpace(m.Signup.SecretKey) == "" {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): a broker signup step needs signup.secret_key (the key the minted secret is cached under)", i, m.Name))
+		}
+	case "account":
+		// A local reader of the cached account — needs only the secrets keys.
+		if strings.TrimSpace(m.Signup.SecretKey) == "" {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): an account step needs signup.secret_key", i, m.Name))
+		}
 	default:
-		errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.step %q must be register|verify", i, m.Name, m.Signup.Step))
-	}
-	if strings.TrimSpace(m.Signup.URL) == "" {
-		errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.url is required", i, m.Name))
-	} else if u, err := url.Parse(m.Signup.URL); err != nil || u.Scheme != "https" || u.Host == "" {
-		errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.url %q must be an https URL", i, m.Name, m.Signup.URL))
-	}
-	if m.Signup.IsVerify() && strings.TrimSpace(m.Signup.SecretKey) == "" {
-		errs = append(errs, fmt.Errorf("methods[%d] (%s): a verify signup step needs signup.secret_key (the secrets.json key the minted key is stored under)", i, m.Name))
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.step %q must be register|verify|broker|account", i, m.Name, m.Signup.Step))
 	}
 	if c.Managed() {
 		errs = append(errs, fmt.Errorf("methods[%d] (%s): a signup (no-broker) route cannot be combined with managed/provisioned auth", i, m.Name))
