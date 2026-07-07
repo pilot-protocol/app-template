@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -58,6 +59,48 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// microUSD formats a micro-dollar amount as "$X.XX" (floored at zero).
+func microUSD(micros int) string {
+	if micros < 0 {
+		micros = 0
+	}
+	return fmt.Sprintf("$%d.%02d", micros/1_000_000, (micros%1_000_000)/10_000)
+}
+
+// serveCreditBalance answers a credit app's balance path from the per-caller
+// ledger. It NEVER contacts the partner, so the shared master account's pooled
+// balance is not exposed — only this caller's own remaining budget. The caller is
+// seeded on first sight (so the per-IP cap applies), mirroring a first call.
+func (b *Broker) serveCreditBalance(w http.ResponseWriter, r *http.Request, app *AppEntry, caller string) {
+	ps, ok := b.provStore()
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store does not support credit metering"})
+		return
+	}
+	ip := clientIP(r.Header.Get, r.RemoteAddr, b.IPTrust)
+	rec, err := ps.Provision(app.ID, caller, ip, app.creditSeed, app.creditMaxPerIP, app.creditMintCooldown, b.now())
+	if err != nil {
+		switch err {
+		case ErrIPCap:
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "per-IP identity cap reached — too many pilot identities have claimed a budget from this network"})
+		case ErrCooldown:
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "re-provision cooldown — retry shortly"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "balance: " + err.Error()})
+		}
+		return
+	}
+	w.Header().Set("X-Pilot-Credits-Remaining", strconv.Itoa(rec.Credits))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"balance":           microUSD(rec.Credits),
+		"credits_remaining": rec.Credits,
+		"credits_seed":      app.creditSeed,
+		"unit":              "micro_usd",
+		"scope":             "per-pilot-user",
+		"note":              "Your personal budget on this app. The shared provider account balance is not exposed.",
+	})
+}
+
 // ServeHTTP is the forward path for /<app-id>/<method-path>.
 func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	appID, mpath, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
@@ -98,6 +141,15 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if sigErr != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": sigErr.Error()})
+		return
+	}
+
+	// 2b. Per-user balance: a credit app can answer a balance path from the broker's
+	//     OWN ledger — never forwarding to the partner — so the shared account's
+	//     pooled balance is never disclosed. Returns only THIS caller's remaining
+	//     micro-$ budget (seeding on first sight, so the per-IP cap applies here too).
+	if app.creditEnabled() && app.creditBalancePath != "" && mpath == app.creditBalancePath {
+		b.serveCreditBalance(w, r, app, string(caller))
 		return
 	}
 

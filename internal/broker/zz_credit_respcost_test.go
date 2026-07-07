@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -150,6 +151,68 @@ func TestRespCost_FailedCallIsFree(t *testing.T) {
 	}
 	if got := rec.Header().Get("X-Pilot-Credits-Remaining"); got != "5000000" {
 		t.Fatalf("failed run remaining = %q, want 5000000 (unbilled)", got)
+	}
+}
+
+// TestCreditBalance_PerUserNotAccount: the broker answers the balance path from its
+// OWN ledger and never forwards it, so the shared account balance is never exposed —
+// the caller sees only their own remaining budget, which reflects debits.
+func TestCreditBalance_PerUserNotAccount(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	var upHits int
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upHits++
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"success":true,"priceCents":1,"balance":"$54321.00"}`))
+	}))
+	t.Cleanup(up.Close)
+	reg, err := ParseRegistry([]byte(`[{
+		"id":"io.pilot.orthogonal","upstream":"`+up.URL+`","key_env":"ORTH_KEY",
+		"auth_header":"Authorization","auth_scheme":"Bearer","cost_field":"priceCents",
+		"allow":["/v1/run"],
+		"credit":{"seed_credits":5000000,"default_cost":0,"cost_source":"response","cost_scale":10000,
+			"cost_credits":{"POST /v1/run":1},"balance_path":"/v1/credits/balance"}
+	}]`), func(string) string { return "MASTERKEY" })
+	if err != nil {
+		t.Fatalf("ParseRegistry: %v", err)
+	}
+	b := New(reg, NewMemStore())
+	b.Verify = VerifyConfig{Now: fixedClock(now)}
+	_, priv := newKey(t)
+
+	balance := func() map[string]any {
+		rec := httptest.NewRecorder()
+		b.ServeHTTP(rec, signedReq(t, priv, "GET", "/io.pilot.orthogonal/v1/credits/balance", nil, now))
+		if rec.Code != 200 {
+			t.Fatalf("balance: status %d, want 200 (body %s)", rec.Code, rec.Body.String())
+		}
+		var m map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
+			t.Fatalf("balance decode: %v", err)
+		}
+		return m
+	}
+
+	// Fresh caller → seeded $5, and the upstream (which would leak "$54321.00") is
+	// NOT contacted.
+	m := balance()
+	if m["balance"] != "$5.00" || m["scope"] != "per-pilot-user" {
+		t.Fatalf("balance = %v, want $5.00 / per-pilot-user", m)
+	}
+	if upHits != 0 {
+		t.Fatal("balance path was forwarded upstream — account balance could leak")
+	}
+	// Spend $0.01 via a run, then balance reflects the per-user debit.
+	run := httptest.NewRecorder()
+	b.ServeHTTP(run, signedReq(t, priv, "POST", "/io.pilot.orthogonal/v1/run", []byte(`{}`), now))
+	if run.Code != 200 {
+		t.Fatalf("run: %d", run.Code)
+	}
+	if m := balance(); m["balance"] != "$4.99" {
+		t.Fatalf("post-spend balance = %v, want $4.99", m["balance"])
+	}
+	if upHits != 1 { // only the run hit upstream; neither balance call did
+		t.Fatalf("upstream hits = %d, want 1 (run only)", upHits)
 	}
 }
 
