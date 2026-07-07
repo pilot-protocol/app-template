@@ -55,6 +55,7 @@ type AppEntry struct {
 	creditMintCooldown time.Duration  // Credit.MintCooldownMs: per-caller re-seed touch cooldown (0 ⇒ none)
 	creditRespCost     bool           // Credit.CostSource == "response": debit actual cost from the response, not a fixed pre-debit
 	creditCostScale    int            // Credit.CostScale: micro-$ per unit of CostField (response mode; default 1)
+	creditBalancePath  string         // Credit.BalancePath: broker answers this path from the ledger (never forwarded)
 
 	deriveSecret     []byte          // provisioned: HMAC secret (current version) resolved from Provision.SecretEnv
 	secretsByVersion map[byte][]byte // provisioned: {version: secret} accepted during a rotation grace window
@@ -151,6 +152,17 @@ type CreditSpec struct {
 	// (response mode only). E.g. a CostField reporting whole cents → 10000
 	// (1¢ = $0.01 = 10000 micro-$); a field reporting dollars → 1000000. Default 1.
 	CostScale int `json:"cost_scale"`
+
+	// BalancePath, when set, is a request path the broker answers ITSELF from the
+	// per-caller ledger — it is NEVER forwarded to the partner. This exists to close
+	// a privacy leak: a shared-master-key app whose partner exposes an account-wide
+	// "balance"/"credits" endpoint would otherwise reveal the WHOLE account's balance
+	// (every pilot user's spend, pooled) to any single caller. Instead, the broker
+	// returns only that caller's own remaining micro-$ budget. The partner's account
+	// balance is never disclosed. The caller is seeded on first sight (same as a
+	// first call), so the per-IP cap applies here too. Keep the partner's real
+	// account-balance path OUT of the allow-list so it can't be forwarded.
+	BalancePath string `json:"balance_path"`
 }
 
 // costPattern is a templated cost key split into segments (like allowPatterns),
@@ -340,6 +352,7 @@ func ParseRegistry(raw []byte, getenv func(string) string) (*Registry, error) {
 			if a.creditCostScale <= 0 {
 				a.creditCostScale = 1
 			}
+			a.creditBalancePath = a.Credit.BalancePath
 			a.creditExact = map[string]int{}
 			a.creditPatterns = nil
 			for k, c := range a.Credit.CostCredits {
