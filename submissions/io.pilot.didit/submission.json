@@ -1,0 +1,1316 @@
+{
+  "id": "io.pilot.didit",
+  "version": "1.0.0",
+  "namespace": "didit",
+  "description": "Full Didit identity-verification platform over one HTTPS app \u2014 KYC/ID, liveness, face match, AML, proof-of-address, database validation, email/phone OTP, plus hosted sessions, workflows, users, billing, blocklists, questionnaires and webhooks. No broker: didit.signup {email} + didit.verify {code} create your own Didit account and cache its API key locally, then every method authenticates as you and bills to your own Didit balance (500 free full-KYC checks/month).",
+  "email": "alex@vulturelabs.io",
+  "backend": {
+    "type": "http",
+    "base_url": "https://verification.didit.me/v3",
+    "auth": "byo",
+    "headers": [
+      {
+        "name": "x-api-key",
+        "value": "${DIDIT_API_KEY}"
+      }
+    ]
+  },
+  "methods": [
+    {
+      "name": "didit.signup",
+      "description": "STEP 1 of 2 \u2014 create a Didit account. Pass YOUR email; Didit emails it a 6-character one-time code. No broker: this hits Didit's programmatic register endpoint (POST /programmatic/register/) directly and caches the account email + password to $APP/secrets.json so the account stays recoverable. It does NOT return an API key \u2014 Didit only issues the key after you confirm the code. Then call didit.verify with that code. Why your own email (not a throwaway): Didit suppresses disposable mailboxes, so the code must land in an inbox you control. FREE \u2014 account creation costs nothing; you pay only per verification you run, and each new account includes Didit's 500 free full-KYC checks/month. Register is rate-limited to 5 attempts per IP per hour. Password is optional (a strong one is generated and cached if omitted).",
+      "latency": "med",
+      "signup": {
+        "step": "register",
+        "url": "https://apx.didit.me/auth/v2/programmatic/register/",
+        "email_key": "DIDIT_ACCOUNT_EMAIL",
+        "password_key": "DIDIT_ACCOUNT_PASSWORD"
+      },
+      "params": [
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "description": "The email address to register. Didit sends the 6-character verification code here, so use a real inbox you can read (disposable domains are rejected). Cached for didit.verify to default.",
+          "in": "body"
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "required": false,
+          "description": "Optional account password (min 8 chars, 1 upper/lower/digit/special). Omit to auto-generate + cache one; you only need it later for the Didit console or POST /programmatic/login/.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.verify",
+      "description": "STEP 2 of 2 \u2014 confirm the code from didit.signup and mint your API key. Pass the 6-character code Didit emailed you; this POSTs to /programmatic/verify-email/, extracts application.api_key from the response, and writes it to $APP/secrets.json as DIDIT_API_KEY. From then on EVERY other didit.* method authenticates automatically (x-api-key) \u2014 you never handle the key yourself. Idempotent: if a key is already cached it returns {already:true} without re-verifying. email defaults to the address you registered with, so usually you only need to pass {code}. FREE.",
+      "latency": "med",
+      "signup": {
+        "step": "verify",
+        "url": "https://apx.didit.me/auth/v2/programmatic/verify-email/",
+        "key_path": "application.api_key",
+        "secret_key": "DIDIT_API_KEY",
+        "email_key": "DIDIT_ACCOUNT_EMAIL"
+      },
+      "params": [
+        {
+          "name": "code",
+          "type": "string",
+          "required": true,
+          "description": "The 6-character one-time code Didit emailed you after didit.signup.",
+          "in": "body"
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": false,
+          "description": "The email you registered with. Optional \u2014 defaults to the address didit.signup cached.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.billing_balance",
+      "description": "Check your remaining Didit credit balance (and auto-refill settings). FREE. Returns {balance, auto_refill_enabled, auto_refill_amount, auto_refill_threshold}. Verifications draw down this balance; check it before a batch of checks.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/billing/balance/"
+      },
+      "params": []
+    },
+    {
+      "name": "didit.billing_topup",
+      "description": "Add credit to your Didit balance. FREE call \u2014 returns a Stripe checkout URL (checkout_session_url) to present to the user; the charge happens on Stripe, not through Pilot.",
+      "latency": "fast",
+      "http": {
+        "verb": "POST",
+        "path": "/billing/top-up/"
+      },
+      "params": [
+        {
+          "name": "amount_in_dollars",
+          "type": "number",
+          "required": true,
+          "description": "Amount to add, USD. Minimum $50.",
+          "in": "body"
+        },
+        {
+          "name": "success_url",
+          "type": "string",
+          "required": false,
+          "description": "Redirect URL after successful payment.",
+          "in": "body"
+        },
+        {
+          "name": "cancel_url",
+          "type": "string",
+          "required": false,
+          "description": "Redirect URL if the user cancels.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.create_workflow",
+      "description": "Create a verification workflow \u2014 the reusable template that defines which checks a hosted session runs, in order. FREE to create; you're billed per feature only when a session actually runs it. Returns {uuid} \u2014 pass it as workflow_id to didit.create_session. The v3 API takes a `features` ARRAY (in the order users complete them); each item is {feature, config?} where feature is one of OCR, NFC, LIVENESS, FACE_MATCH, PROOF_OF_ADDRESS, QUESTIONNAIRE, DOCUMENT_AI, PHONE_VERIFICATION, EMAIL_VERIFICATION, DATABASE_VALIDATION, AML, IP_ANALYSIS, AGE_ESTIMATION, KYB_REGISTRY, KYB_DOCUMENTS, KYB_KEY_PEOPLE. Example: [{\"feature\":\"OCR\"},{\"feature\":\"LIVENESS\",\"config\":{\"face_liveness_method\":\"PASSIVE\"}},{\"feature\":\"FACE_MATCH\"}]. The API uses a strict field whitelist \u2014 any undeclared key (e.g. workflow_type) is a 400. Max 50 workflows per account.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/workflows/"
+      },
+      "params": [
+        {
+          "name": "features",
+          "type": "object",
+          "required": true,
+          "description": "REQUIRED array (min 1) of {feature, config?, label?} in completion order. feature codes: OCR, NFC, LIVENESS, FACE_MATCH, PROOF_OF_ADDRESS, QUESTIONNAIRE, DOCUMENT_AI, PHONE_VERIFICATION, EMAIL_VERIFICATION, DATABASE_VALIDATION, AML, IP_ANALYSIS, AGE_ESTIMATION, KYB_*. config is per-feature (e.g. LIVENESS {face_liveness_method: PASSIVE|ACTIVE_3D|FLASHING}; FACE_MATCH {face_match_score_decline_threshold, face_match_score_review_threshold}; OCR {duplicated_user_action: NO_ACTION|REVIEW|DECLINE}).",
+          "in": "body"
+        },
+        {
+          "name": "workflow_label",
+          "type": "string",
+          "required": false,
+          "description": "Display name (max 50 chars; default 'ID Verification').",
+          "in": "body"
+        },
+        {
+          "name": "is_default",
+          "type": "bool",
+          "required": false,
+          "description": "Set as the default workflow for new sessions.",
+          "in": "body"
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "description": "draft | published (default published \u2014 omit to publish immediately).",
+          "in": "body"
+        },
+        {
+          "name": "is_white_label_enabled",
+          "type": "bool",
+          "required": false,
+          "description": "Enable white-label customization.",
+          "in": "body"
+        },
+        {
+          "name": "is_desktop_allowed",
+          "type": "bool",
+          "required": false,
+          "description": "Allow desktop browsers (default false).",
+          "in": "body"
+        },
+        {
+          "name": "max_retry_attempts",
+          "type": "int",
+          "required": false,
+          "description": "Retries after a decline, 0\u201310 (default 3).",
+          "in": "body"
+        },
+        {
+          "name": "retry_window_days",
+          "type": "int",
+          "required": false,
+          "description": "Retry counting period in days, 1\u2013365 or null (default 7).",
+          "in": "body"
+        },
+        {
+          "name": "session_expiration_time",
+          "type": "int",
+          "required": false,
+          "description": "Seconds until a session expires, 3600\u20132419200 (default 604800).",
+          "in": "body"
+        },
+        {
+          "name": "face_liveness_max_attempts",
+          "type": "int",
+          "required": false,
+          "description": "Liveness submission limit, 1\u20133 (default 3).",
+          "in": "body"
+        },
+        {
+          "name": "face_match_max_attempts",
+          "type": "int",
+          "required": false,
+          "description": "Face-match submission limit, 1\u20133 (default 3).",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.list_workflows",
+      "description": "List your verification workflows with their features and total_price. FREE.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/workflows/"
+      },
+      "params": []
+    },
+    {
+      "name": "didit.get_workflow",
+      "description": "Get one workflow by id. FREE.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/workflows/{workflow_id}/"
+      },
+      "params": [
+        {
+          "name": "workflow_id",
+          "type": "string",
+          "required": true,
+          "description": "Workflow UUID (settings_uuid).",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "didit.update_workflow",
+      "description": "Update a workflow (partial \u2014 send only the fields to change; same field set as create_workflow, e.g. a replacement `features` array, workflow_label, status, is_default). FREE.",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/workflows/{workflow_id}/"
+      },
+      "params": [
+        {
+          "name": "workflow_id",
+          "type": "string",
+          "required": true,
+          "description": "Workflow UUID.",
+          "in": "path"
+        },
+        {
+          "name": "workflow_label",
+          "type": "string",
+          "required": false,
+          "description": "New display name.",
+          "in": "body"
+        },
+        {
+          "name": "features",
+          "type": "object",
+          "required": false,
+          "description": "Replacement features array ({feature, config?} items) \u2014 see create_workflow.",
+          "in": "body"
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "description": "draft | published.",
+          "in": "body"
+        },
+        {
+          "name": "is_default",
+          "type": "bool",
+          "required": false,
+          "description": "Set as the default workflow.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.delete_workflow",
+      "description": "Delete a workflow. FREE. Existing sessions are unaffected. Returns 204.",
+      "latency": "fast",
+      "http": {
+        "verb": "DELETE",
+        "path": "/workflows/{workflow_id}/"
+      },
+      "params": [
+        {
+          "name": "workflow_id",
+          "type": "string",
+          "required": true,
+          "description": "Workflow UUID.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "didit.create_session",
+      "description": "Start a hosted verification session for a user and get a URL to send them to. This is Didit's recommended path for ID/liveness/face-match/AML/PoA/etc. \u2014 the user completes everything at the hosted URL, so you never handle document images yourself. COST is the sum of the features the workflow enables (e.g. a full KYC bundle \u2248 $0.33/check; 500 full-KYC checks/month are free), charged to your Didit balance when the session runs. Returns {session_id, session_token, url, status}. Poll didit.get_decision or set a webhook for the result. Nested objects (contact_details, expected_details) are passed as JSON objects.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/session/"
+      },
+      "params": [
+        {
+          "name": "workflow_id",
+          "type": "string",
+          "required": true,
+          "description": "Workflow UUID from didit.create_workflow.",
+          "in": "body"
+        },
+        {
+          "name": "vendor_data",
+          "type": "string",
+          "required": false,
+          "description": "Your own user identifier (ties the session to a user).",
+          "in": "body"
+        },
+        {
+          "name": "callback",
+          "type": "string",
+          "required": false,
+          "description": "Redirect URL after verification (Didit appends verificationSessionId + status).",
+          "in": "body"
+        },
+        {
+          "name": "callback_method",
+          "type": "string",
+          "required": false,
+          "description": "initiator | completer | both.",
+          "in": "body"
+        },
+        {
+          "name": "metadata",
+          "type": "string",
+          "required": false,
+          "description": "Custom JSON string stored with the session.",
+          "in": "body"
+        },
+        {
+          "name": "language",
+          "type": "string",
+          "required": false,
+          "description": "ISO 639-1 UI language.",
+          "in": "body"
+        },
+        {
+          "name": "contact_details",
+          "type": "object",
+          "required": false,
+          "description": "{email, phone (E.164), send_notification_emails, email_lang} to pre-fill contact steps.",
+          "in": "body"
+        },
+        {
+          "name": "expected_details",
+          "type": "object",
+          "required": false,
+          "description": "Expected {first_name,last_name,date_of_birth,gender,nationality,id_country,poa_country,address,identification_number,ip_address} \u2014 mismatch raises a warning.",
+          "in": "body"
+        },
+        {
+          "name": "portrait_image",
+          "type": "string",
+          "required": false,
+          "description": "Base64 reference portrait (max 1MB) for biometric_authentication workflows.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.get_decision",
+      "description": "Get the full decision and extracted data for a session \u2014 status plus id_verifications, liveness_checks, face_matches, aml_screenings, phone/email verifications, poa_verifications, database_validations, ip_analyses, and reviews. FREE (reading results). Image URLs in the response expire after 60 minutes. Statuses: Not Started | In Progress | In Review | Approved | Declined | Abandoned | Expired | Resubmitted.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/session/{session_id}/decision/"
+      },
+      "params": [
+        {
+          "name": "session_id",
+          "type": "string",
+          "required": true,
+          "description": "Session id from didit.create_session.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "didit.list_sessions",
+      "description": "List/filter your sessions (paginated). FREE.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/sessions/"
+      },
+      "params": [
+        {
+          "name": "vendor_data",
+          "type": "string",
+          "required": false,
+          "description": "Filter by your user identifier.",
+          "in": "query"
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "description": "Filter by status (Approved, Declined, In Review, ...).",
+          "in": "query"
+        },
+        {
+          "name": "country",
+          "type": "string",
+          "required": false,
+          "description": "Filter by ISO 3166-1 alpha-3 country code.",
+          "in": "query"
+        },
+        {
+          "name": "workflow_id",
+          "type": "string",
+          "required": false,
+          "description": "Filter by workflow UUID.",
+          "in": "query"
+        },
+        {
+          "name": "offset",
+          "type": "int",
+          "required": false,
+          "description": "Items to skip (default 0).",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "int",
+          "required": false,
+          "description": "Max items to return (default 20).",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "didit.update_session_status",
+      "description": "Manually override a session's status (approve/decline/resubmit) \u2014 the programmatic-review action. FREE. For Resubmitted, pass nodes_to_resubmit; the session must be Declined, In Review, or Abandoned.",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/session/{session_id}/update-status/"
+      },
+      "params": [
+        {
+          "name": "session_id",
+          "type": "string",
+          "required": true,
+          "description": "Session id.",
+          "in": "path"
+        },
+        {
+          "name": "new_status",
+          "type": "string",
+          "required": true,
+          "description": "Approved | Declined | Resubmitted.",
+          "in": "body"
+        },
+        {
+          "name": "comment",
+          "type": "string",
+          "required": false,
+          "description": "Reason for the change.",
+          "in": "body"
+        },
+        {
+          "name": "send_email",
+          "type": "bool",
+          "required": false,
+          "description": "Email the user about the change.",
+          "in": "body"
+        },
+        {
+          "name": "email_address",
+          "type": "string",
+          "required": false,
+          "description": "Required when send_email is true.",
+          "in": "body"
+        },
+        {
+          "name": "email_language",
+          "type": "string",
+          "required": false,
+          "description": "Email language (default en).",
+          "in": "body"
+        },
+        {
+          "name": "nodes_to_resubmit",
+          "type": "object",
+          "required": false,
+          "description": "For Resubmitted: [{node_id, feature}] list of steps to redo.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.delete_session",
+      "description": "Permanently delete a session and all its data. FREE. Returns 204.",
+      "latency": "fast",
+      "http": {
+        "verb": "DELETE",
+        "path": "/session/{session_id}/delete/"
+      },
+      "params": [
+        {
+          "name": "session_id",
+          "type": "string",
+          "required": true,
+          "description": "Session id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "didit.batch_delete_sessions",
+      "description": "Delete many sessions at once by number (or all). FREE.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/sessions/delete/"
+      },
+      "params": [
+        {
+          "name": "session_numbers",
+          "type": "object",
+          "required": false,
+          "description": "Array of session numbers to delete.",
+          "in": "body"
+        },
+        {
+          "name": "delete_all",
+          "type": "bool",
+          "required": false,
+          "description": "Delete ALL sessions (use with care).",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.share_session",
+      "description": "Generate a share_token so a partner can import a finished session (B2B KYC reuse). FREE. Works only for finished sessions.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/session/{session_id}/share/"
+      },
+      "params": [
+        {
+          "name": "session_id",
+          "type": "string",
+          "required": true,
+          "description": "Session id (must be finished).",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "didit.import_session",
+      "description": "Import a session shared by a partner via its share_token. FREE.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/session/import-shared/"
+      },
+      "params": [
+        {
+          "name": "share_token",
+          "type": "string",
+          "required": true,
+          "description": "Token from the sharing partner.",
+          "in": "body"
+        },
+        {
+          "name": "trust_review",
+          "type": "bool",
+          "required": true,
+          "description": "true keeps the original status; false sets it to In Review.",
+          "in": "body"
+        },
+        {
+          "name": "workflow_id",
+          "type": "string",
+          "required": true,
+          "description": "Your workflow id to attach it to.",
+          "in": "body"
+        },
+        {
+          "name": "vendor_data",
+          "type": "string",
+          "required": false,
+          "description": "Your user identifier.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.list_reviews",
+      "description": "List the manual-review activity for a session (status changes, notes). FREE.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/sessions/{session_id}/reviews/"
+      },
+      "params": [
+        {
+          "name": "session_id",
+          "type": "string",
+          "required": true,
+          "description": "Session id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "didit.create_review",
+      "description": "Add a manual review decision to a session (Approved/Declined/In Review). FREE.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/sessions/{session_id}/reviews/"
+      },
+      "params": [
+        {
+          "name": "session_id",
+          "type": "string",
+          "required": true,
+          "description": "Session id.",
+          "in": "path"
+        },
+        {
+          "name": "new_status",
+          "type": "string",
+          "required": true,
+          "description": "Approved | Declined | In Review.",
+          "in": "body"
+        },
+        {
+          "name": "comment",
+          "type": "string",
+          "required": false,
+          "description": "Review note.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.aml",
+      "description": "Screen a person or company against sanctions, PEP, and adverse-media watchlists (standalone, no session). COST $0.20/check on your Didit balance. Returns matches with scores and categories.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/aml/"
+      },
+      "params": [
+        {
+          "name": "full_name",
+          "type": "string",
+          "required": true,
+          "description": "Full name to screen.",
+          "in": "body"
+        },
+        {
+          "name": "entity_type",
+          "type": "string",
+          "required": false,
+          "description": "person | company.",
+          "in": "body"
+        },
+        {
+          "name": "date_of_birth",
+          "type": "string",
+          "required": false,
+          "description": "YYYY-MM-DD, narrows person matches.",
+          "in": "body"
+        },
+        {
+          "name": "country",
+          "type": "string",
+          "required": false,
+          "description": "ISO alpha-3 nationality/registration country.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.database_validation",
+      "description": "Cross-check identity fields against government / authoritative databases (standalone). COST from $0.05/check (1x1, single source) to $0.30 (2x2, two-source cross-validation); varies by country/source. Covers 1,000+ sources across 18+ countries.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/database-validation/"
+      },
+      "params": [
+        {
+          "name": "issuing_state",
+          "type": "string",
+          "required": true,
+          "description": "ISO country whose database to check.",
+          "in": "body"
+        },
+        {
+          "name": "first_name",
+          "type": "string",
+          "required": true,
+          "description": "Given name.",
+          "in": "body"
+        },
+        {
+          "name": "last_name",
+          "type": "string",
+          "required": true,
+          "description": "Family name.",
+          "in": "body"
+        },
+        {
+          "name": "date_of_birth",
+          "type": "string",
+          "required": false,
+          "description": "YYYY-MM-DD.",
+          "in": "body"
+        },
+        {
+          "name": "identification_number",
+          "type": "string",
+          "required": false,
+          "description": "National/personal/tax number where required.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.email_send",
+      "description": "Send a one-time verification code to an email address. Part of email verification ($0.03 per completed verification, charged to your Didit balance).",
+      "latency": "fast",
+      "http": {
+        "verb": "POST",
+        "path": "/email/send/"
+      },
+      "params": [
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "description": "Email address to verify.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.email_check",
+      "description": "Verify the email OTP the user received. Completes an email verification ($0.03).",
+      "latency": "fast",
+      "http": {
+        "verb": "POST",
+        "path": "/email/check/"
+      },
+      "params": [
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "description": "Same email as email_send.",
+          "in": "body"
+        },
+        {
+          "name": "code",
+          "type": "string",
+          "required": true,
+          "description": "The OTP code the user received.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.phone_send",
+      "description": "Send a one-time code by SMS / WhatsApp / Telegram. Part of phone verification (from $0.03 per completed verification, varies by channel).",
+      "latency": "fast",
+      "http": {
+        "verb": "POST",
+        "path": "/phone/send/"
+      },
+      "params": [
+        {
+          "name": "phone",
+          "type": "string",
+          "required": true,
+          "description": "Phone number in E.164 format.",
+          "in": "body"
+        },
+        {
+          "name": "channel",
+          "type": "string",
+          "required": true,
+          "description": "sms | whatsapp | telegram.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.phone_check",
+      "description": "Verify the phone OTP the user received. Completes a phone verification (from $0.03).",
+      "latency": "fast",
+      "http": {
+        "verb": "POST",
+        "path": "/phone/check/"
+      },
+      "params": [
+        {
+          "name": "phone",
+          "type": "string",
+          "required": true,
+          "description": "Same phone as phone_send.",
+          "in": "body"
+        },
+        {
+          "name": "code",
+          "type": "string",
+          "required": true,
+          "description": "The OTP code the user received.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.blocklist_add",
+      "description": "Add a session's face/document/phone/email to your blocklist so future matches auto-flag (FACE_IN_BLOCKLIST, etc.). FREE.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/blocklist/add/"
+      },
+      "params": [
+        {
+          "name": "session_id",
+          "type": "string",
+          "required": true,
+          "description": "Session to blocklist items from.",
+          "in": "body"
+        },
+        {
+          "name": "blocklist_face",
+          "type": "bool",
+          "required": false,
+          "description": "Block the biometric face template.",
+          "in": "body"
+        },
+        {
+          "name": "blocklist_document",
+          "type": "bool",
+          "required": false,
+          "description": "Block the document fingerprint.",
+          "in": "body"
+        },
+        {
+          "name": "blocklist_phone",
+          "type": "bool",
+          "required": false,
+          "description": "Block the phone number.",
+          "in": "body"
+        },
+        {
+          "name": "blocklist_email",
+          "type": "bool",
+          "required": false,
+          "description": "Block the email address.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.blocklist_remove",
+      "description": "Remove items from your blocklist. FREE.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/blocklist/remove/"
+      },
+      "params": [
+        {
+          "name": "session_id",
+          "type": "string",
+          "required": true,
+          "description": "Session whose items to unblock.",
+          "in": "body"
+        },
+        {
+          "name": "unblock_face",
+          "type": "bool",
+          "required": false,
+          "description": "Unblock the face template.",
+          "in": "body"
+        },
+        {
+          "name": "unblock_document",
+          "type": "bool",
+          "required": false,
+          "description": "Unblock the document.",
+          "in": "body"
+        },
+        {
+          "name": "unblock_phone",
+          "type": "bool",
+          "required": false,
+          "description": "Unblock the phone.",
+          "in": "body"
+        },
+        {
+          "name": "unblock_email",
+          "type": "bool",
+          "required": false,
+          "description": "Unblock the email.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.blocklist_list",
+      "description": "List your blocklisted items. FREE.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/blocklist/"
+      },
+      "params": [
+        {
+          "name": "item_type",
+          "type": "string",
+          "required": false,
+          "description": "face | document | phone | email (omit for all).",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "didit.create_questionnaire",
+      "description": "Create a custom form (7 element types) to attach to a questionnaire_verification workflow. FREE.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/questionnaires/"
+      },
+      "params": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "description": "Form title.",
+          "in": "body"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "Shown to users.",
+          "in": "body"
+        },
+        {
+          "name": "default_language",
+          "type": "string",
+          "required": false,
+          "description": "Default language code.",
+          "in": "body"
+        },
+        {
+          "name": "languages",
+          "type": "object",
+          "required": false,
+          "description": "Array of supported language codes.",
+          "in": "body"
+        },
+        {
+          "name": "form_elements",
+          "type": "object",
+          "required": true,
+          "description": "Array of question objects ({element_type, label, is_required, options}).",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.list_questionnaires",
+      "description": "List your questionnaires. FREE.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/questionnaires/"
+      },
+      "params": []
+    },
+    {
+      "name": "didit.get_questionnaire",
+      "description": "Get one questionnaire. FREE.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/questionnaires/{questionnaire_id}/"
+      },
+      "params": [
+        {
+          "name": "questionnaire_id",
+          "type": "string",
+          "required": true,
+          "description": "Questionnaire UUID.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "didit.update_questionnaire",
+      "description": "Update a questionnaire (partial). FREE.",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/questionnaires/{questionnaire_id}/"
+      },
+      "params": [
+        {
+          "name": "questionnaire_id",
+          "type": "string",
+          "required": true,
+          "description": "Questionnaire UUID.",
+          "in": "path"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": false,
+          "description": "New title.",
+          "in": "body"
+        },
+        {
+          "name": "form_elements",
+          "type": "object",
+          "required": false,
+          "description": "Replacement question objects.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.delete_questionnaire",
+      "description": "Delete a questionnaire. FREE. Returns 204.",
+      "latency": "fast",
+      "http": {
+        "verb": "DELETE",
+        "path": "/questionnaires/{questionnaire_id}/"
+      },
+      "params": [
+        {
+          "name": "questionnaire_id",
+          "type": "string",
+          "required": true,
+          "description": "Questionnaire UUID.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "didit.list_users",
+      "description": "List verified individuals (grouped by vendor_data) with status and session counts. FREE.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/users/"
+      },
+      "params": [
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "description": "Approved | Declined | In Review | Pending.",
+          "in": "query"
+        },
+        {
+          "name": "search",
+          "type": "string",
+          "required": false,
+          "description": "Search by name or identifier.",
+          "in": "query"
+        },
+        {
+          "name": "country",
+          "type": "string",
+          "required": false,
+          "description": "ISO 3166-1 alpha-3.",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "int",
+          "required": false,
+          "description": "Results per page (max 200).",
+          "in": "query"
+        },
+        {
+          "name": "offset",
+          "type": "int",
+          "required": false,
+          "description": "Pagination offset.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "didit.get_user",
+      "description": "Get one user by your vendor_data. FREE.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/users/{vendor_data}/"
+      },
+      "params": [
+        {
+          "name": "vendor_data",
+          "type": "string",
+          "required": true,
+          "description": "Your user identifier.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "didit.update_user",
+      "description": "Update a user's display name / manual status / metadata. FREE.",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/users/{vendor_data}/"
+      },
+      "params": [
+        {
+          "name": "vendor_data",
+          "type": "string",
+          "required": true,
+          "description": "Your user identifier.",
+          "in": "path"
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "required": false,
+          "description": "Custom display name.",
+          "in": "body"
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "description": "Manual override: Approved | Declined | In Review.",
+          "in": "body"
+        },
+        {
+          "name": "metadata",
+          "type": "object",
+          "required": false,
+          "description": "Custom JSON metadata.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.batch_delete_users",
+      "description": "Delete many users by vendor_data (or all). FREE.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/users/delete/"
+      },
+      "params": [
+        {
+          "name": "vendor_data_list",
+          "type": "object",
+          "required": false,
+          "description": "Array of vendor_data strings.",
+          "in": "body"
+        },
+        {
+          "name": "delete_all",
+          "type": "bool",
+          "required": false,
+          "description": "Delete ALL users (use with care).",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "didit.get_webhook",
+      "description": "Get your webhook configuration (url, version, HMAC secret_shared_key, capture_method). FREE.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/webhook/"
+      },
+      "params": []
+    },
+    {
+      "name": "didit.update_webhook",
+      "description": "Set/rotate your webhook config programmatically \u2014 no console needed. FREE.",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/webhook/"
+      },
+      "params": [
+        {
+          "name": "webhook_url",
+          "type": "string",
+          "required": false,
+          "description": "Notification URL (null to disable).",
+          "in": "body"
+        },
+        {
+          "name": "webhook_version",
+          "type": "string",
+          "required": false,
+          "description": "v1 | v2 | v3 (v3 recommended).",
+          "in": "body"
+        },
+        {
+          "name": "rotate_secret_key",
+          "type": "bool",
+          "required": false,
+          "description": "true generates a new HMAC secret (old one invalidated).",
+          "in": "body"
+        },
+        {
+          "name": "capture_method",
+          "type": "string",
+          "required": false,
+          "description": "mobile | desktop | both.",
+          "in": "body"
+        },
+        {
+          "name": "data_retention_months",
+          "type": "int",
+          "required": false,
+          "description": "1\u2013120 months, or null for unlimited.",
+          "in": "body"
+        }
+      ]
+    }
+  ],
+  "listing": {
+    "display_name": "Didit",
+    "tagline": "One API for identity and fraud \u2014 KYC, liveness, face match, AML, and more, with a no-broker key you mint in one call.",
+    "app_description": "**Didit is one API for identity and fraud** \u2014 KYC/ID verification, liveness, face match, AML screening, proof of address, database validation, and email/phone OTP, wrapped as a single Pilot app. It fronts Didit's full platform: **hosted verification sessions**, reusable **workflows**, **users**, **billing**, **blocklists**, **questionnaires**, and **webhooks** \u2014 40 methods in all.\n\n## No broker \u2014 your own key, minted in two calls\n\nUnlike managed apps, this app holds **no shared key** and routes through **no Pilot broker**. Instead it self-provisions a Didit account that is entirely *yours*, keyed by *your* email:\n\n1. **`didit.signup` `{email}`** registers you with Didit; Didit emails your inbox a 6-character code. (Use a real inbox \u2014 Didit rejects disposable mailboxes. The account email + password are cached locally so the account stays recoverable.)\n2. **`didit.verify` `{code}`** confirms the code and writes the returned `api_key` to `$APP/secrets.json`.\n\nAfter that, **every other method sends your key as `x-api-key` automatically** \u2014 you never handle it. Verifications bill to **your** Didit balance (top up with `didit.billing_topup`); Pilot adds no markup and sees no credentials. Each new account includes Didit's **500 free full-KYC checks/month**, and account creation, management, sessions CRUD, users, billing, blocklists, questionnaires and webhooks are all **free** \u2014 you only pay per verification you actually run.\n\n## The fast path\n\n1. `didit.signup` `{email:\"you@example.com\"}` \u2192 check that inbox for the code.\n2. `didit.verify` `{code:\"A3K9F2\"}` \u2192 your key is cached.\n3. `didit.create_workflow` `{workflow_label:\"KYC\", features:[{feature:\"OCR\"},{feature:\"LIVENESS\"},{feature:\"FACE_MATCH\"}]}` \u2192 get `uuid`.\n4. `didit.create_session` `{workflow_id, vendor_data:\"user-123\"}` \u2192 send the user to the returned `url`.\n5. `didit.get_decision` `{session_id}` (or a webhook) \u2192 read the Approved/Declined result and extracted data.\n\n## What each area does\n\n- **Sessions** \u2014 hosted flows where the user completes verification at a Didit URL, so you never handle document images: `create_session`, `get_decision`, `list_sessions`, `update_session_status` (approve/decline/resubmit), `delete_session`, `batch_delete_sessions`, `share_session` / `import_session` (B2B KYC reuse), `list_reviews`, `create_review`.\n- **Workflows** \u2014 templates built from an ordered `features` array (`OCR`, `LIVENESS`, `FACE_MATCH`, `AML`, `PROOF_OF_ADDRESS`, `PHONE_VERIFICATION`, `EMAIL_VERIFICATION`, `DATABASE_VALIDATION`, `IP_ANALYSIS`, `AGE_ESTIMATION`, `NFC`, `QUESTIONNAIRE`, `KYB_*`), each with an optional per-feature `config`: `create_workflow`, `list_workflows`, `get_workflow`, `update_workflow`, `delete_workflow`.\n- **Standalone checks (JSON, no session)** \u2014 `aml` (sanctions/PEP/adverse-media, $0.20), `database_validation` (gov sources, from $0.05).\n- **Contact** \u2014 `email_send`/`email_check` ($0.03) and `phone_send`/`phone_check` (from $0.03) OTP verification.\n- **Billing** \u2014 `billing_balance`, `billing_topup` (Stripe checkout URL).\n- **Governance** \u2014 `blocklist_*` (auto-flag repeat faces/docs/phones/emails), `questionnaire_*` (custom forms), `users_*` (people grouped by your `vendor_data`), `get_webhook`/`update_webhook` (set + rotate the HMAC secret programmatically).\n\n## Pricing\n\nPay-per-check on **your** Didit balance \u2014 no Pilot markup. See the full rate card in `didit.help`. Highlights: full KYC bundle **$0.33/check** (first **500/month free**), ID verification $0.15, passive liveness $0.10, face match $0.05, **face search free**, AML $0.20, PoA $0.20, email/phone from $0.03. Image-upload APIs (direct ID scan, liveness, face match, face search, age estimation, PoA) run through the **hosted session** flow rather than as direct methods.\n\n## Notes\n\n- Two hosts, one app: signup uses `apx.didit.me`; everything else uses `verification.didit.me`. The adapter only ever dials Didit and the temp-mail provider used for the one-time OTP.\n- Plain request/response REST \u2014 no websockets, no async jobs. Rate limits: ~600 session-creates/min, 300/min per other method; the account OTP register is 5/IP/hour.\n- Errors surface verbatim: `401` (run `didit.signup` first), `403` (top up credits), `429` (back off).\n",
+    "license": "Proprietary",
+    "homepage": "https://didit.me",
+    "source_url": "https://github.com/didit-protocol/skills",
+    "categories": [
+      "identity",
+      "verification",
+      "compliance",
+      "security",
+      "kyc"
+    ],
+    "keywords": [
+      "kyc",
+      "identity",
+      "verification",
+      "aml",
+      "liveness",
+      "face-match",
+      "biometrics",
+      "proof-of-address",
+      "sanctions",
+      "pep",
+      "onboarding",
+      "fraud",
+      "kyb",
+      "otp",
+      "didit"
+    ]
+  },
+  "vendor": {
+    "name": "Didit",
+    "url": "https://didit.me",
+    "contact": "hello@didit.me",
+    "agent_usage": "An agent onboards once with two calls \u2014 didit.signup {email} then didit.verify {code} (the code Didit emails the user) \u2014 which mints and caches its own Didit API key locally (no broker, no shared key). It then creates a workflow and a hosted session, hands the user the returned URL, and polls didit.get_decision (or receives a webhook) for the Approved/Declined result \u2014 running KYC/ID, liveness, face match, AML, proof-of-address, and email/phone OTP without ever handling document images. Standalone JSON checks (aml, database_validation, email/phone OTP) run directly. Verifications bill to the agent's own Didit balance; account/session/management calls are free.",
+    "capabilities": "signup + verify (no-broker two-step self-provision of a Didit key with your own email); workflows CRUD; sessions (create/get-decision/list/update-status/delete/batch-delete/share/import/reviews); standalone aml + database_validation; email + phone OTP verification; billing balance + top-up; blocklist add/remove/list; questionnaires CRUD; users list/get/update/batch-delete; webhook get/update. Documents in help: ID verification, NFC, liveness, face match, face search, age estimation, proof of address, KYB, transaction monitoring, wallet screening \u2014 with per-endpoint pricing."
+  },
+  "pricing": {
+    "model": "Pay-per-check on YOUR Didit balance (BYO key minted by didit.signup + didit.verify \u2014 no Pilot broker, no markup). Account creation, management, sessions/workflows/users/billing/blocklist/questionnaires/webhooks are FREE; you pay only for verifications you run. Every new account includes Didit's 500 free full-KYC checks/month; face search is always free.",
+    "credit_unit": "USD charged to your Didit balance (top up via didit.billing_topup, min $50)",
+    "free_credits": 0,
+    "cloud_rate_card": {
+      "0 \u00b7 signup / account / workflows / sessions-CRUD / users / billing / blocklist / questionnaires / webhooks": "FREE \u2014 you only pay per verification you run",
+      "1 \u00b7 Full KYC bundle (ID + passive liveness + face match + device&IP)": "$0.33/check \u00b7 first 500/month FREE",
+      "2 \u00b7 ID verification (OCR + MRZ + authenticity, 4000+ docs / 220+ countries)": "$0.15/check",
+      "3 \u00b7 NFC ePassport chip reading (mobile only)": "$0.15/check",
+      "4 \u00b7 Passive liveness": "$0.10/check",
+      "5 \u00b7 Active liveness (3D / flashing)": "$0.15/check",
+      "6 \u00b7 Face match 1:1 (selfie \u2194 document)": "$0.05/check",
+      "7 \u00b7 Face search 1:N (across your verified sessions)": "FREE",
+      "8 \u00b7 Age estimation (biometric)": "$0.10/check",
+      "9 \u00b7 Biometric authentication (re-verify returning user)": "$0.10/auth",
+      "10 \u00b7 Proof of address": "$0.20/check",
+      "11 \u00b7 AML screening (sanctions / PEP / adverse media)": "$0.20/check",
+      "12 \u00b7 AML ongoing monitoring": "$0.07/user/year",
+      "13 \u00b7 Device & IP analysis": "$0.03/check",
+      "14 \u00b7 Database validation (gov sources)": "from $0.05/check (1x1) \u00b7 $0.30 (2x2)",
+      "15 \u00b7 Email verification (OTP)": "$0.03/check",
+      "16 \u00b7 Phone verification (SMS / WhatsApp / Telegram OTP)": "from $0.03/check",
+      "17 \u00b7 Hosted session": "= sum of the features its workflow enables (billed when the user completes it)",
+      "18 \u00b7 KYB business verification": "$2.00/business (+ $0.20/doc)",
+      "19 \u00b7 Transaction monitoring": "$0.02/transaction",
+      "20 \u00b7 Wallet screening / KYT": "$0.15/screening",
+      "note \u00b7 image APIs (ID scan, liveness, face match, face search, age, PoA)": "run these via didit.create_session (hosted flow) \u2014 they upload images, so they aren't direct methods here"
+    }
+  }
+}

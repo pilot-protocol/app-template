@@ -276,6 +276,38 @@ func (c *Config) Managed() bool {
 // io.pilot.smol model). Provisioned apps write that key to $APP/secrets.json.
 func (c *Config) Provisioned() bool { return c.Backend.Auth == "provisioned" }
 
+// HasSignup reports whether any method self-provisions a per-user key with no
+// broker (a SignupRoute). Such an app writes the minted key to $APP/secrets.json
+// locally, so — like a provisioned app — it needs fs.read+fs.write on that file.
+func (c *Config) HasSignup() bool {
+	for _, m := range c.Methods {
+		if m.Signup != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// SignupHosts returns the extra hosts a no-broker signup adapter must dial on
+// top of the backend base_url: the register/verify auth endpoints. Deduped,
+// excluding the base_url host (already granted via HasHTTPMethods).
+func (c *Config) SignupHosts() []string {
+	base := c.AdapterBackendHost()
+	seen := map[string]bool{base: true}
+	var out []string
+	for _, m := range c.Methods {
+		if m.Signup == nil {
+			continue
+		}
+		if u, err := url.Parse(m.Signup.URL); err == nil && u.Hostname() != "" && !seen[u.Hostname()] {
+			seen[u.Hostname()] = true
+			out = append(out, u.Hostname())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // IsHybrid reports whether the adapter runs some methods via the local CLI and
 // routes others to the broker (per-method cli vs http route).
 func (c *Config) IsHybrid() bool { return c.Backend.Type == "hybrid" }
@@ -447,9 +479,44 @@ type Method struct {
 	HTTP      *HTTPRoute        `yaml:"http"`      // http backend route
 	CLI       *CLIRoute         `yaml:"cli"`       // cli backend route
 	Local     *LocalRoute       `yaml:"local"`     // local metadata route (no backend call)
+	Signup    *SignupRoute      `yaml:"signup"`    // no-broker self-signup route (mints + saves a per-user key)
 	Params    map[string]string `yaml:"params"`    // name -> human description, for help
 	Roundtrip string            `yaml:"roundtrip"` // measured warm roundtrip, for help
 }
+
+// SignupRoute makes a method self-provision a per-user API key WITHOUT a Pilot
+// broker: the adapter drives the backend's own programmatic account-creation
+// handshake and writes the resulting key into $APP/secrets.json, from which the
+// byo ${TOKEN} headers then resolve it on every subsequent call. It is the
+// keyless, broker-free counterpart to the provisioned (broker-minted) model.
+//
+// The handshake is a two-call flow keyed by the user's OWN email, so the backend
+// delivers the one-time code to a mailbox the user controls (backends routinely
+// suppress disposable mailboxes, so an app-provisioned inbox is not reliable):
+//
+//	Step "register": POST URL {email, password} — starts registration; the
+//	    backend emails the user a one-time code. The handler caches the account
+//	    email + password (EmailKey/PasswordKey) so the account is recoverable and
+//	    the verify step can default the email. NO key is minted yet.
+//	Step "verify":   POST URL {email, code} — the handler extracts the key at
+//	    KeyPath from the JSON response and merges {SecretKey:key} into
+//	    $APP/secrets.json (write-if-absent). After this, every other method
+//	    authenticates automatically.
+//
+// Both steps hit the backend's auth host (URL), which is typically distinct from
+// the byo base_url — SignupHosts adds the net.dial grant for it.
+type SignupRoute struct {
+	Step        string `yaml:"step"`         // "register" (send OTP) | "verify" (redeem OTP → mint key)
+	URL         string `yaml:"url"`          // the endpoint POSTed for this step
+	KeyPath     string `yaml:"key_path"`     // verify: dotted path to the key in the response (default application.api_key)
+	SecretKey   string `yaml:"secret_key"`   // verify: secrets.json key the minted key is stored under (e.g. DIDIT_API_KEY)
+	EmailKey    string `yaml:"email_key"`    // secrets.json key for the account email (default DIDIT_ACCOUNT_EMAIL)
+	PasswordKey string `yaml:"password_key"` // secrets.json key for the account password (default DIDIT_ACCOUNT_PASSWORD)
+}
+
+// SignupStep classifies a signup route. IsVerify is the leg that mints + caches
+// the key; the other leg only starts registration.
+func (s *SignupRoute) IsVerify() bool { return strings.EqualFold(s.Step, "verify") }
 
 // LocalRoute makes a method run entirely on the host with NO backend call: it
 // reads a local JSON metadata file (see HTTPRoute.CaptureTo, which writes it) and
@@ -674,6 +741,21 @@ func (c *Config) Resolve() {
 			m.HTTP.Verb = strings.ToUpper(m.HTTP.Verb)
 			m.HTTP.resolveParamLocs()
 		}
+		if m.Signup != nil {
+			if m.Signup.Step == "" {
+				m.Signup.Step = "register"
+			}
+			m.Signup.Step = strings.ToLower(m.Signup.Step)
+			if m.Signup.KeyPath == "" {
+				m.Signup.KeyPath = "application.api_key"
+			}
+			if m.Signup.EmailKey == "" {
+				m.Signup.EmailKey = "ACCOUNT_EMAIL"
+			}
+			if m.Signup.PasswordKey == "" {
+				m.Signup.PasswordKey = "ACCOUNT_PASSWORD"
+			}
+		}
 	}
 }
 
@@ -822,6 +904,10 @@ func (c *Config) Validate() []error {
 			switch {
 			case m.Local != nil && m.HTTP != nil:
 				errs = append(errs, fmt.Errorf("methods[%d] (%s): a method cannot declare both a local and an http route", i, m.Name))
+			case m.Signup != nil && (m.HTTP != nil || m.Local != nil || m.CLI != nil):
+				errs = append(errs, fmt.Errorf("methods[%d] (%s): a signup method must not also declare an http/cli/local route", i, m.Name))
+			case m.Signup != nil:
+				errs = append(errs, c.validateSignupMethod(i, m)...)
 			case m.Local != nil:
 				errs = append(errs, c.validateLocalMethod(i, m)...)
 			default:
@@ -857,6 +943,31 @@ func (c *Config) validateLocalMethod(i int, m Method) []error {
 	}
 	if m.HTTP != nil || m.CLI != nil {
 		errs = append(errs, fmt.Errorf("methods[%d] (%s): a local method must not also declare an http/cli route", i, m.Name))
+	}
+	return errs
+}
+
+// validateSignupMethod checks one no-broker signup route: a valid step, an https
+// URL, and — for the verify leg — the secrets key the minted key is stored under.
+// The app must be a byo http app (a signup route mints the key the byo ${TOKEN}
+// headers then resolve).
+func (c *Config) validateSignupMethod(i int, m Method) []error {
+	var errs []error
+	switch m.Signup.Step {
+	case "register", "verify":
+	default:
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.step %q must be register|verify", i, m.Name, m.Signup.Step))
+	}
+	if strings.TrimSpace(m.Signup.URL) == "" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.url is required", i, m.Name))
+	} else if u, err := url.Parse(m.Signup.URL); err != nil || u.Scheme != "https" || u.Host == "" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.url %q must be an https URL", i, m.Name, m.Signup.URL))
+	}
+	if m.Signup.IsVerify() && strings.TrimSpace(m.Signup.SecretKey) == "" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): a verify signup step needs signup.secret_key (the secrets.json key the minted key is stored under)", i, m.Name))
+	}
+	if c.Managed() {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): a signup (no-broker) route cannot be combined with managed/provisioned auth", i, m.Name))
 	}
 	return errs
 }

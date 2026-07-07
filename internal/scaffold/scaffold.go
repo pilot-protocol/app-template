@@ -41,6 +41,11 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 		if cfg.Managed() {
 			files = append(files, file{filepath.Join("internal", "backend", "signer.go"), "signer.go.tmpl"})
 		}
+		// No-broker self-signup: emit the local register→OTP→verify→cache runtime
+		// next to main.go (package main) when any method declares a signup route.
+		if cfg.HasSignup() {
+			files = append(files, file{filepath.Join("cmd", cfg.BinaryName, "signup.go"), "signup.go.tmpl"})
+		}
 	case "cli":
 		files = append(files, file{filepath.Join("internal", "backend", "exec.go"), "client_cli.go.tmpl"})
 		// Native-binary delivery: emit the staging runtime only when the app

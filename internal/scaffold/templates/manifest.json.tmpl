@@ -15,10 +15,10 @@
   ],
   "grants": [
     {"cap": "fs.read", "target": "$APP/config.json"},
-{{- if or .Backend.NeedsSecrets .Provisioned}}
+{{- if or .Backend.NeedsSecrets .Provisioned .HasSignup}}
     {"cap": "fs.read", "target": "$APP/secrets.json"},
 {{- end}}
-{{- if .Provisioned}}
+{{- if or .Provisioned .HasSignup}}
     {"cap": "fs.write", "target": "$APP/secrets.json"},
 {{- end}}
 {{- if .Managed}}
@@ -27,6 +27,10 @@
 {{- if .HasHTTPMethods}}
     {"cap": "net.dial", "target": "{{.AdapterBackendHost}}",
      "if": {"kind": "rate", "params": {"per": "min", "limit": {{.Grants.RatePerMin}}}}},
+{{- end}}
+{{- range .SignupHosts}}
+    {"cap": "net.dial", "target": "{{.}}",
+     "if": {"kind": "rate", "params": {"per": "min", "limit": {{$.Grants.RatePerMin}}}}},
 {{- end}}
 {{- if .HasCLIMethods}}
     {"cap": "proc.exec", "target": "{{index .Backend.Command 0}}"},

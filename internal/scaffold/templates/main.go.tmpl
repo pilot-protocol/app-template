@@ -68,7 +68,7 @@ func main() {
 		log.Fatalf("{{.BinaryName}}: %v", err)
 	}
 {{- end}}
-	client, err := backend.New(backend.Config{BaseURL: cfg.BackendURL{{if .Backend.Headers}}, Headers: resolveHeaders(*manifestPath){{end}}{{if .Backend.X402}}, DaemonAddr: *addr{{end}}{{if .Managed}}, Sign: signer{{end}}})
+	client, err := backend.New(backend.Config{BaseURL: cfg.BackendURL{{if .Backend.Headers}}{{if .HasSignup}}, HeaderFunc: func() map[string]string { return resolveHeaders(*manifestPath) }{{else}}, Headers: resolveHeaders(*manifestPath){{end}}{{end}}{{if .Backend.X402}}, DaemonAddr: *addr{{end}}{{if .Managed}}, Sign: signer{{end}}})
 	if err != nil {
 		log.Fatalf("{{.BinaryName}}: backend config: %v", err)
 	}
@@ -122,7 +122,7 @@ func main() {
 
 	d := ipc.NewDispatcher()
 {{- if eq .Backend.Type "http"}}
-	registerHandlers(d, client, readAppVersion(*manifestPath), cfg.BackendURL)
+	registerHandlers(d, client, readAppVersion(*manifestPath), cfg.BackendURL{{if .HasSignup}}, *manifestPath{{end}})
 {{- else if eq .Backend.Type "hybrid"}}
 	registerHandlers(d, runner, cloudCli, readAppVersion(*manifestPath), cfg.BackendURL)
 {{- else}}
@@ -175,10 +175,25 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 // registerHandlers wires each IPC method to its backend call. Method names MUST
 // match the manifest's `exposes` list, or the daemon won't broker them.
 {{- if eq .Backend.Type "http"}}
-func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL string) {
+func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL{{if .HasSignup}}, manifestPath{{end}} string) {
 {{- range .Methods}}
 {{- if .Local}}
 	d.Register("{{.Name}}", localRead(expandHome("{{.Local.Store}}"))) // {{.Duration}} (local metadata)
+{{- else if .Signup}}
+{{- if .Signup.IsVerify}}
+	d.Register("{{.Name}}", signupVerifyHandler(signupVerifyConfig{
+		url:       {{printf "%q" .Signup.URL}},
+		keyPath:   {{printf "%q" .Signup.KeyPath}},
+		secretKey: {{printf "%q" .Signup.SecretKey}},
+		emailKey:  {{printf "%q" .Signup.EmailKey}},
+	}, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (no-broker self-signup: verify)
+{{- else}}
+	d.Register("{{.Name}}", signupRegisterHandler(signupRegisterConfig{
+		url:         {{printf "%q" .Signup.URL}},
+		emailKey:    {{printf "%q" .Signup.EmailKey}},
+		passwordKey: {{printf "%q" .Signup.PasswordKey}},
+	}, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (no-broker self-signup: register)
+{{- end}}
 {{- else}}
 	d.Register("{{.Name}}", {{if .HTTP.CaptureTo}}captureWrap(expandHome("{{.HTTP.CaptureTo}}"), {{end}}forward(c, route{
 		method: "{{.HTTP.Verb}}", pathTmpl: "{{.HTTP.Path}}", bodyVerb: {{.HTTP.BodyVerb}},
