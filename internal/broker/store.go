@@ -52,6 +52,14 @@ type ProvisionStore interface {
 	// what was debited in practice (callers only refund what they reserved).
 	Refund(app, caller string, n int)
 
+	// Settle debits n credits AFTER the fact, clamped to the available balance so
+	// it never rejects and never drives the balance below zero. Unlike Debit (a
+	// pre-flight reservation that fails when funds are short), Settle is used by the
+	// response-cost credit path where the true cost is only known from the partner
+	// response: the call already ran, so the debit must always apply. It returns the
+	// remaining balance. n <= 0 and an unprovisioned caller are no-ops.
+	Settle(app, caller string, n int) (remaining int, err error)
+
 	// Get returns the caller's provision record (for reading the current rotation
 	// counter + credit). exists is false for an unprovisioned caller.
 	Get(app, caller string) (rec ProvisionRecord, exists bool, err error)
@@ -167,6 +175,22 @@ func (s *MemStore) Refund(app, caller string, n int) {
 	if rec := s.prov[key(app, caller)]; rec != nil {
 		rec.Credits += n
 	}
+}
+
+func (s *MemStore) Settle(app, caller string, n int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec := s.prov[key(app, caller)]
+	if rec == nil {
+		return 0, nil
+	}
+	if n > 0 {
+		if n > rec.Credits {
+			n = rec.Credits // clamp: floor the balance at zero
+		}
+		rec.Credits -= n
+	}
+	return rec.Credits, nil
 }
 
 func (s *MemStore) Get(app, caller string) (ProvisionRecord, bool, error) {
