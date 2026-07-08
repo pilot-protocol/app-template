@@ -42,6 +42,93 @@ methods:
     http: {verb: GET, path: /billing/balance/}
 `
 
+// brokerSignupSpec is a byo http app whose signup is the fully-autonomous broker
+// step (one call, no email) plus an account reader.
+const brokerSignupSpec = `
+id: io.pilot.didit
+app_version: 1.0.0
+description: "Identity verification with broker-side autonomous signup."
+backend:
+  type: http
+  base_url: https://verification.didit.me/v3
+  auth: byo
+  headers:
+    x-api-key: "${DIDIT_API_KEY}"
+methods:
+  - name: didit.signup
+    summary: "Mint a Didit key via the broker — one call, no email."
+    duration: slow
+    signup:
+      step: broker
+      broker_url: https://broker.pilotprotocol.network/didit/signup
+      secret_key: DIDIT_API_KEY
+      email_key: DIDIT_ACCOUNT_EMAIL
+  - name: didit.account
+    summary: "Retrieve the cached account (email + key)."
+    duration: fast
+    signup:
+      step: account
+      secret_key: DIDIT_API_KEY
+      email_key: DIDIT_ACCOUNT_EMAIL
+  - name: didit.billing_balance
+    summary: "Check remaining credit balance."
+    duration: fast
+    http: {verb: GET, path: /billing/balance/}
+`
+
+func TestBrokerSignupGrantsAndCompiles(t *testing.T) {
+	cfg := parseSpec(t, brokerSignupSpec)
+	if !cfg.HasBrokerSignup() {
+		t.Fatal("HasBrokerSignup() should be true")
+	}
+	dir := t.TempDir()
+	if _, err := Generate(cfg, dir); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	mf, _ := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	for _, want := range []string{
+		`"cap": "key.sign", "target": "self"`,
+		`"cap": "fs.write", "target": "$APP/secrets.json"`,
+		`"target": "broker.pilotprotocol.network"`,
+		`"didit.signup"`, `"didit.account"`,
+	} {
+		if !strings.Contains(string(mf), want) {
+			t.Errorf("manifest missing %q", want)
+		}
+	}
+	for _, f := range []string{"broker_signup.go", "signup.go"} {
+		if _, err := os.Stat(filepath.Join(dir, "cmd", cfg.BinaryName, f)); err != nil {
+			t.Errorf("expected generated %s: %v", f, err)
+		}
+	}
+	// the signer.go (from the backend package) must be emitted for the broker call
+	if _, err := os.Stat(filepath.Join(dir, "internal", "backend", "signer.go")); err != nil {
+		t.Errorf("expected generated signer.go: %v", err)
+	}
+	if testing.Short() {
+		return
+	}
+	compileGenerated(t, dir)
+}
+
+// compileGenerated seeds go.sum and `go build ./...` the generated project.
+func compileGenerated(t *testing.T, dir string) {
+	t.Helper()
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not available")
+	}
+	if sum, err := os.ReadFile(filepath.Join("..", "..", "go.sum")); err == nil {
+		_ = os.WriteFile(filepath.Join(dir, "go.sum"), sum, 0o644)
+	}
+	cmd := exec.Command(goBin, "build", "./...")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated broker-signup project failed to compile: %v\n%s", err, out)
+	}
+}
+
 func TestSignupConfigResolvesDefaults(t *testing.T) {
 	cfg := parseSpec(t, signupSpec)
 	if !cfg.HasSignup() {

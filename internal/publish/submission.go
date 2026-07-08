@@ -156,17 +156,18 @@ type SubMethod struct {
 // $APP/secrets.json under SecretKey, from which the byo ${TOKEN} headers resolve
 // it). One SubSignup describes one leg, selected by Step.
 type SubSignup struct {
-	Step        string `json:"step"`         // "register" (send OTP) | "verify" (redeem OTP → mint key)
-	URL         string `json:"url"`          // the endpoint POSTed for this step
-	KeyPath     string `json:"key_path"`     // verify: dotted path to the key in the response (default application.api_key)
-	SecretKey   string `json:"secret_key"`   // verify: secrets.json key the minted key is stored under
+	Step        string `json:"step"`         // "register" | "verify" | "broker" | "account"
+	URL         string `json:"url"`          // register/verify: the provider endpoint POSTed
+	BrokerURL   string `json:"broker_url"`   // broker: the Pilot broker /signup endpoint (signed)
+	KeyPath     string `json:"key_path"`     // verify: dotted path to the key (default application.api_key)
+	SecretKey   string `json:"secret_key"`   // secrets.json key the minted key is stored under
 	EmailKey    string `json:"email_key"`    // secrets.json key for the account email (optional)
 	PasswordKey string `json:"password_key"` // secrets.json key for the account password (optional)
 }
 
-// HasSignup reports whether this method is a no-broker self-signup route.
+// HasSignup reports whether this method is a self-signup route (any step).
 func (m SubMethod) HasSignup() bool {
-	return m.Signup != nil && strings.TrimSpace(m.Signup.URL) != ""
+	return m.Signup != nil && strings.TrimSpace(m.Signup.Step) != ""
 }
 
 // SubLocal makes a method read a local JSON metadata file (no backend call) —
@@ -382,18 +383,36 @@ func validateSubLocalMethod(n string, m SubMethod) []string {
 // verify URLs, a secrets key, and no conflicting http/cli/local route.
 func validateSubSignupMethod(n string, m SubMethod) []string {
 	var e []string
+	https := func(field, raw string) {
+		if u, err := url.Parse(raw); err != nil || u.Scheme != "https" || u.Host == "" {
+			e = append(e, fmt.Sprintf("Method %q: signup.%s must be an https URL", n, field))
+		}
+	}
 	switch m.Signup.Step {
 	case "register", "verify":
+		if strings.TrimSpace(m.Signup.URL) == "" {
+			e = append(e, fmt.Sprintf("Method %q: signup.url is required", n))
+		} else {
+			https("url", m.Signup.URL)
+		}
+		if m.Signup.Step == "verify" && strings.TrimSpace(m.Signup.SecretKey) == "" {
+			e = append(e, fmt.Sprintf("Method %q: a verify signup step needs signup.secret_key", n))
+		}
+	case "broker":
+		if strings.TrimSpace(m.Signup.BrokerURL) == "" {
+			e = append(e, fmt.Sprintf("Method %q: a broker signup step needs signup.broker_url", n))
+		} else {
+			https("broker_url", m.Signup.BrokerURL)
+		}
+		if strings.TrimSpace(m.Signup.SecretKey) == "" {
+			e = append(e, fmt.Sprintf("Method %q: a broker signup step needs signup.secret_key", n))
+		}
+	case "account":
+		if strings.TrimSpace(m.Signup.SecretKey) == "" {
+			e = append(e, fmt.Sprintf("Method %q: an account step needs signup.secret_key", n))
+		}
 	default:
-		e = append(e, fmt.Sprintf("Method %q: signup.step must be register|verify", n))
-	}
-	if strings.TrimSpace(m.Signup.URL) == "" {
-		e = append(e, fmt.Sprintf("Method %q: signup.url is required", n))
-	} else if u, err := url.Parse(m.Signup.URL); err != nil || u.Scheme != "https" || u.Host == "" {
-		e = append(e, fmt.Sprintf("Method %q: signup.url must be an https URL", n))
-	}
-	if m.Signup.Step == "verify" && strings.TrimSpace(m.Signup.SecretKey) == "" {
-		e = append(e, fmt.Sprintf("Method %q: a verify signup step needs signup.secret_key", n))
+		e = append(e, fmt.Sprintf("Method %q: signup.step must be register|verify|broker|account", n))
 	}
 	if m.HasHTTP() || m.HasCLI() || m.HasLocal() {
 		e = append(e, fmt.Sprintf("Method %q: a signup method must not also declare an http/cli/local route", n))
@@ -613,6 +632,7 @@ func (s Submission) ToConfig() *scaffold.Config {
 			method.Signup = &scaffold.SignupRoute{
 				Step:        m.Signup.Step,
 				URL:         m.Signup.URL,
+				BrokerURL:   m.Signup.BrokerURL,
 				KeyPath:     m.Signup.KeyPath,
 				SecretKey:   m.Signup.SecretKey,
 				EmailKey:    m.Signup.EmailKey,

@@ -21,7 +21,7 @@
 {{- if or .Provisioned .HasSignup}}
     {"cap": "fs.write", "target": "$APP/secrets.json"},
 {{- end}}
-{{- if .Managed}}
+{{- if or .Managed .HasBrokerSignup}}
     {"cap": "key.sign", "target": "self"},
 {{- end}}
 {{- if .HasHTTPMethods}}

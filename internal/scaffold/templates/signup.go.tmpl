@@ -175,6 +175,28 @@ func signupVerifyHandler(sc signupVerifyConfig, manifestPath string, timeout tim
 	}
 }
 
+// accountConfig / accountHandler expose the cached account for retrieval: the
+// minted email + key are persistent in $APP/secrets.json, and this returns them
+// (the user owns their own key) plus a signed_up flag. Local, no backend call.
+type accountConfig struct {
+	secretKey string
+	emailKey  string
+}
+
+func accountHandler(ac accountConfig, manifestPath string) ipc.Handler {
+	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
+		m := map[string]string{}
+		if dir := signupAppDir(manifestPath); dir != "" {
+			m = signupReadSecrets(filepath.Join(dir, "secrets.json"))
+		}
+		return signupResult(map[string]any{
+			"signed_up": m[ac.secretKey] != "",
+			"email":     m[ac.emailKey],
+			"api_key":   m[ac.secretKey],
+		})
+	}
+}
+
 // ── shared helpers ──────────────────────────────────────────────────────────
 
 func signupResult(m map[string]any) (json.RawMessage, error) {
