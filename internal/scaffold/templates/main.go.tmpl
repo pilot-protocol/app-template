@@ -68,7 +68,7 @@ func main() {
 		log.Fatalf("{{.BinaryName}}: %v", err)
 	}
 {{- end}}
-	client, err := backend.New(backend.Config{BaseURL: cfg.BackendURL{{if .Backend.Headers}}{{if .HasSignup}}, HeaderFunc: func() map[string]string { return resolveHeaders(*manifestPath) }{{else}}, Headers: resolveHeaders(*manifestPath){{end}}{{end}}{{if .Backend.X402}}, DaemonAddr: *addr{{end}}{{if .Managed}}, Sign: signer{{end}}})
+	client, err := backend.New(backend.Config{BaseURL: cfg.BackendURL{{if .Backend.URLSecret}}, BaseURLFunc: func() string { return resolveBackendURLDyn(*manifestPath, {{printf "%q" .Backend.URLSecret}}) }{{end}}{{if .Backend.Headers}}{{if .HasSignup}}, HeaderFunc: func() map[string]string { return resolveHeaders(*manifestPath) }{{else}}, Headers: resolveHeaders(*manifestPath){{end}}{{end}}{{if .Backend.X402}}, DaemonAddr: *addr{{end}}{{if .Managed}}, Sign: signer{{end}}})
 	if err != nil {
 		log.Fatalf("{{.BinaryName}}: backend config: %v", err)
 	}
@@ -184,12 +184,14 @@ func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL 
 	d.Register("{{.Name}}", accountHandler(accountConfig{
 		secretKey: {{printf "%q" .Signup.SecretKey}},
 		emailKey:  {{printf "%q" .Signup.EmailKey}},
+		urlKey:    {{printf "%q" $.Backend.URLSecret}},
 	}, manifestPath)) // {{.Duration}} (local: retrieve the cached account)
 {{- else if .Signup.IsBroker}}
 	d.Register("{{.Name}}", brokerSignupHandler(brokerSignupConfig{
 		brokerURL: {{printf "%q" .Signup.BrokerURL}},
 		secretKey: {{printf "%q" .Signup.SecretKey}},
 		emailKey:  {{printf "%q" .Signup.EmailKey}},
+		urlKey:    {{printf "%q" $.Backend.URLSecret}},
 	}, signer, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (broker self-signup: one call, no email)
 {{- else if .Signup.IsVerify}}
 	d.Register("{{.Name}}", signupVerifyHandler(signupVerifyConfig{
@@ -213,6 +215,7 @@ func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL 
 		queryParams:   []string{ {{- range $p := .HTTP.QueryParams}}{{printf "%q" $p}}, {{end -}} },
 		bodyParams:    []string{ {{- range $p := .HTTP.BodyParams}}{{printf "%q" $p}}, {{end -}} },
 		headerParams:  []string{ {{- range $p := .HTTP.HeaderParams}}{{printf "%q" $p}}, {{end -}} },
+		bodyRawParam:  "{{.HTTP.BodyRawParam}}",
 	}, dur("{{.TimeoutFor}}")){{if .HTTP.CaptureTo}}){{end}}) // {{.Duration}}
 {{- end}}
 {{- end}}
@@ -318,6 +321,7 @@ type route struct {
 	queryParams   []string // forced to the query string
 	bodyParams    []string // forced into the JSON body object
 	headerParams  []string // forced to a request header (Name: value)
+	bodyRawParam  string   // a param whose value IS the entire request body (bare array/scalar); "" = none
 }
 
 // forward builds one backend request for a method. It fills {name} placeholders
@@ -351,6 +355,22 @@ func forward(c *backend.Client, r route, timeout time.Duration) ipc.Handler {
 				query[k] = jsonScalar(v)
 				delete(fields, k)
 			}
+		}
+		// body_raw: one param's value IS the entire request body, verbatim (a bare
+		// top-level array/scalar/object an object-wrapped body cannot express). Any
+		// remaining non-located fields fold into the query string.
+		if r.bodyRawParam != "" {
+			raw, ok := fields[r.bodyRawParam]
+			if !ok {
+				return nil, fmt.Errorf("missing required body parameter %q", r.bodyRawParam)
+			}
+			delete(fields, r.bodyRawParam)
+			for k, v := range fields {
+				query[k] = jsonScalar(v)
+			}
+			ctx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			return c.Do(ctx, r.method, path, query, headers, json.RawMessage(raw))
 		}
 		bodyFields := map[string]json.RawMessage{}
 		for _, k := range r.bodyParams {
@@ -804,6 +824,34 @@ func resolveConfig(manifestPath string) appConfig {
 	}
 	return cfg
 }
+{{if .Backend.URLSecret}}
+// resolveBackendURLDyn reads a per-user backend base URL from $APP/secrets.json
+// under key (provisioned at signup). Called per request by the HTTP client's
+// BaseURLFunc so calls made after signup reach the user's own backend without a
+// restart. Empty (not yet signed up) ⇒ the client falls back to the baked-in
+// default. An env override of the same name wins (dev/self-hosted).
+func resolveBackendURLDyn(manifestPath, key string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	dir := os.Getenv("APP")
+	if manifestPath != "" {
+		dir = filepath.Dir(manifestPath)
+	}
+	if dir == "" {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "secrets.json"))
+	if err != nil {
+		return ""
+	}
+	var m map[string]string
+	if json.Unmarshal(b, &m) != nil {
+		return ""
+	}
+	return m[key]
+}
+{{end}}
 {{if .Backend.Headers}}
 // resolveHeaders builds the headers sent on every backend request. ${TOKEN}
 // placeholders are filled at runtime from the environment or from a flat

@@ -86,6 +86,38 @@ compiled in. In broad strokes:
 
 See each package's `Config` for the full environment contract.
 
+## Variant: master-account provisioning (no mailbox)
+
+Some backends have **no email-OTP account signup at all** — the only machine path
+to a credential is an OAuth/token exchange under one owner account. There the
+mailbox half does not apply: instead of driving `register → OTP → verify`, the
+broker holds **one master account's OAuth refresh token** and, per caller,
+provisions an **isolated sub-resource** (a project/workspace/tenant) and returns
+its scoped key. `internal/insforgesignup` (with `cmd/insforge-signup-broker`) is
+this shape for InsForge: refresh the master token headlessly → create a project
+→ fetch its access key → return `{api_key, backend_url, project_id}`. It reuses
+the same signed handler, per-caller encrypted ledger, idempotency, and per-IP cap
+as the OTP broker — only the provider handshake differs, and there is **no mail
+server to run**.
+
+Because each user gets a *different* backend endpoint, this variant pairs with two
+scaffold primitives:
+
+- **`backend.url_secret`** — names a `secrets.json` key holding a per-user backend
+  base URL, re-resolved per request (a `BaseURLFunc`, the base-URL analogue of the
+  per-request `HeaderFunc`). The broker-signup handler caches the returned
+  `backend_url` there, so every call after signup reaches the user's own backend
+  with no restart. `base_url` stays the pre-signup default.
+- **`body_raw`** — a method param (`in: body_raw`) whose value becomes the entire
+  request body verbatim (a bare top-level array/scalar), for APIs whose body is
+  not an object (e.g. a bulk insert takes `[{…}]`). The body-shape analogue of
+  `path_raw`.
+
+The economics differ from per-user accounts: every provisioned sub-resource lives
+under the **one** master account, so its plan limits and billing are shared — this
+variant is for a **provider-funded**, metered managed service, not per-user free
+tiers. Cap exposure with the per-IP mint cap and the master account's own plan.
+
 ## Security notes
 
 - The mailbox holds a **live code for seconds** — treat it as a secret: tmpfs,

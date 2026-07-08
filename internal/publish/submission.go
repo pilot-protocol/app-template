@@ -78,6 +78,10 @@ type SubBackend struct {
 	// Quota is the per-caller call cap the broker enforces for a managed app
 	// (0 = unlimited). Set at publish time so the rate limit ships with the app.
 	Quota int `json:"quota"`
+	// URLSecret names a secrets.json key holding a per-user backend base URL
+	// resolved per request (for a broker-signup app whose backend is provisioned
+	// per user). See scaffold.Backend.URLSecret.
+	URLSecret string `json:"url_secret"`
 
 	// --- cli fields ---
 	// Command is the base argv the adapter execs (e.g. ["gh"] or ["python","-m","tool"]).
@@ -454,7 +458,7 @@ func validateSubHTTPMethod(n string, m SubMethod) []string {
 
 // subParamIn is the closed set of param request locations (empty = default).
 var subParamIn = map[string]bool{
-	"query": true, "path": true, "path_raw": true, "body": true, "header": true,
+	"query": true, "path": true, "path_raw": true, "body": true, "body_raw": true, "header": true,
 }
 
 // validateParamLocations checks the per-param `in` rules for an http method, so
@@ -473,7 +477,7 @@ func validateParamLocations(method string, m SubMethod) []string {
 			continue
 		}
 		if !subParamIn[p.In] {
-			e = append(e, fmt.Sprintf("Method %q, param %q: in %q must be one of query, path, path_raw, body, header", method, name, p.In))
+			e = append(e, fmt.Sprintf("Method %q, param %q: in %q must be one of query, path, path_raw, body, body_raw, header", method, name, p.In))
 			continue
 		}
 		if (p.In == "path" || p.In == "path_raw") && !placeholder[name] {
@@ -553,7 +557,7 @@ func (s Submission) validateArtifacts() []string {
 // the generator needs). Review-only fields (vendor free-text, agent-usage,
 // capabilities, binary URL) are intentionally not part of it.
 func (s Submission) ToConfig() *scaffold.Config {
-	backend := scaffold.Backend{Type: "http", BaseURL: s.Backend.BaseURL, Auth: s.Backend.Auth}
+	backend := scaffold.Backend{Type: "http", BaseURL: s.Backend.BaseURL, Auth: s.Backend.Auth, URLSecret: s.Backend.URLSecret}
 	if s.Backend.IsCLI() {
 		backend = scaffold.Backend{Type: "cli", Command: s.Backend.Command, EnvPassthrough: s.Backend.EnvPassthrough}
 	}

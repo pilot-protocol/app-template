@@ -25,10 +25,11 @@ type httpDoer interface {
 
 // Client talks to one backend over HTTP.
 type Client struct {
-	baseURL    string
-	headers    map[string]string
-	headerFunc func() map[string]string // when set, re-resolved per request (see Config.HeaderFunc)
-	http       httpDoer
+	baseURL     string
+	baseURLFunc func() string            // when set, re-resolved per request (see Config.BaseURLFunc)
+	headers     map[string]string
+	headerFunc  func() map[string]string // when set, re-resolved per request (see Config.HeaderFunc)
+	http        httpDoer
 {{- if .Managed}}
 	sign    Signer // managed: stamp the verified caller identity on every request
 {{- end}}
@@ -45,7 +46,14 @@ type Config struct {
 	// method that writes the key to $APP/secrets.json mid-life; a per-request
 	// re-read is the only way later calls see the freshly-minted key.
 	HeaderFunc func() map[string]string
-	Timeout    time.Duration
+	// BaseURLFunc, when set, is called on EVERY request to (re)resolve the backend
+	// base URL, and takes precedence over BaseURL when it returns a non-empty
+	// value. It exists for apps whose backend endpoint is provisioned at runtime —
+	// a broker-signup route that mints a per-user backend and writes its URL to
+	// $APP/secrets.json mid-life; a per-request re-read is the only way later calls
+	// reach the freshly-provisioned backend. BaseURL remains the fallback.
+	BaseURLFunc func() string
+	Timeout     time.Duration
 	// DaemonAddr is the pilot daemon broker address (--addr), used by the x402
 	// payment layer to reach the wallet. Empty when x402 is disabled.
 	DaemonAddr string
@@ -95,7 +103,19 @@ func New(cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("backend: managed adapter requires a Signer")
 	}
 {{- end}}
-	return &Client{baseURL: base, headers: cfg.Headers, headerFunc: cfg.HeaderFunc, http: doer{{if .Managed}}, sign: cfg.Sign{{end}}}, nil
+	return &Client{baseURL: base, baseURLFunc: cfg.BaseURLFunc, headers: cfg.Headers, headerFunc: cfg.HeaderFunc, http: doer{{if .Managed}}, sign: cfg.Sign{{end}}}, nil
+}
+
+// base returns the backend base URL for one request: re-resolved via
+// BaseURLFunc when set and non-empty (so a runtime-provisioned backend is picked
+// up), else the static base captured at New.
+func (c *Client) base() string {
+	if c.baseURLFunc != nil {
+		if u := strings.TrimRight(c.baseURLFunc(), "/"); u != "" {
+			return u
+		}
+	}
+	return c.baseURL
 }
 
 // authHeaders returns the auth headers for one request: re-resolved via
@@ -118,7 +138,7 @@ func (c *Client) Get(ctx context.Context, path string, params map[string]string)
 			q.Set(k, v)
 		}
 	}
-	u := c.baseURL + path
+	u := c.base() + path
 	if enc := q.Encode(); enc != "" {
 		u += "?" + enc
 	}
@@ -139,7 +159,7 @@ func (c *Client) PostRaw(ctx context.Context, path string, payload json.RawMessa
 	if len(bytes.TrimSpace(body)) == 0 {
 		body = []byte("{}")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base()+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +178,7 @@ func (c *Client) PostRaw(ctx context.Context, path string, payload json.RawMessa
 // body sends no body (no Content-Type). The path is used verbatim — a raw
 // path param (URL-in-path) reaches the backend unescaped.
 func (c *Client) Do(ctx context.Context, method, path string, query, headers map[string]string, body json.RawMessage) (json.RawMessage, error) {
-	u := c.baseURL + path
+	u := c.base() + path
 	if len(query) > 0 {
 		q := url.Values{}
 		for k, v := range query {

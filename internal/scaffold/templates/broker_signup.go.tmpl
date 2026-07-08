@@ -29,6 +29,7 @@ type brokerSignupConfig struct {
 	brokerURL string // the Pilot broker /signup endpoint (signed)
 	secretKey string // secrets.json key the minted key is cached under
 	emailKey  string // secrets.json key the minted email is cached under
+	urlKey    string // secrets.json key the minted per-user backend URL is cached under (empty = none)
 }
 
 // brokerSignupHandler signs a call to the broker, then caches {email, api_key}.
@@ -78,8 +79,9 @@ func brokerSignupHandler(bc brokerSignupConfig, signer backend.Signer, manifestP
 		}
 
 		var out struct {
-			Email  string `json:"email"`
-			APIKey string `json:"api_key"`
+			Email      string `json:"email"`
+			APIKey     string `json:"api_key"`
+			BackendURL string `json:"backend_url"`
 		}
 		if err := json.Unmarshal(raw, &out); err != nil || out.APIKey == "" {
 			return nil, fmt.Errorf("signup: broker returned no api_key")
@@ -88,12 +90,17 @@ func brokerSignupHandler(bc brokerSignupConfig, signer backend.Signer, manifestP
 		if bc.emailKey != "" {
 			add[bc.emailKey] = out.Email
 		}
+		// A per-user backend URL provisioned at signup is cached too, so the HTTP
+		// client's BaseURLFunc reaches this user's own backend on every later call.
+		if bc.urlKey != "" && out.BackendURL != "" {
+			add[bc.urlKey] = out.BackendURL
+		}
 		if err := signupMergeSecrets(secretsFile, add); err != nil {
 			return nil, fmt.Errorf("signup: cache key: %w", err)
 		}
 		return signupResult(map[string]any{
-			"ok": true, "email": out.Email, "key_field": bc.secretKey, "api_key": "saved",
-			"message": "account minted by the broker; key cached to secrets.json and used on every call",
+			"ok": true, "email": out.Email, "backend_url": out.BackendURL, "key_field": bc.secretKey, "api_key": "saved",
+			"message": "account provisioned by the broker; key + backend cached to secrets.json and used on every call",
 		})
 	}
 }
