@@ -52,8 +52,9 @@ sudo -u pilot HOME=/opt/pilot bash -c '
   cd /opt/pilot
   if [ -d app-template/.git ]; then (cd app-template && git pull --ff-only); else git clone --depth 1 https://github.com/pilot-protocol/app-template; fi
   cd app-template
-  go build -o /opt/pilot/publish-server ./cmd/publish-server
-  go build -o /opt/pilot/broker         ./cmd/broker
+  go build -o /opt/pilot/publish-server   ./cmd/publish-server
+  go build -o /opt/pilot/broker           ./cmd/broker
+  go build -o /opt/pilot/otpsignup-broker ./cmd/otpsignup-broker
 '
 install -d -o pilot -g pilot /opt/pilot/registry   # shared: publish-server writes apps.json, broker reads it
 
@@ -127,13 +128,58 @@ RestartSec=3
 WantedBy=multi-user.target
 UNIT
 
+# ── OTP-signup broker (optional) ────────────────────────────────────────────
+# A signed broker that mints a per-user provider key with no email/code (see
+# docs/BROKER-SIGNUP.md). It runs only when the operator supplies its config in
+# broker-env metadata (an OTPSIGNUP_* block) — so a broker VM that doesn't offer
+# signup simply doesn't run it. All app/provider/host specifics live in metadata,
+# never here. Its public route is added to nginx via broker-extra-locations
+# (below), so nothing app-specific is baked into this script.
+if grep -q '^OTPSIGNUP_' /opt/pilot/broker.env 2>/dev/null; then
+  cat >/etc/systemd/system/otpsignup-broker.service <<UNIT
+[Unit]
+Description=Pilot OTP-signup broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pilot
+EnvironmentFile=/opt/pilot/broker.env
+# Non-secret default; everything else (mail control URL + token, provider URLs,
+# domain, at-rest key, caps) comes from broker.env metadata.
+Environment=OTPSIGNUP_LISTEN=127.0.0.1:8091
+Environment=OTPSIGNUP_DB=/opt/pilot/otpsignup-data/accounts.db
+WorkingDirectory=/opt/pilot
+ExecStartPre=/usr/bin/install -d -o pilot -g pilot /opt/pilot/otpsignup-data
+ExecStart=/opt/pilot/otpsignup-broker
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+fi
+
+# Operator-provided extra nginx location blocks (e.g. a signup broker's public
+# route → 127.0.0.1:8091), from instance metadata. setup-broker-tls.sh injects
+# this file before the default `location /`. Keeps app-specific routes out of the
+# repo — the operator supplies them per deployment.
+EXTRA_LOCATIONS="$(meta broker-extra-locations)"
+if [ -n "$EXTRA_LOCATIONS" ]; then
+  printf '%s\n' "$EXTRA_LOCATIONS" >/opt/pilot/broker-extra-locations.conf
+else
+  rm -f /opt/pilot/broker-extra-locations.conf
+fi
+
 systemctl daemon-reload
 systemctl enable pilot-publish pilot-broker
+[ -f /etc/systemd/system/otpsignup-broker.service ] && systemctl enable otpsignup-broker
 # RESTART (not just enable --now): on a reboot/reset systemd auto-starts the
 # previously-enabled service with the OLD on-disk binary BEFORE this script
 # rebuilds it. enable --now is then a no-op and the stale binary keeps serving.
 # An explicit restart loads the freshly-built binary every deploy.
 systemctl restart pilot-publish pilot-broker
+[ -f /etc/systemd/system/otpsignup-broker.service ] && systemctl restart otpsignup-broker
 echo "pilot-publish + pilot-broker (re)started on freshly built binaries"
 
 # Expose the broker over HTTPS via nginx + a Let's Encrypt cert (idempotent;

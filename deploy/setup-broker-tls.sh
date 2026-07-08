@@ -64,6 +64,16 @@ server {
     }
 }
 NGINX
+  # Inject operator-provided extra location blocks (e.g. a signup broker's public
+  # route → 127.0.0.1:8091) before the default `location /`. Written by startup.sh
+  # from instance metadata (broker-extra-locations); keeps app-specific routes out
+  # of the repo. The blocks are inserted verbatim (they should use \$host etc.).
+  EXTRA="${BROKER_EXTRA_LOCATIONS:-/opt/pilot/broker-extra-locations.conf}"
+  if [ -s "$EXTRA" ]; then
+    echo "→ injecting extra nginx locations from $EXTRA"
+    awk -v f="$EXTRA" '/location \/ \{/ && !d {while ((getline l < f) > 0) print "    " l; print ""; d=1} {print}' \
+      /etc/nginx/sites-available/broker.conf > /tmp/broker.conf.new && mv /tmp/broker.conf.new /etc/nginx/sites-available/broker.conf
+  fi
   ln -sf /etc/nginx/sites-available/broker.conf /etc/nginx/sites-enabled/broker.conf
   # Remove nginx's default site — it binds :80, which publish-server owns, so
   # nginx would fail to start. The broker vhost is :443-only.
