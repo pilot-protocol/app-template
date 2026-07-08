@@ -245,6 +245,17 @@ type Backend struct {
 	// shared broker.pilotprotocol.network. Empty ⇒ the shared broker.
 	BrokerURL string `yaml:"broker_url"`
 
+	// URLSecret names a $APP/secrets.json key holding this app's backend base
+	// URL, resolved PER REQUEST (falling back to base_url when absent). It exists
+	// for apps whose backend endpoint is provisioned per user at runtime — a
+	// broker-signup route that mints an isolated backend and returns its URL, not
+	// just a key. The broker-signup handler caches the returned backend_url under
+	// this key; the HTTP client then re-reads it each call (like HeaderFunc for
+	// the auth key), so calls made after signup reach the user's own backend with
+	// no restart. base_url stays required as the pre-signup default. e.g.
+	//   url_secret: INSFORGE_BACKEND_URL
+	URLSecret string `yaml:"url_secret"`
+
 	// Auth selects how the adapter authenticates to the backend:
 	//   "" / "byo"   — each user supplies their own key (the ${TOKEN} headers above)
 	//   "managed"    — Pilot holds ONE master key and meters per user. The generated
@@ -607,6 +618,13 @@ type HTTPRoute struct {
 	HeaderParams []string `yaml:"-"`
 	QueryParams  []string `yaml:"-"`
 	BodyParams   []string `yaml:"-"`
+
+	// BodyRawParam is derived in Resolve: a param given `in: body_raw`, whose
+	// VALUE becomes the entire request body verbatim (a bare JSON array/scalar/
+	// object), instead of being wrapped into the JSON body object. At most one per
+	// method — for APIs that take a top-level array (e.g. a bulk insert) which a
+	// wrapped `{field:[...]}` body cannot express.
+	BodyRawParam string `yaml:"-"`
 }
 
 // BodyVerb reports whether this route sends remaining payload fields as a JSON
@@ -792,12 +810,13 @@ const (
 	InPath    = "path"
 	InPathRaw = "path_raw"
 	InBody    = "body"
+	InBodyRaw = "body_raw"
 	InHeader  = "header"
 )
 
 // validParamIn is the closed set of param locations (empty = verb/path default).
 var validParamIn = map[string]bool{
-	InQuery: true, InPath: true, InPathRaw: true, InBody: true, InHeader: true,
+	InQuery: true, InPath: true, InPathRaw: true, InBody: true, InBodyRaw: true, InHeader: true,
 }
 
 // resolveParamLocs derives the per-location param buckets from the path
@@ -812,6 +831,7 @@ func (h *HTTPRoute) resolveParamLocs() {
 	h.QueryParams = nil
 	h.BodyParams = nil
 	h.HeaderParams = nil
+	h.BodyRawParam = ""
 	placeholder := map[string]bool{}
 	for _, name := range pathParamNames(h.Path) {
 		placeholder[name] = true
@@ -836,6 +856,8 @@ func (h *HTTPRoute) resolveParamLocs() {
 			h.QueryParams = append(h.QueryParams, name)
 		case InBody:
 			h.BodyParams = append(h.BodyParams, name)
+		case InBodyRaw:
+			h.BodyRawParam = name
 		case InHeader:
 			h.HeaderParams = append(h.HeaderParams, name)
 		}
@@ -1053,7 +1075,7 @@ func (c *Config) validateHTTPMethod(i int, m Method) []error {
 	for _, name := range inNames {
 		loc := m.HTTP.ParamIn[name]
 		if !validParamIn[loc] {
-			errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q in %q must be query|path|path_raw|body|header", i, m.Name, name, loc))
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q in %q must be query|path|path_raw|body|body_raw|header", i, m.Name, name, loc))
 		}
 		if _, ok := m.Params[name]; !ok {
 			errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q has an `in` location but is not declared under params", i, m.Name, name))

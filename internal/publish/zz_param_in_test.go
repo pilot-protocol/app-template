@@ -66,7 +66,7 @@ func TestSubmissionParamInRejections(t *testing.T) {
 		HTTP:   SubRoute{Verb: "GET", Path: "/x"},
 		Params: []SubParam{{Name: "u", Type: "string", In: "cookie"}},
 	}}
-	if !hasSub(bad.Validate(), "must be one of query, path, path_raw, body, header") {
+	if !hasSub(bad.Validate(), "must be one of query, path, path_raw, body, body_raw, header") {
 		t.Errorf("expected invalid in-value error, got %v", bad.Validate())
 	}
 

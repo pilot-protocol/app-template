@@ -1,0 +1,487 @@
+{
+  "id": "io.pilot.insforge",
+  "version": "1.0.0",
+  "namespace": "insforge",
+  "description": "The agent-native cloud (an AWS for agents) as ONE Pilot app. insforge.signup provisions your OWN isolated InsForge backend in one call \u2014 no email, no browser: a dedicated Postgres database, authentication, S3-style storage, Deno edge functions, and a Model Gateway OpenRouter key seeded with $1 of AI credits. Pilot's broker mints and manages the account; every method then talks directly to your backend, authenticated as you. Free to provision \u2014 pay only for what your backend uses.",
+  "email": "alex@vulturelabs.io",
+  "backend": {
+    "type": "http",
+    "base_url": "https://api.insforge.dev",
+    "auth": "byo",
+    "url_secret": "INSFORGE_BACKEND_URL",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer ${INSFORGE_API_KEY}"
+      }
+    ]
+  },
+  "methods": [
+    {
+      "name": "insforge.signup",
+      "description": "Provision your OWN isolated InsForge backend in ONE call \u2014 no email, no browser, no human step. This signs a keyless request to Pilot's InsForge signup broker, which mints a fresh InsForge project under Pilot's managed account and returns its access key + backend URL. The adapter caches {api_key, backend_url} to $APP/secrets.json, and from then on EVERY other insforge.* method talks directly to YOUR backend, authenticated as you. You get a dedicated Postgres database, authentication, S3-style storage, edge functions, and a Model Gateway OpenRouter key seeded with $1 of AI credits. Idempotent: the broker provisions at most one project per Pilot identity, so a repeat call (or a fresh install) returns the SAME backend. Run this ONCE before any other method. FREE to provision \u2014 you pay only for the resources your backend actually uses (see per-method costs and insforge.help). Retrieve your backend URL + key any time via insforge.account. Takes no arguments.",
+      "latency": "slow",
+      "signup": {
+        "step": "broker",
+        "broker_url": "https://broker.pilotprotocol.network/insforge/signup",
+        "secret_key": "INSFORGE_API_KEY"
+      },
+      "params": []
+    },
+    {
+      "name": "insforge.account",
+      "description": "Retrieve your provisioned InsForge backend \u2014 its backend_url, your api_key, and project id \u2014 plus a signed_up flag. Local, instant, FREE (reads $APP/secrets.json; no backend call). Use it to confirm you're provisioned or to read your key/URL (e.g. to call the backend from your own code). If signed_up is false, call insforge.signup first.",
+      "latency": "fast",
+      "signup": {
+        "step": "account",
+        "secret_key": "INSFORGE_API_KEY"
+      },
+      "params": []
+    },
+    {
+      "name": "insforge.metadata",
+      "description": "Get your backend's full configuration \u2014 auth providers/SMTP, database tables, storage buckets, edge functions, realtime, and AI models \u2014 in one call. FREE (control-plane / metadata).",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/api/metadata"
+      },
+      "params": []
+    },
+    {
+      "name": "insforge.db_list_tables",
+      "description": "List all database tables with their schemas (columns, types, constraints). FREE (control-plane / metadata).",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/api/database/tables"
+      },
+      "params": []
+    },
+    {
+      "name": "insforge.db_create_table",
+      "description": "Create a Postgres table. Body: {tableName, columns:[{columnName, type, isNullable, isUnique, defaultValue?}]} \u2014 type is one of string, integer, float, boolean, datetime, date, uuid, json. An id (uuid) + createdAt/updatedAt are added automatically. Rows count toward Postgres storage (500 MB free, then $0.125/GB); reads toward bandwidth (5 GB free, then $0.09/GB).",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/api/database/tables"
+      },
+      "params": [
+        {
+          "name": "tableName",
+          "type": "string",
+          "required": true,
+          "description": "New table name (snake_case).",
+          "in": "body"
+        },
+        {
+          "name": "columns",
+          "type": "array",
+          "required": true,
+          "description": "Column defs: [{columnName,type,isNullable,isUnique,defaultValue?}].",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "insforge.db_query",
+      "description": "Query records from a table with PostgREST-style filtering, sorting, pagination. Path: table name. Query params: limit (1-1000, default 100), offset, order (e.g. createdAt.desc), select (comma columns), and any {field}=<op>.<value> filter (op: eq, neq, gt, gte, lt, lte, like, ilike, in, is). Counts toward bandwidth (5 GB free, then $0.09/GB).",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/api/database/records/{table}"
+      },
+      "params": [
+        {
+          "name": "table",
+          "type": "string",
+          "required": true,
+          "description": "Table name.",
+          "in": "path"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Max records (1-1000, default 100).",
+          "in": "query"
+        },
+        {
+          "name": "offset",
+          "type": "integer",
+          "required": false,
+          "description": "Records to skip.",
+          "in": "query"
+        },
+        {
+          "name": "order",
+          "type": "string",
+          "required": false,
+          "description": "Sort, e.g. createdAt.desc or name.asc.",
+          "in": "query"
+        },
+        {
+          "name": "select",
+          "type": "string",
+          "required": false,
+          "description": "Comma-separated columns to return.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "insforge.db_insert",
+      "description": "Insert one or more records into a table. Path: table name. Body: a JSON array of row objects (e.g. [{\"title\":\"hi\"}]) \u2014 always an array, even for one row. Returns the inserted rows with generated ids. Note: just after db_create_table, wait ~3s before the first insert (the database reloads its schema cache after DDL; an immediate insert can 404). Rows count toward Postgres storage (500 MB free, then $0.125/GB); reads toward bandwidth (5 GB free, then $0.09/GB).",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/api/database/records/{table}"
+      },
+      "params": [
+        {
+          "name": "table",
+          "type": "string",
+          "required": true,
+          "description": "Table name.",
+          "in": "path"
+        },
+        {
+          "name": "records",
+          "type": "array",
+          "required": true,
+          "description": "Array of row objects to insert (sent as the request body).",
+          "in": "body_raw"
+        }
+      ]
+    },
+    {
+      "name": "insforge.db_update",
+      "description": "Update records matching PostgREST filters. Path: table name. Pass filter(s) as query params ({field}=eq.<value>) and the new column values in the body. Returns the updated rows. Rows count toward Postgres storage (500 MB free, then $0.125/GB); reads toward bandwidth (5 GB free, then $0.09/GB).",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/api/database/records/{table}"
+      },
+      "params": [
+        {
+          "name": "table",
+          "type": "string",
+          "required": true,
+          "description": "Table name.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "insforge.db_delete",
+      "description": "Delete records matching PostgREST filters. Path: table name. Pass filter(s) as query params ({field}=eq.<value>). Returns the deleted rows. Rows count toward Postgres storage (500 MB free, then $0.125/GB); reads toward bandwidth (5 GB free, then $0.09/GB).",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/api/database/records/{table}"
+      },
+      "params": [
+        {
+          "name": "table",
+          "type": "string",
+          "required": true,
+          "description": "Table name.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "insforge.db_sql",
+      "description": "Run raw parameterized SQL against your Postgres database. Body: {query, params?}. Powerful \u2014 use for joins, aggregates, DDL, migrations. Rows count toward Postgres storage (500 MB free, then $0.125/GB); reads toward bandwidth (5 GB free, then $0.09/GB).",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/api/database/advance/rawsql"
+      },
+      "params": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": true,
+          "description": "SQL statement (use $1,$2 for params).",
+          "in": "body"
+        },
+        {
+          "name": "params",
+          "type": "array",
+          "required": false,
+          "description": "Positional parameter values.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "insforge.storage_list_buckets",
+      "description": "List your storage buckets. FREE (control-plane / metadata).",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/api/storage/buckets"
+      },
+      "params": []
+    },
+    {
+      "name": "insforge.storage_create_bucket",
+      "description": "Create a storage bucket. Body: {bucketName, isPublic}. A public bucket serves objects without auth; a private one requires the key. FREE (control-plane / metadata).",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/api/storage/buckets"
+      },
+      "params": [
+        {
+          "name": "bucketName",
+          "type": "string",
+          "required": true,
+          "description": "Bucket name.",
+          "in": "body"
+        },
+        {
+          "name": "isPublic",
+          "type": "boolean",
+          "required": false,
+          "description": "Public (no-auth reads) if true; default false.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "insforge.storage_list_objects",
+      "description": "List objects in a bucket (paginated). Path: bucket name. Query: limit, offset, prefix. Counts toward bandwidth (5 GB free, then $0.09/GB).",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/api/storage/buckets/{bucket}/objects"
+      },
+      "params": [
+        {
+          "name": "bucket",
+          "type": "string",
+          "required": true,
+          "description": "Bucket name.",
+          "in": "path"
+        },
+        {
+          "name": "prefix",
+          "type": "string",
+          "required": false,
+          "description": "Only keys under this prefix.",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Max objects (default 100).",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "insforge.storage_download",
+      "description": "Download an object (returns its content). Path: bucket + object key. Counts toward bandwidth (5 GB free, then $0.09/GB).",
+      "latency": "med",
+      "http": {
+        "verb": "GET",
+        "path": "/api/storage/buckets/{bucket}/objects/{key}"
+      },
+      "params": [
+        {
+          "name": "bucket",
+          "type": "string",
+          "required": true,
+          "description": "Bucket name.",
+          "in": "path"
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Object key.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "insforge.storage_delete",
+      "description": "Delete an object. Path: bucket + object key. FREE (control-plane / metadata).",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/api/storage/buckets/{bucket}/objects/{key}"
+      },
+      "params": [
+        {
+          "name": "bucket",
+          "type": "string",
+          "required": true,
+          "description": "Bucket name.",
+          "in": "path"
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Object key.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "insforge.auth_config",
+      "description": "Get your backend's auth configuration (enabled OAuth providers, JWT settings, SMTP). FREE (control-plane / metadata).",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/api/auth/config"
+      },
+      "params": []
+    },
+    {
+      "name": "insforge.auth_list_users",
+      "description": "List the end-users registered in your backend's auth (paginated). Query: limit, offset. Auth users count toward MAU (50,000 free, then $0.00325 per monthly active user).",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/api/auth/users"
+      },
+      "params": [
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Max users (default 10).",
+          "in": "query"
+        },
+        {
+          "name": "offset",
+          "type": "integer",
+          "required": false,
+          "description": "Users to skip.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "insforge.functions_list",
+      "description": "List your deployed edge functions (Deno/TypeScript) and the runtime status. FREE (control-plane / metadata).",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/api/functions"
+      },
+      "params": []
+    },
+    {
+      "name": "insforge.function_invoke",
+      "description": "Invoke a deployed edge function by slug. Path: function slug. Body: the JSON payload passed to the function. Each invocation counts toward edge-function calls (100,000 free, then $0.01 per 1,000).",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/functions/{slug}"
+      },
+      "params": [
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "Function slug.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "insforge.ai_gateway_key",
+      "description": "Get your project's Model Gateway OpenRouter API key (sk-or-...). InsForge provisions it seeded with $1 of AI credits; call it directly against https://openrouter.ai/api/v1 with any OpenAI-compatible SDK (models like openai/gpt-4o, anthropic/claude-3.5-haiku). Returns the project's Model Gateway OpenRouter key, seeded with $1 of AI credits; usage bills per OpenRouter token pricing on that key.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/api/ai/openrouter/api-key"
+      },
+      "params": []
+    },
+    {
+      "name": "insforge.secrets_list",
+      "description": "List your backend's secrets/keys (names + metadata; values are not returned). FREE (control-plane / metadata).",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/api/secrets"
+      },
+      "params": []
+    },
+    {
+      "name": "insforge.get",
+      "description": "Escape hatch: GET any backend API path under /api. Path param is the sub-path (e.g. \"database/tables\", \"storage/config\"); extra fields become query params. Covers endpoints not given a dedicated method. Cost depends on the endpoint \u2014 see insforge.help.",
+      "latency": "med",
+      "http": {
+        "verb": "GET",
+        "path": "/api/{path}"
+      },
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "description": "Backend sub-path under /api (raw, e.g. database/migrations).",
+          "in": "path_raw"
+        }
+      ]
+    },
+    {
+      "name": "insforge.post",
+      "description": "Escape hatch: POST any backend API path under /api. Path param is the sub-path; the rest of the payload is sent as the JSON body. Covers endpoints not given a dedicated method. Cost depends on the endpoint.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/api/{path}"
+      },
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "description": "Backend sub-path under /api (raw).",
+          "in": "path_raw"
+        }
+      ]
+    }
+  ],
+  "listing": {
+    "display_name": "InsForge",
+    "tagline": "The agent-native cloud \u2014 your own backend in one call",
+    "app_description": "**InsForge** is the agent-native cloud infrastructure platform \u2014 the cloud a coding agent drives end to end. This app puts a full InsForge backend behind one Pilot handshake.\n\n`insforge.signup` provisions your OWN isolated InsForge project in a single call \u2014 no email, no browser, no human step \u2014 via Pilot's signup broker (which holds one managed InsForge account and mints a fresh project per Pilot identity). You immediately get:\n\n- **Postgres database** \u2014 tables + PostgREST-style CRUD (`db_create_table`, `db_query`, `db_insert`, `db_update`, `db_delete`) and raw SQL (`db_sql`).\n- **Authentication** \u2014 users, sessions, OAuth/JWT (`auth_config`, `auth_list_users`).\n- **S3-style storage** \u2014 buckets + objects (`storage_create_bucket`, `storage_upload`, `storage_download`, `storage_list_objects`).\n- **Edge functions** \u2014 Deno/TypeScript (`functions_list`, `function_invoke`).\n- **AI Model Gateway** \u2014 an OpenRouter key seeded with **$1 of AI credits** (`ai_gateway_key`), OpenAI-compatible.\n- **Escape hatches** \u2014 `insforge.get` / `insforge.post` reach any backend endpoint.\n\nThe adapter caches your backend URL + key to `secrets.json`; every method then talks directly to your own backend, authenticated as you. **Free to provision** \u2014 you pay only for the resources your backend actually uses. Per-method costs are stated on each method and summarised in `insforge.help`; full pricing at https://insforge.dev/pricing.\n\nFree-tier allowances (per backend): 500 MB Postgres, 1 GB storage, 5 GB bandwidth, 50,000 monthly active users, 100,000 edge-function calls, and $1 of Model Gateway AI credits.",
+    "license": "Apache-2.0",
+    "homepage": "https://insforge.dev",
+    "source_url": "https://github.com/InsForge/insforge",
+    "categories": [
+      "Developer Tools",
+      "Data & Storage"
+    ],
+    "keywords": [
+      "backend",
+      "baas",
+      "database",
+      "postgres",
+      "auth",
+      "storage",
+      "edge functions",
+      "ai gateway",
+      "openrouter",
+      "agent-native",
+      "insforge"
+    ]
+  },
+  "vendor": {
+    "name": "InsForge",
+    "url": "https://insforge.dev",
+    "contact": "info@insforge.dev",
+    "agent_usage": "insforge.signup once (provisions your isolated backend, no email/browser), then drive Postgres, auth, storage, edge functions and the AI model gateway directly as yourself.",
+    "capabilities": "database, auth, storage, edge-functions, ai-gateway, hosting"
+  }
+}

@@ -181,6 +181,7 @@ func signupVerifyHandler(sc signupVerifyConfig, manifestPath string, timeout tim
 type accountConfig struct {
 	secretKey string
 	emailKey  string
+	urlKey    string // secrets.json key holding a per-user backend URL (empty = none)
 }
 
 func accountHandler(ac accountConfig, manifestPath string) ipc.Handler {
@@ -189,11 +190,15 @@ func accountHandler(ac accountConfig, manifestPath string) ipc.Handler {
 		if dir := signupAppDir(manifestPath); dir != "" {
 			m = signupReadSecrets(filepath.Join(dir, "secrets.json"))
 		}
-		return signupResult(map[string]any{
+		out := map[string]any{
 			"signed_up": m[ac.secretKey] != "",
 			"email":     m[ac.emailKey],
 			"api_key":   m[ac.secretKey],
-		})
+		}
+		if ac.urlKey != "" {
+			out["backend_url"] = m[ac.urlKey]
+		}
+		return signupResult(out)
 	}
 }
 
