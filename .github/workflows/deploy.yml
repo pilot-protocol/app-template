@@ -68,11 +68,18 @@ jobs:
             sudo -u pilot bash -c "export PATH=\$PATH:/usr/local/go/bin; \
               cd /opt/pilot/app-template && git pull --ff-only && \
               go build -o /opt/pilot/publish-server ./cmd/publish-server && \
-              go build -o /opt/pilot/broker ./cmd/broker"
+              go build -o /opt/pilot/broker ./cmd/broker && \
+              go build -o /opt/pilot/insforge-signup-broker ./cmd/insforge-signup-broker || true"
             sudo systemctl restart pilot-publish
             # The broker unit is created by startup.sh; tolerate its absence on
             # the first deploy (reset the VM once to bootstrap it).
             sudo systemctl restart pilot-broker || echo "pilot-broker unit not installed yet — reset the VM once to bootstrap it"
+            # Sidecar signup broker: refresh its binary + restart only if startup.sh
+            # has installed its unit (metadata-gated; absent on VMs that do not run it).
+            if [ -f /etc/systemd/system/insforge-signup-broker.service ]; then
+              sudo install -o root -g root -m 0755 /opt/pilot/insforge-signup-broker /usr/local/bin/insforge-signup-broker
+              sudo systemctl restart insforge-signup-broker || true
+            fi
             echo "deployed: $(cd /opt/pilot/app-template && git rev-parse --short HEAD)"
           '
 
@@ -84,7 +91,8 @@ jobs:
           INSTANCE: ${{ vars.GCP_INSTANCE || 'pilot-publish' }}
         run: |
           gcloud compute ssh "$INSTANCE" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap --command '
-            sudo BROKER_HOST=broker.pilotprotocol.network CERT_EMAIL=apps@pilotprotocol.network \
+            EXTRA="$(curl -sf -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/broker-extra-locations || true)"
+            sudo BROKER_EXTRA_LOCATIONS="$EXTRA" BROKER_HOST=broker.pilotprotocol.network CERT_EMAIL=apps@pilotprotocol.network \
               bash /opt/pilot/app-template/deploy/setup-broker-tls.sh || true
           '
 
