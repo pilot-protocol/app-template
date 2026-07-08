@@ -18,7 +18,10 @@ import (
 // {application:{api_key}}. mockMail stands in for the otpmail control API.
 func mockProvider(t *testing.T, key string) *httptest.Server {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(201); w.Write([]byte(`{"message":"ok"}`)) })
+	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"message":"ok"}`))
+	})
 	mux.HandleFunc("/verify", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"application":{"api_key":"` + key + `"}}`))
 	})
@@ -32,7 +35,7 @@ func mockMail(t *testing.T, code string) *httptest.Server {
 	auth := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer mail-tok" {
-				http.Error(w, "unauth", 401)
+				http.Error(w, "unauth", http.StatusUnauthorized)
 				return
 			}
 			h(w, r)
