@@ -75,11 +75,11 @@ type Broker struct {
 	http   *http.Client
 	log    *log.Logger
 
-	mu      sync.Mutex
-	tok     string    // cached master access token
-	tokExp  time.Time // its expiry
-	ipSeen  map[string]map[string]bool // ip -> set of caller ids
-	ipLast  map[string]time.Time       // ip -> last mint time
+	mu     sync.Mutex
+	tok    string                     // cached master access token
+	tokExp time.Time                  // its expiry
+	ipSeen map[string]map[string]bool // ip -> set of caller ids
+	ipLast map[string]time.Time       // ip -> last mint time
 }
 
 // New validates cfg, opens the ledger, and returns a Broker.
