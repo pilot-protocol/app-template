@@ -15,6 +15,12 @@ HOST="${BROKER_HOST:-broker.pilotprotocol.network}"
 EMAIL="${CERT_EMAIL:-apps@pilotprotocol.network}"
 ORIGIN="${BROKER_ORIGIN:-http://127.0.0.1:8099}"
 LIVE="/etc/letsencrypt/live/$HOST"
+# Extra nginx location blocks injected before `location /` — verbatim nginx
+# config for sidecar brokers that live behind the same vhost (e.g. a signup
+# broker on another port). Supplied by startup.sh from the `broker-extra-locations`
+# instance-metadata key so a regenerated broker.conf keeps those routes instead of
+# silently dropping them. Empty ⇒ just the default `location /`.
+EXTRA_LOCATIONS="${BROKER_EXTRA_LOCATIONS:-}"
 
 echo "→ installing nginx + certbot"
 export DEBIAN_FRONTEND=noninteractive
@@ -64,6 +70,20 @@ server {
     }
 }
 NGINX
+  # Inject any sidecar location blocks BEFORE `location /` (literal — the value
+  # carries nginx vars like $host/$remote_addr that bash must not expand).
+  if [ -n "$EXTRA_LOCATIONS" ]; then
+    EXTRA_LOCATIONS="$EXTRA_LOCATIONS" python3 - <<'PY'
+import os
+p = "/etc/nginx/sites-available/broker.conf"
+extra = os.environ["EXTRA_LOCATIONS"].strip("\n")
+s = open(p).read()
+if extra and extra not in s:
+    s = s.replace("    location / {", extra + "\n\n    location / {", 1)
+    open(p, "w").write(s)
+    print("  → injected broker-extra-locations")
+PY
+  fi
   ln -sf /etc/nginx/sites-available/broker.conf /etc/nginx/sites-enabled/broker.conf
   # Remove nginx's default site — it binds :80, which publish-server owns, so
   # nginx would fail to start. The broker vhost is :443-only.
