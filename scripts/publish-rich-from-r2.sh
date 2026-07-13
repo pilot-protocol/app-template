@@ -127,25 +127,31 @@ LICENSE="$(jq -r '.license // ""' "$META")"
 SOURCE="$(jq -r '.source_url // "https://github.com/pilot-protocol/app-template/tree/main/submissions/'"$ID"'"' "$META")"
 CATEGORIES_JSON="$(jq -c '.categories // []' "$META")"
 
+# NB: jq's object-construction value grammar is stricter than a full pipe, and
+# some jq builds reject `key: (A) + {..}` / `key: A // {..}` inline. Precompute
+# the composite sub-objects with plain jq and pass them in as --argjson so every
+# value below is a single term — portable across jq 1.6/1.7.
+VENDOR_JSON="$(jq -c --arg dn "$DISPLAY" --arg pub "$PUBLISHER" \
+  '((.vendor // {name: $dn}) + {publisher_pubkey: $pub})' "$META")"
+METHODS_JSON="$(jq -c '[ (.methods // [])[] | {name: .name, summary: (.summary // .description // "")} ]' "$META")"
 METADATA_JSON="$(jq -n \
   --arg id "$ID" --arg dn "$DISPLAY" --arg desc "$DESC" \
-  --arg src "$SOURCE" --arg lic "$LICENSE" --arg pub "$PUBLISHER" \
+  --arg src "$SOURCE" --arg lic "$LICENSE" \
   --argjson cats "$CATEGORIES_JSON" --argjson bb "$BUNDLE_BYTES" \
-  --arg ver "$VERSION" \
-  --slurpfile sub "$META" '
+  --arg ver "$VERSION" --argjson vendor "$VENDOR_JSON" --argjson methods "$METHODS_JSON" '
   {
     schema_version: 1,
     id: $id,
     display_name: $dn,
-    tagline: ($desc | .[0:120]),
+    tagline: ($desc[0:120]),
     description_md: $desc,
-    vendor: ($sub[0].vendor // {name: $dn}) + {publisher_pubkey: $pub},
+    vendor: $vendor,
     source_url: $src,
     license: $lic,
     categories: $cats,
     size: {bundle_bytes: $bb},
-    methods: [ ($sub[0].methods // [])[] | {name: .name, summary: (.summary // .description // "")} ],
-    changelog: [ {version: $ver, notes: ["Published v" + $ver]} ]
+    methods: $methods,
+    changelog: [ {version: $ver, notes: (["Published v " + $ver])} ]
   }')"
 
 # ── 6. open the catalogue PR on pilotprotocol ────────────────────────────────
