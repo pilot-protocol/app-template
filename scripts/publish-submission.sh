@@ -28,8 +28,17 @@ DESC="$(jq -r '.description // empty' "$META")"
 PRIMARY_FILE="$(jq -r '.bundle // empty' "$META")"
 if [ -z "$PRIMARY_FILE" ]; then
   if jq -e '(.backend | type == "object") and ((.methods // []) | length > 0)' "$META" >/dev/null; then
-    echo "==> $ID v$VERSION is a RICH submission (no pre-built .bundle pointer) — it is built+signed by the publisher's own key via the pilot-app submit / publish-api path, not by this pointer publisher. Skipping."
-    exit 0
+    # RICH submission: its per-platform bundles are built+signed with the
+    # PUBLISHER's own key (pilot-app submit / publish-api) and uploaded to R2 —
+    # CI holds no publisher key, so this pointer publisher cannot build them.
+    # But it CAN finish the last mile the old code silently skipped: derive the
+    # catalogue entry from the bundles ALREADY live on R2, sign catalogue.json
+    # with CATALOG_SIGN_KEY, and open the catalogue PR. If nothing is on R2 yet,
+    # publish-rich-from-r2.sh fails LOUDLY (red check + ::error::) instead of
+    # exiting 0 — a merged rich app that never reached the catalogue must be
+    # visible, not a silent no-op.
+    echo "==> $ID v$VERSION is a RICH submission — publishing its catalogue entry from the bundles already on R2"
+    exec "$(dirname "$0")/publish-rich-from-r2.sh" "$DIR"
   fi
   echo "ERROR: $META ($ID v$VERSION) has neither a .bundle pointer nor a rich backend/methods spec — nothing to publish"
   exit 1
