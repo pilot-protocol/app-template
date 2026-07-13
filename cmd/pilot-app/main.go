@@ -651,7 +651,7 @@ func cmdSubmit(args []string) {
 
 	fmt.Printf("\nTo publish via the single central repo, run `pilot-app submit -C %s --prepare <app-template-fork>`.\n", *dir)
 	fmt.Printf("\nDirect path (org maintainers only):\n── Step 1: release on pilot-protocol/catalog ──\n%s\n", relCmd)
-	fmt.Printf("\n── Step 2: add to catalogue/catalogue.json on TeoSlayer/pilotprotocol@main (PR) ──\n%s\n", catEntry)
+	fmt.Printf("\n── Step 2: add to catalogue/catalogue.json on pilot-protocol/pilotprotocol@main (PR) ──\n%s\n", catEntry)
 }
 
 // writeEnrichedMetadata reads the project's metadata.json (from init), fills the
