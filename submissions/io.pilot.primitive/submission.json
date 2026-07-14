@@ -167,6 +167,13 @@
       },
       "params": [
         {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
           "name": "is_active",
           "type": "boolean",
           "required": false,
@@ -190,7 +197,15 @@
         "verb": "DELETE",
         "path": "/domains/{id}"
       },
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.verify_domain",
@@ -202,6 +217,13 @@
       },
       "gated": "requires a custom domain whose DNS you control",
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "Idempotency-Key",
           "type": "string",
@@ -221,6 +243,13 @@
       },
       "gated": "requires a custom domain whose DNS you control",
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "outbound_only",
           "type": "boolean",
@@ -459,7 +488,15 @@
         "verb": "GET",
         "path": "/emails/{id}"
       },
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.delete_email",
@@ -469,7 +506,15 @@
         "verb": "DELETE",
         "path": "/emails/{id}"
       },
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.download_raw_email",
@@ -480,6 +525,13 @@
         "path": "/emails/{id}/raw"
       },
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "token",
           "type": "string",
@@ -499,6 +551,13 @@
       },
       "params": [
         {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
           "name": "token",
           "type": "string",
           "required": false,
@@ -516,6 +575,13 @@
         "path": "/emails/{id}/reply"
       },
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "Idempotency-Key",
           "type": "string",
@@ -570,6 +636,13 @@
       },
       "params": [
         {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
           "name": "Idempotency-Key",
           "type": "string",
           "required": false,
@@ -588,6 +661,13 @@
       },
       "params": [
         {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
           "name": "Idempotency-Key",
           "type": "string",
           "required": false,
@@ -604,7 +684,15 @@
         "verb": "GET",
         "path": "/emails/{id}/conversation"
       },
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.list_endpoints",
@@ -693,6 +781,13 @@
       },
       "params": [
         {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
           "name": "url",
           "type": "string",
           "required": false,
@@ -730,7 +825,15 @@
         "verb": "DELETE",
         "path": "/endpoints/{id}"
       },
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.test_endpoint",
@@ -741,6 +844,13 @@
         "path": "/endpoints/{id}/test"
       },
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "Idempotency-Key",
           "type": "string",
@@ -809,6 +919,13 @@
       },
       "params": [
         {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
           "name": "enabled",
           "type": "boolean",
           "required": true,
@@ -825,7 +942,15 @@
         "verb": "DELETE",
         "path": "/filters/{id}"
       },
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.list_wake_schedules",
@@ -915,7 +1040,15 @@
         "path": "/wake/schedules/{id}"
       },
       "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.update_wake_schedule",
@@ -927,6 +1060,13 @@
       },
       "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "enabled",
           "type": "boolean",
@@ -994,7 +1134,15 @@
         "path": "/wake/schedules/{id}"
       },
       "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.run_wake_schedule",
@@ -1006,6 +1154,13 @@
       },
       "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "Idempotency-Key",
           "type": "string",
@@ -1099,6 +1254,13 @@
       "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
       "params": [
         {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
           "name": "enabled",
           "type": "boolean",
           "required": true,
@@ -1116,7 +1278,15 @@
         "path": "/wake/authorizations/{id}"
       },
       "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.list_wake_dispatches",
@@ -1286,6 +1456,13 @@
       "gated": "requires the recipient-routing feature \u2014 disabled on the free agent plan (the managed inbox routes to storage automatically)",
       "params": [
         {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
           "name": "match_type",
           "type": "string",
           "required": false,
@@ -1338,7 +1515,15 @@
         "path": "/routes/{id}"
       },
       "gated": "requires the recipient-routing feature \u2014 disabled on the free agent plan (the managed inbox routes to storage automatically)",
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.list_deliveries",
@@ -1402,6 +1587,13 @@
         "path": "/webhooks/deliveries/{id}/replay"
       },
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Delivery ID (numeric)",
+          "in": "path"
+        },
         {
           "name": "Idempotency-Key",
           "type": "string",
@@ -1684,7 +1876,15 @@
         "verb": "GET",
         "path": "/threads/{id}"
       },
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.list_functions",
@@ -1753,7 +1953,15 @@
         "path": "/functions/{id}"
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.update_function",
@@ -1765,6 +1973,13 @@
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "code",
           "type": "string",
@@ -1797,7 +2012,15 @@
         "path": "/functions/{id}"
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.test_function",
@@ -1809,6 +2032,13 @@
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "Idempotency-Key",
           "type": "string",
@@ -1834,7 +2064,22 @@
         "path": "/functions/{id}/test-runs/{run_id}/trace"
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
+          "name": "run_id",
+          "type": "string",
+          "required": true,
+          "description": "Function test run id returned by POST /functions/{id}/test.",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.get_org_routing_topology",
@@ -1856,7 +2101,15 @@
         "path": "/functions/{id}/routing"
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.set_function_route",
@@ -1868,6 +2121,13 @@
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "target",
           "type": "object",
@@ -1893,7 +2153,15 @@
         "path": "/functions/{id}/route"
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.list_function_secrets",
@@ -1904,7 +2172,15 @@
         "path": "/functions/{id}/secrets"
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.create_function_secret",
@@ -1916,6 +2192,13 @@
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "Idempotency-Key",
           "type": "string",
@@ -1950,6 +2233,20 @@
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
       "params": [
         {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Secret key.",
+          "in": "path"
+        },
+        {
           "name": "value",
           "type": "string",
           "required": true,
@@ -1967,7 +2264,22 @@
         "path": "/functions/{id}/secrets/{key}"
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
-      "params": []
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Secret key.",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.list_org_secrets",
@@ -2024,6 +2336,13 @@
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
       "params": [
         {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Secret key.",
+          "in": "path"
+        },
+        {
           "name": "value",
           "type": "string",
           "required": true,
@@ -2041,7 +2360,15 @@
         "path": "/org/secrets/{key}"
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
-      "params": []
+      "params": [
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Secret key.",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.list_function_logs",
@@ -2053,6 +2380,13 @@
       },
       "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
       "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "limit",
           "type": "integer",
@@ -2681,7 +3015,15 @@
         "verb": "GET",
         "path": "/registries/{slug}"
       },
-      "params": []
+      "params": [
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "The registry slug",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.update_registry",
@@ -2692,6 +3034,13 @@
         "path": "/registries/{slug}"
       },
       "params": [
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "The registry slug",
+          "in": "path"
+        },
         {
           "name": "name",
           "type": "string",
@@ -2730,7 +3079,15 @@
         "verb": "DELETE",
         "path": "/registries/{slug}"
       },
-      "params": []
+      "params": [
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "The registry slug",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.list_registry_agents",
@@ -2741,6 +3098,13 @@
         "path": "/registries/{slug}/agents"
       },
       "params": [
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "The registry slug.",
+          "in": "path"
+        },
         {
           "name": "limit",
           "type": "integer",
@@ -2766,6 +3130,13 @@
         "path": "/registries/{slug}/agents"
       },
       "params": [
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "The registry slug.",
+          "in": "path"
+        },
         {
           "name": "Idempotency-Key",
           "type": "string",
@@ -2832,7 +3203,22 @@
         "verb": "GET",
         "path": "/registries/{slug}/agents/{handle}"
       },
-      "params": []
+      "params": [
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "The registry slug.",
+          "in": "path"
+        },
+        {
+          "name": "handle",
+          "type": "string",
+          "required": true,
+          "description": "The registry-scoped handle the agent is published under.",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.unpublish_agent",
@@ -2842,7 +3228,22 @@
         "verb": "DELETE",
         "path": "/registries/{slug}/agents/{handle}"
       },
-      "params": []
+      "params": [
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "The registry slug.",
+          "in": "path"
+        },
+        {
+          "name": "handle",
+          "type": "string",
+          "required": true,
+          "description": "The registry-scoped handle the agent is published under.",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.list_registry_requests",
@@ -2853,6 +3254,13 @@
         "path": "/registries/{slug}/requests"
       },
       "params": [
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "The registry slug.",
+          "in": "path"
+        },
         {
           "name": "limit",
           "type": "integer",
@@ -2871,6 +3279,20 @@
         "path": "/registries/{slug}/requests/{id}"
       },
       "params": [
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "The registry slug.",
+          "in": "path"
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
         {
           "name": "Idempotency-Key",
           "type": "string",
@@ -2955,7 +3377,15 @@
         "verb": "GET",
         "path": "/agents/{address}"
       },
-      "params": []
+      "params": [
+        {
+          "name": "address",
+          "type": "string",
+          "required": true,
+          "description": "The agent's email address (URL-encoded).",
+          "in": "path"
+        }
+      ]
     },
     {
       "name": "primitive.list_templates",
