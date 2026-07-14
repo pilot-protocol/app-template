@@ -1,0 +1,3186 @@
+{
+  "id": "io.pilot.primitive",
+  "version": "1.0.0",
+  "namespace": "primitive",
+  "description": "Email for AI agents \u2014 provision a managed inbox in one call, then send, receive, reply, and search real email over a single REST API.",
+  "email": "apps@pilotprotocol.network",
+  "backend": {
+    "type": "http",
+    "base_url": "https://api.primitive.dev/v1",
+    "auth": "byo",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer ${PRIMITIVE_API_KEY}"
+      }
+    ]
+  },
+  "methods": [
+    {
+      "name": "primitive.signup",
+      "description": "Provision your own Primitive account and a managed *.primitive.email inbox in ONE call \u2014 no email, no code, no human step. Zero arguments required. This POSTs to Primitive's emailless account endpoint, which returns a fresh API key (prim_...) and a provisioned inbox address; the adapter caches the key to $APP/secrets.json and INJECTS it on the Authorization header of every other primitive.* call automatically \u2014 you never see, store, or pass the key. Idempotent: if this host already has a key it is kept (a repeat call does NOT mint a new identity). Run this ONCE before anything else. FREE \u2014 the account is on the reply-capable 'agent' plan; you can send to other Primitive-managed addresses and reply to anyone who mails you. If you call any method before signing up, it soft-fails with these exact instructions.",
+      "latency": "med",
+      "signup": {
+        "step": "create",
+        "url": "https://api.primitive.dev/v1/agent/accounts",
+        "secret_key": "PRIMITIVE_API_KEY",
+        "email_key": "PRIMITIVE_ADDRESS",
+        "address_path": "data.address",
+        "key_path": "data.api_key",
+        "body": {
+          "terms_accepted": true,
+          "device_name": "pilot appstore adapter"
+        }
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.get_account",
+      "description": "Get account info. Retrieve the authenticated organization's account: organization identity, current plan, usage, and onboarding state",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/account"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.update_account",
+      "description": "Update account settings. Update the mutable account settings (such as display name and notification preferences) for the authenticated organization",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/account"
+      },
+      "params": [
+        {
+          "name": "spam_threshold",
+          "type": "number",
+          "required": false,
+          "description": "Global spam score threshold (0-15).",
+          "in": "body"
+        },
+        {
+          "name": "discard_content_on_webhook_confirmed",
+          "type": "boolean",
+          "required": false,
+          "description": "Whether to discard email content after the webhook endpoint confirms receipt.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_storage_stats",
+      "description": "Get storage usage. Return stored-email storage usage and the remaining quota for the authenticated organization",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/account/storage"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.get_webhook_secret",
+      "description": "Get webhook signing secret. Returns the webhook signing secret for your account. If no secret exists yet, one is generated automatically on first access.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/account/webhook-secret"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.rotate_webhook_secret",
+      "description": "Rotate webhook signing secret. Generates a new webhook signing secret, replacing the current one. Rate limited to once per 60 minutes.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/account/webhook-secret/rotate"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        }
+      ]
+    },
+    {
+      "name": "primitive.list_domains",
+      "description": "List all domains. Returns all verified and unverified domains for your organization, sorted by creation date (newest first). Each domain includes a `verified` boolean to distinguish between the two states.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/domains"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.add_domain",
+      "description": "Claim a new domain. Creates an unverified domain claim and returns the exact DNS records to publish in `dns_records`. Publish those records before calling the verify endpoint.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/domains"
+      },
+      "gated": "requires a custom domain whose DNS you control \u2014 the managed *.primitive.email inbox needs no domain setup",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "domain",
+          "type": "string",
+          "required": true,
+          "description": "The domain name to claim (e.g.",
+          "in": "body"
+        },
+        {
+          "name": "confirmed",
+          "type": "boolean",
+          "required": false,
+          "description": "Set to true to confirm replacing an existing mailbox provider after an mx_conflict response.",
+          "in": "body"
+        },
+        {
+          "name": "outbound",
+          "type": "boolean",
+          "required": false,
+          "description": "Deprecated and ignored.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.update_domain",
+      "description": "Update domain settings. Update a verified domain's settings. Only verified domains can be updated.",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/domains/{id}"
+      },
+      "params": [
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "required": false,
+          "description": "Whether the domain accepts incoming emails",
+          "in": "body"
+        },
+        {
+          "name": "spam_threshold",
+          "type": "number",
+          "required": false,
+          "description": "Per-domain spam threshold override (Pro plan required)",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.delete_domain",
+      "description": "Delete a domain. Remove a domain from the organization. Inbound mail for its addresses stops being accepted",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/domains/{id}"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.verify_domain",
+      "description": "Verify domain ownership. Checks DNS records required for inbound routing, ownership, and outbound authentication: MX, ownership TXT, SPF, DKIM, DMARC, and TLS-RPT. On success, the domain is promoted from unverified to verified.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/domains/{id}/verify"
+      },
+      "gated": "requires a custom domain whose DNS you control",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        }
+      ]
+    },
+    {
+      "name": "primitive.download_domain_zone_file",
+      "description": "Download domain DNS zone file. Downloads a BIND-format DNS zone file containing the DNS records required for a domain claim. Agents should offer this after `addDomain` when users want to import DNS records instead of copying each record manually",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/domains/{id}/zone-file"
+      },
+      "gated": "requires a custom domain whose DNS you control",
+      "params": [
+        {
+          "name": "outbound_only",
+          "type": "boolean",
+          "required": false,
+          "description": "When true, include only outbound DNS records.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_inbox_status",
+      "description": "Get inbound inbox readiness. Returns one consolidated view of domain verification, webhook/function processing routes, deployed functions, and recent inbound mail. Agents should use this before guiding users through inbound email setup",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/inbox/status"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.list_emails",
+      "description": "List inbound emails. Returns a paginated list of INBOUND emails received at your verified domains. Outbound messages sent via /send-mail are not included; this endpoint is the inbox view, not a unified send/receive history.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/emails"
+      },
+      "params": [
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Pagination cursor from a previous response's `meta.cursor` field.",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Number of results per page",
+          "in": "query"
+        },
+        {
+          "name": "domain_id",
+          "type": "string",
+          "required": false,
+          "description": "Filter by domain ID",
+          "in": "query"
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "description": "Filter inbound rows by lifecycle status.",
+          "in": "query"
+        },
+        {
+          "name": "search",
+          "type": "string",
+          "required": false,
+          "description": "Search subject, sender, and recipient (case-insensitive)",
+          "in": "query"
+        },
+        {
+          "name": "date_from",
+          "type": "string",
+          "required": false,
+          "description": "Filter emails created on or after this timestamp",
+          "in": "query"
+        },
+        {
+          "name": "date_to",
+          "type": "string",
+          "required": false,
+          "description": "Filter emails created on or before this timestamp",
+          "in": "query"
+        },
+        {
+          "name": "since",
+          "type": "string",
+          "required": false,
+          "description": "Forward-tail cursor.",
+          "in": "query"
+        },
+        {
+          "name": "wait",
+          "type": "integer",
+          "required": false,
+          "description": "Long-poll: hold the request up to this many seconds waiting for new mail past `since`, returning as soon as any arrives",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.search_emails",
+      "description": "Search inbound emails. Searches inbound emails with structured filters and optional full-text matching across parsed email fields. This endpoint is optimized for filtered inbox views and CLI polling workflows: callers that only need new accepted mail can pass `sort=received_at_asc`, `snippet=false`, `include_facets=false`, and a `date_from` timestamp.",
+      "latency": "med",
+      "http": {
+        "verb": "GET",
+        "path": "/emails/search"
+      },
+      "params": [
+        {
+          "name": "q",
+          "type": "string",
+          "required": false,
+          "description": "Full-text search DSL query.",
+          "in": "query"
+        },
+        {
+          "name": "from",
+          "type": "string",
+          "required": false,
+          "description": "Filter by sender address or sender domain.",
+          "in": "query"
+        },
+        {
+          "name": "to",
+          "type": "string",
+          "required": false,
+          "description": "Filter by recipient address or recipient domain.",
+          "in": "query"
+        },
+        {
+          "name": "subject",
+          "type": "string",
+          "required": false,
+          "description": "Full-text search restricted to the subject field.",
+          "in": "query"
+        },
+        {
+          "name": "body",
+          "type": "string",
+          "required": false,
+          "description": "Full-text search restricted to the parsed text body.",
+          "in": "query"
+        },
+        {
+          "name": "domain_id",
+          "type": "string",
+          "required": false,
+          "description": "Filter by domain ID.",
+          "in": "query"
+        },
+        {
+          "name": "reply_to_sent_email_id",
+          "type": "string",
+          "required": false,
+          "description": "Filter to inbound emails that are replies to a specific outbound send.",
+          "in": "query"
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "description": "Filter by inbound email lifecycle status.",
+          "in": "query"
+        },
+        {
+          "name": "date_from",
+          "type": "string",
+          "required": false,
+          "description": "Filter emails received on or after this timestamp.",
+          "in": "query"
+        },
+        {
+          "name": "date_to",
+          "type": "string",
+          "required": false,
+          "description": "Filter emails received on or before this timestamp.",
+          "in": "query"
+        },
+        {
+          "name": "has_attachment",
+          "type": "string",
+          "required": false,
+          "description": "Filter by whether the email has one or more attachments.",
+          "in": "query"
+        },
+        {
+          "name": "spam_score_lt",
+          "type": "number",
+          "required": false,
+          "description": "Filter to emails with spam score below this value.",
+          "in": "query"
+        },
+        {
+          "name": "spam_score_gte",
+          "type": "number",
+          "required": false,
+          "description": "Filter to emails with spam score greater than or equal to this value.",
+          "in": "query"
+        },
+        {
+          "name": "sort",
+          "type": "string",
+          "required": false,
+          "description": "Sort mode.",
+          "in": "query"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Opaque pagination cursor from a previous search response.",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Number of results per page",
+          "in": "query"
+        },
+        {
+          "name": "snippet",
+          "type": "string",
+          "required": false,
+          "description": "Include subject/body highlight snippets when text search is active.",
+          "in": "query"
+        },
+        {
+          "name": "include_facets",
+          "type": "string",
+          "required": false,
+          "description": "Include facet counts for sender, domain, status, and attachment presence.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_email",
+      "description": "Get inbound email by id. Returns the full record for an inbound email received at one of your verified domains, including the parsed text and HTML bodies, threading metadata, SMTP envelope detail, webhook delivery state, and a `replies` array for any outbound sends recorded as replies to this inbound. For listing inbound emails (with cursor pagination, statu",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/emails/{id}"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.delete_email",
+      "description": "Delete an email. Permanently delete a received email and its stored content. This cannot be undone",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/emails/{id}"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.download_raw_email",
+      "description": "Download raw email. Downloads the raw RFC 822 email file (.eml). Authenticates via a signed download token (provided in webhook payloads) or a valid session.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/emails/{id}/raw"
+      },
+      "params": [
+        {
+          "name": "token",
+          "type": "string",
+          "required": false,
+          "description": "Signed download token from webhook payload",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.download_attachments",
+      "description": "Download email attachments. Downloads all attachments as a gzip-compressed tar archive. Authenticates via a signed download token (provided in webhook payloads) or a valid session.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/emails/{id}/attachments.tar.gz"
+      },
+      "params": [
+        {
+          "name": "token",
+          "type": "string",
+          "required": false,
+          "description": "Signed download token from webhook payload",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.reply_to_email",
+      "description": "Reply to an inbound email. Sends an outbound reply to the inbound email identified by `id`. Threading headers (`In-Reply-To`, `References`), recipient derivation (Reply-To, then From, then bare sender), and the `Re:` subject prefix are all derived server-side from the stored inbound row.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/emails/{id}/reply"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "body_text",
+          "type": "string",
+          "required": false,
+          "description": "Plain-text reply body.",
+          "in": "body"
+        },
+        {
+          "name": "body_html",
+          "type": "string",
+          "required": false,
+          "description": "HTML reply body.",
+          "in": "body"
+        },
+        {
+          "name": "from",
+          "type": "string",
+          "required": false,
+          "description": "Optional override for the reply's From header.",
+          "in": "body"
+        },
+        {
+          "name": "wait",
+          "type": "boolean",
+          "required": false,
+          "description": "When true, wait for the first downstream SMTP delivery outcome before returning, mirroring the send-mail `wait` semantic",
+          "in": "body"
+        },
+        {
+          "name": "attachments",
+          "type": "array<object>",
+          "required": false,
+          "description": "Inline attachments for this reply.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.replay_email_webhooks",
+      "description": "Replay email webhooks. Re-delivers the webhook payload for this email to all active endpoints matching the email's domain. Rate limited per-email (short cooldown between successive replays of the same email) and per-org (burst + sustained windows), sharing an org-wide budget with delivery replays.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/emails/{id}/replay"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        }
+      ]
+    },
+    {
+      "name": "primitive.discard_email_content",
+      "description": "Discard email content. Permanently deletes the email's raw bytes, parsed body (text + HTML), and attachments while preserving metadata (sender, recipient, subject, timestamps, hashes, attachment manifest) for audit logs. Idempotent: a second call returns success with `already_discarded: true` and does no work.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/emails/{id}/discard-content"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_conversation",
+      "description": "Get the conversation an email belongs to. Returns the full conversation the given inbound email belongs to, as ordered, ready-to-prompt turns WITH bodies. It resolves the thread from the email and returns every message oldest-first, so an agent that received an email can pass `messages` straight to a chat model in one call instead of walking `/threads/{id}`",
+      "latency": "med",
+      "http": {
+        "verb": "GET",
+        "path": "/emails/{id}/conversation"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.list_endpoints",
+      "description": "List webhook endpoints. Returns all active (non-deleted) webhook endpoints",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/endpoints"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.create_endpoint",
+      "description": "Create a webhook endpoint. Creates a new webhook endpoint. If a deactivated endpoint with the same URL and domain exists, it is reactivated instead.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/endpoints"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "kind",
+          "type": "string",
+          "required": false,
+          "description": "http: deliver to a webhook URL (provide url).",
+          "in": "body"
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "required": false,
+          "description": "The webhook URL to deliver events to.",
+          "in": "body"
+        },
+        {
+          "name": "function_id",
+          "type": "string",
+          "required": false,
+          "description": "The Function to invoke.",
+          "in": "body"
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "required": false,
+          "description": "Whether the endpoint is active",
+          "in": "body"
+        },
+        {
+          "name": "domain_id",
+          "type": "string",
+          "required": false,
+          "description": "Restrict to emails from a specific domain",
+          "in": "body"
+        },
+        {
+          "name": "rules",
+          "type": "object",
+          "required": false,
+          "description": "Endpoint-specific filtering rules",
+          "in": "body"
+        },
+        {
+          "name": "is_route_target",
+          "type": "boolean",
+          "required": false,
+          "description": "Create this endpoint as a route-target: reachable only via an explicit recipient route, never a domain's default destina",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.update_endpoint",
+      "description": "Update a webhook endpoint. Updates an active webhook endpoint. If the URL is changed, the old endpoint is deactivated and a new one is created (or an existing deactivated endpoint with the new URL is reactivated).",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/endpoints/{id}"
+      },
+      "params": [
+        {
+          "name": "url",
+          "type": "string",
+          "required": false,
+          "description": "New webhook URL (triggers endpoint rotation)",
+          "in": "body"
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "domain_id",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "rules",
+          "type": "object",
+          "required": false,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.delete_endpoint",
+      "description": "Delete a webhook endpoint. Delete a webhook endpoint. Inbound messages are no longer delivered to it",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/endpoints/{id}"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.test_endpoint",
+      "description": "Send a test webhook. Sends a sample `email.received` event to the endpoint. The request includes SSRF protection (private IP rejection and DNS pinning).",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/endpoints/{id}/test"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        }
+      ]
+    },
+    {
+      "name": "primitive.list_filters",
+      "description": "List filter rules. Returns all whitelist and blocklist filter rules",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/filters"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.create_filter",
+      "description": "Create a filter rule. Creates a new whitelist or blocklist filter. Per-domain filters require a Pro plan.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/filters"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "pattern",
+          "type": "string",
+          "required": true,
+          "description": "Email address or pattern to filter",
+          "in": "body"
+        },
+        {
+          "name": "domain_id",
+          "type": "string",
+          "required": false,
+          "description": "Restrict filter to a specific domain (Pro plan required)",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.update_filter",
+      "description": "Update a filter rule. Toggle a filter's enabled state",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/filters/{id}"
+      },
+      "params": [
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "required": true,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.delete_filter",
+      "description": "Delete a filter rule. Delete an inbound routing filter rule. Messages already processed by the rule are unaffected",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/filters/{id}"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.list_wake_schedules",
+      "description": "List wake schedules. Returns the org's wake.dispatch schedules",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/wake/schedules"
+      },
+      "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.create_wake_schedule",
+      "description": "Create a wake schedule. Create a cron schedule that sends a wake.dispatch command to one of your own function addresses. `from` and `to` must differ (no self-dispatch); the cron expression and IANA timezone are validated and the first fire time is computed without firing immediately.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/wake/schedules"
+      },
+      "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "from_address",
+          "type": "string",
+          "required": true,
+          "description": "Sending identity (must be a domain the org can sign).",
+          "in": "body"
+        },
+        {
+          "name": "target_address",
+          "type": "string",
+          "required": true,
+          "description": "Your function address (must differ from from_address).",
+          "in": "body"
+        },
+        {
+          "name": "command",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "args",
+          "type": "object",
+          "required": false,
+          "description": "Optional JSON object passed through to the woken function.",
+          "in": "body"
+        },
+        {
+          "name": "cron_expr",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "timezone",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_wake_schedule",
+      "description": "Get a wake schedule. Get a wake schedule",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/wake/schedules/{id}"
+      },
+      "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.update_wake_schedule",
+      "description": "Update a wake schedule. Update a schedule's command, args, cadence, addresses, note, or enabled state. Changing the cadence (or re-enabling) recomputes the next fire time.",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/wake/schedules/{id}"
+      },
+      "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
+      "params": [
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "command",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "args",
+          "type": "object",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "cron_expr",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "timezone",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "from_address",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "target_address",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.delete_wake_schedule",
+      "description": "Delete a wake schedule. Delete a wake schedule",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/wake/schedules/{id}"
+      },
+      "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.run_wake_schedule",
+      "description": "Run a wake schedule now. Fire the schedule immediately, sending one wake.dispatch via the same signed-send path as a scheduled fire. Does not change the schedule's next fire time.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/wake/schedules/{id}/run"
+      },
+      "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        }
+      ]
+    },
+    {
+      "name": "primitive.list_wake_authorizations",
+      "description": "List wake authorizations. Returns the per-target allowlist grants that authorize which senders may wake a function. Optionally filter by the target endpoint.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/wake/authorizations"
+      },
+      "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
+      "params": [
+        {
+          "name": "recipient_endpoint_id",
+          "type": "string",
+          "required": false,
+          "description": "Only return grants for this target endpoint",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.create_wake_authorization",
+      "description": "Create a wake authorization. Grant a sender domain (and optionally a specific address and command set) permission to wake a target function. The domain must be fully-qualified.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/wake/authorizations"
+      },
+      "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "recipient_endpoint_id",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "allowed_sender_domain",
+          "type": "string",
+          "required": true,
+          "description": "Fully-qualified sender domain (at least two labels).",
+          "in": "body"
+        },
+        {
+          "name": "allowed_sender_address",
+          "type": "string",
+          "required": false,
+          "description": "Optional specific sender address to pin the grant to.",
+          "in": "body"
+        },
+        {
+          "name": "allowed_commands",
+          "type": "array<string>",
+          "required": false,
+          "description": "Optional command allowlist; null = any command.",
+          "in": "body"
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.update_wake_authorization",
+      "description": "Update a wake authorization. Toggle a wake authorization's enabled state",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/wake/authorizations/{id}"
+      },
+      "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
+      "params": [
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "required": true,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.delete_wake_authorization",
+      "description": "Delete a wake authorization. Delete a wake authorization",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/wake/authorizations/{id}"
+      },
+      "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.list_wake_dispatches",
+      "description": "List recent wake dispatches. Read-only audit of recent wake.dispatch interactions for the org",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/wake/dispatches"
+      },
+      "gated": "requires a plan/entitlement upgrade \u2014 Wake scheduling is not on the free agent plan",
+      "params": [
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Maximum number of rows to return (1-200, default 50)",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.list_routes",
+      "description": "List recipient routes. Returns the org's recipient routing rules in evaluation order. Each rule binds a recipient address pattern to one endpoint; inbound mail resolves to a single destination at delivery time.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/routes"
+      },
+      "gated": "requires the recipient-routing feature \u2014 disabled on the free agent plan (the managed inbox routes to storage automatically)",
+      "params": []
+    },
+    {
+      "name": "primitive.create_route",
+      "description": "Create a recipient route. Binds a recipient pattern to a destination. Provide exactly one of `endpoint_id` (an existing endpoint) or `function_id`.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/routes"
+      },
+      "gated": "requires the recipient-routing feature \u2014 disabled on the free agent plan (the managed inbox routes to storage automatically)",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "match_type",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "pattern",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "endpoint_id",
+          "type": "string",
+          "required": false,
+          "description": "An existing endpoint to route to.",
+          "in": "body"
+        },
+        {
+          "name": "function_id",
+          "type": "string",
+          "required": false,
+          "description": "Route to this function, minting its route-target endpoint if needed.",
+          "in": "body"
+        },
+        {
+          "name": "domain_id",
+          "type": "string",
+          "required": false,
+          "description": "Scope the route to a domain; defaults to the pattern's domain.",
+          "in": "body"
+        },
+        {
+          "name": "priority",
+          "type": "integer",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "required": false,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.reorder_routes",
+      "description": "Reorder recipient routes. Update the priority of one or more routes in a single call",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/routes/reorder"
+      },
+      "gated": "requires the recipient-routing feature \u2014 disabled on the free agent plan (the managed inbox routes to storage automatically)",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "updates",
+          "type": "array<object>",
+          "required": true,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.simulate_route",
+      "description": "Simulate routing for a recipient. Resolves where an inbound email to `recipient` would be delivered, with a trace of every rule evaluated and why. Read-only; creates nothing.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/routes/simulate"
+      },
+      "gated": "requires the recipient-routing feature \u2014 disabled on the free agent plan (the managed inbox routes to storage automatically)",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "recipient",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "event_type",
+          "type": "string",
+          "required": false,
+          "description": "Event type to model; defaults to email.received.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.update_route",
+      "description": "Update a recipient route. Update a recipient route",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/routes/{id}"
+      },
+      "gated": "requires the recipient-routing feature \u2014 disabled on the free agent plan (the managed inbox routes to storage automatically)",
+      "params": [
+        {
+          "name": "match_type",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "pattern",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "endpoint_id",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "domain_id",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "priority",
+          "type": "integer",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "required": false,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.delete_route",
+      "description": "Delete a recipient route. Delete a recipient route",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/routes/{id}"
+      },
+      "gated": "requires the recipient-routing feature \u2014 disabled on the free agent plan (the managed inbox routes to storage automatically)",
+      "params": []
+    },
+    {
+      "name": "primitive.list_deliveries",
+      "description": "List webhook deliveries. Returns a paginated list of webhook delivery attempts. Each delivery includes a nested `email` object with sender, recipient, and subject.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/webhooks/deliveries"
+      },
+      "params": [
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Pagination cursor from a previous response's `meta.cursor` field.",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Number of results per page",
+          "in": "query"
+        },
+        {
+          "name": "email_id",
+          "type": "string",
+          "required": false,
+          "description": "Filter by email ID",
+          "in": "query"
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "description": "Filter by delivery status",
+          "in": "query"
+        },
+        {
+          "name": "date_from",
+          "type": "string",
+          "required": false,
+          "description": "Filter deliveries created on or after this timestamp",
+          "in": "query"
+        },
+        {
+          "name": "date_to",
+          "type": "string",
+          "required": false,
+          "description": "Filter deliveries created on or before this timestamp",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.replay_delivery",
+      "description": "Replay a webhook delivery. Re-sends the stored webhook payload from a previous delivery attempt. If the original endpoint is still active, it is targeted.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/webhooks/deliveries/{id}/replay"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_send_permissions",
+      "description": "List send-permission rules. Returns a flat list of rules describing every recipient the caller may send to. Each rule has a `type`, a kind-specific payload, and a human-readable `description`.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/send-permissions"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.send_email",
+      "description": "Send outbound email. Sends an outbound email through Primitive's outbound relay. By default the request returns once the relay accepts the message for delivery.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/send-mail"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional customer-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "from",
+          "type": "string",
+          "required": true,
+          "description": "RFC 5322 From header.",
+          "in": "body"
+        },
+        {
+          "name": "to",
+          "type": "string",
+          "required": true,
+          "description": "Recipient address.",
+          "in": "body"
+        },
+        {
+          "name": "subject",
+          "type": "string",
+          "required": true,
+          "description": "Subject line for the outbound message",
+          "in": "body"
+        },
+        {
+          "name": "body_text",
+          "type": "string",
+          "required": false,
+          "description": "Plain-text message body.",
+          "in": "body"
+        },
+        {
+          "name": "body_html",
+          "type": "string",
+          "required": false,
+          "description": "HTML message body.",
+          "in": "body"
+        },
+        {
+          "name": "in_reply_to",
+          "type": "string",
+          "required": false,
+          "description": "Message-ID of the direct parent email when sending a threaded reply.",
+          "in": "body"
+        },
+        {
+          "name": "references",
+          "type": "array<string>",
+          "required": false,
+          "description": "Full ordered message-id chain for the thread.",
+          "in": "body"
+        },
+        {
+          "name": "attachments",
+          "type": "array<object>",
+          "required": false,
+          "description": "Inline attachments.",
+          "in": "body"
+        },
+        {
+          "name": "wait",
+          "type": "boolean",
+          "required": false,
+          "description": "When true, wait for the first downstream SMTP delivery outcome before returning.",
+          "in": "body"
+        },
+        {
+          "name": "wait_timeout_ms",
+          "type": "integer",
+          "required": false,
+          "description": "Maximum time to wait for a delivery outcome when wait is true.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.semantic_search",
+      "description": "Semantic search across received and sent mail. Ranked search across both received and sent mail. The `mode` field selects the ranking strategy: - `keyword`: lexical full-text matching only (no embeddings).",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/semantic-search"
+      },
+      "gated": "requires the Pro plan \u2014 semantic search over mail is not on the free agent plan",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "query",
+          "type": "string",
+          "required": false,
+          "description": "Free-text query.",
+          "in": "body"
+        },
+        {
+          "name": "mode",
+          "type": "string",
+          "required": false,
+          "description": "Ranking strategy.",
+          "in": "body"
+        },
+        {
+          "name": "corpus",
+          "type": "array<string>",
+          "required": false,
+          "description": "Which mail to search.",
+          "in": "body"
+        },
+        {
+          "name": "search_in",
+          "type": "array<string>",
+          "required": false,
+          "description": "Restrict matching to these fields.",
+          "in": "body"
+        },
+        {
+          "name": "exclude",
+          "type": "array<string>",
+          "required": false,
+          "description": "Exclude these fields from matching.",
+          "in": "body"
+        },
+        {
+          "name": "date_from",
+          "type": "string",
+          "required": false,
+          "description": "Only include mail at or after this timestamp.",
+          "in": "body"
+        },
+        {
+          "name": "date_to",
+          "type": "string",
+          "required": false,
+          "description": "Only include mail at or before this timestamp.",
+          "in": "body"
+        },
+        {
+          "name": "include",
+          "type": "array<string>",
+          "required": false,
+          "description": "Opt-in extras.",
+          "in": "body"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Maximum number of results to return.",
+          "in": "body"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Opaque pagination cursor from a prior response's `meta.cursor`.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.list_sent_emails",
+      "description": "List outbound sent emails. Returns a paginated list of OUTBOUND emails the caller's org has sent via /send-mail (and /emails/{id}/reply, which forwards through /send-mail). Includes every recorded attempt, including gate-denied attempts that the agent never called and rows still in `queued` state.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/sent-emails"
+      },
+      "params": [
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Pagination cursor from a previous response's `meta.cursor` field.",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Number of results per page",
+          "in": "query"
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "description": "Filter to rows in this status.",
+          "in": "query"
+        },
+        {
+          "name": "request_id",
+          "type": "string",
+          "required": false,
+          "description": "Filter to the row matching a specific server-issued `request_id`.",
+          "in": "query"
+        },
+        {
+          "name": "idempotency_key",
+          "type": "string",
+          "required": false,
+          "description": "Filter to rows with the given `client_idempotency_key`.",
+          "in": "query"
+        },
+        {
+          "name": "date_from",
+          "type": "string",
+          "required": false,
+          "description": "Inclusive lower bound on `created_at`.",
+          "in": "query"
+        },
+        {
+          "name": "date_to",
+          "type": "string",
+          "required": false,
+          "description": "Inclusive upper bound on `created_at`.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_sent_email",
+      "description": "Get a sent email by id. Returns the full sent-email record by id, including `body_text` and `body_html` (omitted from the listing endpoint to keep paginated responses small). Use this when diagnosing a specific send, e.g.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/sent-emails/{id}"
+      },
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_thread",
+      "description": "Get a conversation thread by id. Returns a conversation thread: its metadata plus the inbound and outbound messages that belong to it, interleaved in time order (oldest first). A thread spans both received emails and your sends, so an agent can reconstruct an entire back-and-forth from one call instead of walking reply headers.",
+      "latency": "med",
+      "http": {
+        "verb": "GET",
+        "path": "/threads/{id}"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.list_functions",
+      "description": "List functions. Returns every active (non-deleted) function in the org, newest first. Each entry carries deploy status and timestamps.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/functions"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.create_function",
+      "description": "Deploy a function. Creates and deploys a new function. The handler must be a single ESM module whose default export is an object with an async `fetch(request, env)` method (Workers-style).",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/functions"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Slug-style name.",
+          "in": "body"
+        },
+        {
+          "name": "code",
+          "type": "string",
+          "required": false,
+          "description": "Pre-built handler as a single ESM module.",
+          "in": "body"
+        },
+        {
+          "name": "sourceMap",
+          "type": "string",
+          "required": false,
+          "description": "Optional source map for the bundle.",
+          "in": "body"
+        },
+        {
+          "name": "files",
+          "type": "object",
+          "required": false,
+          "description": "Source files for a managed build, as a map of path to file contents (for example {\"package.json\": \"...\", \"src/index.ts\":",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_function",
+      "description": "Get a function. Returns the full record for a function, including its current source code and the deploy status / error from the most recent deploy attempt.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/functions/{id}"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.update_function",
+      "description": "Update and redeploy a function. Replaces the function's source code with the body's `code` and triggers a redeploy. Same size limits as `POST /functions`.",
+      "latency": "slow",
+      "http": {
+        "verb": "PUT",
+        "path": "/functions/{id}"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": [
+        {
+          "name": "code",
+          "type": "string",
+          "required": false,
+          "description": "New pre-built handler.",
+          "in": "body"
+        },
+        {
+          "name": "sourceMap",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "files",
+          "type": "object",
+          "required": false,
+          "description": "Source files for a managed build, as a map of path to file contents.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.delete_function",
+      "description": "Delete a function. Delete a hosted inbound function. It stops running on future inbound messages",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/functions/{id}"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.test_function",
+      "description": "Send a test invocation. Sends a real test email from a Primitive-controlled sender to a local-part on one of the org's verified inbound domains. By default the recipient is a synthetic `__primitive_function_test+<random>@<domain>` address on a domain selected to route to the function.",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/functions/{id}/test"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "local_part",
+          "type": "string",
+          "required": false,
+          "description": "Override the synthetic local-part.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_function_test_run_trace",
+      "description": "Get a function test run trace. Returns the current end-to-end trace for a function test run. The trace is intentionally partial while the test is still in flight: callers can poll this endpoint and watch it fill in from send -> inbound -> webhook deliveries -> outbound requests, logs, and replies.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/functions/{id}/test-runs/{run_id}/trace"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.get_org_routing_topology",
+      "description": "Get the org's function routing topology. Returns a single snapshot of how inbound mail is routed across this org's active domains and functions: which active domain has which function bound, the org's fallback function (if any), and every deployed function with no route bound. Use this to answer \"which of my functions actually receive mail?\" diagnostically.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/functions/routing-topology"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.get_function_routing",
+      "description": "Get a function's current route binding. Returns the endpoint binding for the function, or null when no route is currently bound. The binding identifies whether the function receives mail for a specific domain (scoped) or for any active domain that has no scoped binding (fallback).",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/functions/{id}/routing"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.set_function_route",
+      "description": "Bind a route to a function. Binds inbound mail to this function. The route target is either a specific verified domain (scoped) or the org's fallback (any active domain with no scoped binding).",
+      "latency": "med",
+      "http": {
+        "verb": "PUT",
+        "path": "/functions/{id}/route"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": [
+        {
+          "name": "target",
+          "type": "object",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "takeover",
+          "type": "boolean",
+          "required": false,
+          "description": "When true, deactivate any conflicting binding before installing this one.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.unset_function_route",
+      "description": "Unbind any route from a function. Deactivates every active endpoint bound to this function. The function stays deployed but stops receiving inbound mail.",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/functions/{id}/route"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.list_function_secrets",
+      "description": "List a function's secrets. Returns metadata for every secret bound to the function, with managed entries (provisioned by Primitive) listed first and user-set entries listed alphabetically after. **Values are never returned.** Secret writes are write-only.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/functions/{id}/secrets"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.create_function_secret",
+      "description": "Create or update a secret. Idempotent insert-or-update keyed on `(function_id, key)`. Returns 201 the first time the key is set, 200 on subsequent updates.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/functions/{id}/secrets"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Uppercase letters, digits, and underscores.",
+          "in": "body"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "required": true,
+          "description": "Secret value, up to 4096 UTF-8 bytes.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.set_function_secret",
+      "description": "Set a secret by key. Path-keyed companion to `POST /functions/{id}/secrets`. Idempotent: returns 201 the first time the key is set, 200 on subsequent updates.",
+      "latency": "med",
+      "http": {
+        "verb": "PUT",
+        "path": "/functions/{id}/secrets/{key}"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": [
+        {
+          "name": "value",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.delete_function_secret",
+      "description": "Delete a secret. Removes the secret. The binding stays live in the running handler until the next deploy refreshes the binding set (`PUT /functions/{id}` with the existing code is sufficient).",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/functions/{id}/secrets/{key}"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.list_org_secrets",
+      "description": "List org-level (global) secrets. Returns metadata for every org-level secret. Org secrets apply to every function in the org and are read as `env.<KEY>` in handlers.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/org/secrets"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.create_org_secret",
+      "description": "Create or update an org secret. Idempotent insert-or-update keyed on `(org_id, key)`. Returns 201 the first time the key is set, 200 on subsequent updates.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/org/secrets"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Uppercase letters, digits, and underscores.",
+          "in": "body"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "required": true,
+          "description": "Secret value, up to 4096 UTF-8 bytes.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.set_org_secret",
+      "description": "Set an org secret by key. Path-keyed companion to `POST /org/secrets`. Idempotent: returns 201 the first time the key is set, 200 on subsequent updates.",
+      "latency": "med",
+      "http": {
+        "verb": "PUT",
+        "path": "/org/secrets/{key}"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": [
+        {
+          "name": "value",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.delete_org_secret",
+      "description": "Delete an org secret. Removes the org secret. Functions keep the previous value until each is redeployed.",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/org/secrets/{key}"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": []
+    },
+    {
+      "name": "primitive.list_function_logs",
+      "description": "List a function's execution logs. Returns the most recent `function_logs` rows for the function, newest first. Each row is a single `console.log` / `console.error` invocation captured from the running handler.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/functions/{id}/logs"
+      },
+      "gated": "requires the developer plan \u2014 confirm an email at primitive.dev to upgrade; hosted Functions are not on the free agent plan",
+      "params": [
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Maximum number of rows to return.",
+          "in": "query"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Opaque pagination cursor from a previous response's `next_cursor`.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.set_memory",
+      "description": "Set a memory. Create or update a durable JSON memory under an org or function scope. Function-authenticated requests use their own Function id and cannot override it.",
+      "latency": "med",
+      "http": {
+        "verb": "PUT",
+        "path": "/memories"
+      },
+      "params": [
+        {
+          "name": "x-primitive-function-id",
+          "type": "string",
+          "required": false,
+          "description": "Optional function id UUID used as the default scope for non-function-authenticated requests when the body does not inclu",
+          "in": "header"
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Caller-defined key, at most 512 UTF-8 bytes.",
+          "in": "body"
+        },
+        {
+          "name": "value",
+          "type": "object",
+          "required": true,
+          "description": "JSON value accepted by Primitive Memories.",
+          "in": "body"
+        },
+        {
+          "name": "scope",
+          "type": "object",
+          "required": false,
+          "description": "Memory scope.",
+          "in": "body"
+        },
+        {
+          "name": "ttl_seconds",
+          "type": "integer",
+          "required": false,
+          "description": "Set or replace the TTL in seconds.",
+          "in": "body"
+        },
+        {
+          "name": "expires_at",
+          "type": "string",
+          "required": false,
+          "description": "Set or replace the absolute expiration timestamp.",
+          "in": "body"
+        },
+        {
+          "name": "clear_ttl",
+          "type": "boolean",
+          "required": false,
+          "description": "Clear any existing TTL.",
+          "in": "body"
+        },
+        {
+          "name": "if_absent",
+          "type": "boolean",
+          "required": false,
+          "description": "Create only when the key is absent.",
+          "in": "body"
+        },
+        {
+          "name": "if_version",
+          "type": "string",
+          "required": false,
+          "description": "Bigint counter serialized as a base-10 string.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_memory",
+      "description": "Get a memory. Fetch one active memory by key and scope. Omit scope parameters to use automatic scope resolution.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/memories"
+      },
+      "params": [
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Memory key.",
+          "in": "query"
+        },
+        {
+          "name": "scope_type",
+          "type": "string",
+          "required": false,
+          "description": "Explicit scope type.",
+          "in": "query"
+        },
+        {
+          "name": "scope_id",
+          "type": "string",
+          "required": false,
+          "description": "Function id UUID when `scope_type=function`.",
+          "in": "query"
+        },
+        {
+          "name": "x-primitive-function-id",
+          "type": "string",
+          "required": false,
+          "description": "Optional function id UUID used as the default scope for non-function-authenticated requests when query scope parameters",
+          "in": "header"
+        }
+      ]
+    },
+    {
+      "name": "primitive.delete_memory",
+      "description": "Delete a memory. Delete one active memory by key and scope. Function-authenticated requests use their own Function id and cannot override it.",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/memories"
+      },
+      "params": [
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Memory key.",
+          "in": "query"
+        },
+        {
+          "name": "scope_type",
+          "type": "string",
+          "required": false,
+          "description": "Explicit scope type.",
+          "in": "query"
+        },
+        {
+          "name": "scope_id",
+          "type": "string",
+          "required": false,
+          "description": "Function id UUID when `scope_type=function`.",
+          "in": "query"
+        },
+        {
+          "name": "if_version",
+          "type": "string",
+          "required": false,
+          "description": "Optional compare-and-delete version.",
+          "in": "query"
+        },
+        {
+          "name": "x-primitive-function-id",
+          "type": "string",
+          "required": false,
+          "description": "Optional function id UUID used as the default scope for non-function-authenticated requests when query scope parameters",
+          "in": "header"
+        }
+      ]
+    },
+    {
+      "name": "primitive.search_memories",
+      "description": "Search memories. List active memories in a scope by lexicographic key prefix. Results are ordered by key ascending.",
+      "latency": "med",
+      "http": {
+        "verb": "GET",
+        "path": "/memories/search"
+      },
+      "params": [
+        {
+          "name": "prefix",
+          "type": "string",
+          "required": false,
+          "description": "Key prefix to match.",
+          "in": "query"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Key cursor from a previous response meta.cursor.",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Number of results per page",
+          "in": "query"
+        },
+        {
+          "name": "include_value",
+          "type": "string",
+          "required": false,
+          "description": "Pass `false` to omit the `value` field and return metadata only.",
+          "in": "query"
+        },
+        {
+          "name": "updated_after",
+          "type": "string",
+          "required": false,
+          "description": "Only include memories updated at or after this timestamp.",
+          "in": "query"
+        },
+        {
+          "name": "updated_before",
+          "type": "string",
+          "required": false,
+          "description": "Only include memories updated at or before this timestamp.",
+          "in": "query"
+        },
+        {
+          "name": "scope_type",
+          "type": "string",
+          "required": false,
+          "description": "Explicit scope type.",
+          "in": "query"
+        },
+        {
+          "name": "scope_id",
+          "type": "string",
+          "required": false,
+          "description": "Function id UUID when `scope_type=function`.",
+          "in": "query"
+        },
+        {
+          "name": "x-primitive-function-id",
+          "type": "string",
+          "required": false,
+          "description": "Optional function id UUID used as the default scope for non-function-authenticated requests when query scope parameters",
+          "in": "header"
+        }
+      ]
+    },
+    {
+      "name": "primitive.register_payout_address",
+      "description": "Register a payout address. Register (or update) the default payout address your org receives x402 payments at, for a given network. You prove control of the address with an org-bound `personal_sign` signature over the message produced by the SDK helper `buildPayoutRegistrationMessage`.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/x402/payout-addresses"
+      },
+      "gated": "requires the invite-only x402_payments + interactions_enabled entitlements",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "address",
+          "type": "string",
+          "required": true,
+          "description": "The payout address (your signer's own EVM address), 0x-prefixed.",
+          "in": "body"
+        },
+        {
+          "name": "network",
+          "type": "string",
+          "required": true,
+          "description": "The chain the address receives on.",
+          "in": "body"
+        },
+        {
+          "name": "signature",
+          "type": "string",
+          "required": true,
+          "description": "A `personal_sign` signature over the org-bound message produced by the SDK helper `buildPayoutRegistrationMessage`.",
+          "in": "body"
+        },
+        {
+          "name": "issued_at",
+          "type": "string",
+          "required": true,
+          "description": "ISO-8601 timestamp embedded in the signed message.",
+          "in": "body"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "required": false,
+          "description": "Optional human-readable label.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.list_payout_addresses",
+      "description": "List payout addresses. List your org's registered payout addresses, newest first",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/x402/payout-addresses"
+      },
+      "gated": "requires the invite-only x402_payments + interactions_enabled entitlements",
+      "params": []
+    },
+    {
+      "name": "primitive.create_email_challenge",
+      "description": "Create an email-native payment challenge. Issue an x402 payment challenge over a real email thread (the payee side). Unlike `createChallenge` (which mints a synthetic challenge id), this sends the challenge as an email from `from` to `to` and binds the payment to that DKIM-authenticated thread.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/x402/email-challenges"
+      },
+      "gated": "requires the invite-only x402_payments + interactions_enabled entitlements",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "from",
+          "type": "string",
+          "required": true,
+          "description": "Your sending address (the payee / funds receiver).",
+          "in": "body"
+        },
+        {
+          "name": "to",
+          "type": "string",
+          "required": true,
+          "description": "The payer's email address the challenge is sent to.",
+          "in": "body"
+        },
+        {
+          "name": "amount",
+          "type": "string",
+          "required": true,
+          "description": "Amount to collect, in token base units (unlike the `charge` CLI command, which also accepts `--amount-usdc`, this field",
+          "in": "body"
+        },
+        {
+          "name": "network",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "expires_in",
+          "type": "integer",
+          "required": false,
+          "description": "Seconds until the challenge expires.",
+          "in": "body"
+        },
+        {
+          "name": "resource",
+          "type": "string",
+          "required": false,
+          "description": "Optional URL identifying what is being paid for.",
+          "in": "body"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "Optional human-readable description of the payment.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.create_challenge",
+      "description": "Create a payment challenge. Create an x402 payment challenge (the payee side of a payment). The `pay_to` address is resolved server-side from your registered default payout address for the network, never from the request.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/x402/challenges"
+      },
+      "gated": "requires the invite-only x402_payments + interactions_enabled entitlements",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "amount",
+          "type": "string",
+          "required": true,
+          "description": "Amount to collect, in token base units.",
+          "in": "body"
+        },
+        {
+          "name": "network",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "payer_org",
+          "type": "string",
+          "required": false,
+          "description": "The org id allowed to pay this challenge (on-net binding).",
+          "in": "body"
+        },
+        {
+          "name": "expires_in",
+          "type": "integer",
+          "required": false,
+          "description": "Seconds until the challenge expires.",
+          "in": "body"
+        },
+        {
+          "name": "resource",
+          "type": "string",
+          "required": false,
+          "description": "Optional URL identifying what is being paid for.",
+          "in": "body"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "Optional human-readable description of the payment.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_challenge",
+      "description": "Get a payment challenge. Fetch a challenge you created, to poll its `status` and settlement receipt (`settle_tx`). Scoped to the challenger org that created it.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/x402/challenges/{id}"
+      },
+      "gated": "requires the invite-only x402_payments + interactions_enabled entitlements",
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "primitive.pay_challenge",
+      "description": "Pay a payment challenge. Settle a challenge addressed to your org as payer. The request body carries a signed x402 `PaymentPayload`: an EIP-3009 `transferWithAuthorization` signed locally with your own key, whose nonce is bound to the challenge via the SDK's `deriveEip3009Nonce`.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/x402/challenges/{id}/pay"
+      },
+      "gated": "requires the invite-only x402_payments + interactions_enabled entitlements",
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Resource UUID",
+          "in": "path"
+        },
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "payment",
+          "type": "object",
+          "required": true,
+          "description": "A signed x402 v1 `PaymentPayload`.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_spend_policy",
+      "description": "Get your spend policy. Read your org's outbound spend policy: the kill-switch, per-payment and per-day caps, and the payee allowlist. Returns the defaults (no limits, not paused) when no policy has been set.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/x402/spend-policy"
+      },
+      "gated": "requires the invite-only x402_payments + interactions_enabled entitlements",
+      "params": []
+    },
+    {
+      "name": "primitive.update_spend_policy",
+      "description": "Update your spend policy. Update your org's spend policy. Applied as a merge: only the fields you include change, and omitted fields keep their current value, so a partial update can't silently reset the kill-switch.",
+      "latency": "med",
+      "http": {
+        "verb": "PUT",
+        "path": "/x402/spend-policy"
+      },
+      "gated": "requires the invite-only x402_payments + interactions_enabled entitlements",
+      "params": [
+        {
+          "name": "paused",
+          "type": "boolean",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "max_per_payment",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "max_per_day",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "allowlist",
+          "type": "array<string>",
+          "required": false,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.list_declined_payments",
+      "description": "List declined payments. The 50 most recent payments your org's spend policy declined, newest first. Use this to see why an outbound payment was refused (a cap, the payee allowlist, or the kill-switch) instead of only reading the dashboard.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/x402/declined-payments"
+      },
+      "gated": "requires the invite-only x402_payments + interactions_enabled entitlements",
+      "params": []
+    },
+    {
+      "name": "primitive.list_registries",
+      "description": "List the registries you own. List the registries you own",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/registries"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.create_registry",
+      "description": "Create a registry. Create a registry",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/registries"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "Lowercase slug, unique across registries.",
+          "in": "body"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "is_public",
+          "type": "boolean",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "publish_policy",
+          "type": "string",
+          "required": false,
+          "description": "Who may publish into a registry.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_registry",
+      "description": "Get a public registry's metadata. Get a public registry's metadata",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/registries/{slug}"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.update_registry",
+      "description": "Update a registry you own. Update a registry you own",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/registries/{slug}"
+      },
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "is_public",
+          "type": "boolean",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "publish_policy",
+          "type": "string",
+          "required": false,
+          "description": "Who may publish into a registry.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.delete_registry",
+      "description": "Delete a registry you own. Removes the registry from discovery and frees its slug for re-creation",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/registries/{slug}"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.list_registry_agents",
+      "description": "List agents in a registry. List agents in a registry",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/registries/{slug}/agents"
+      },
+      "params": [
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Maximum number of items to return (1-200).",
+          "in": "query"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "The address of the last agent from the previous page.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.publish_agent",
+      "description": "Publish an agent into a registry. Publish an agent into a registry",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/registries/{slug}/agents"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "address",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "handle",
+          "type": "string",
+          "required": true,
+          "description": "The registry-scoped name to list the agent under.",
+          "in": "body"
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "required": false,
+          "description": "Present to define the agent identity before publishing (define + publish in one call).",
+          "in": "body"
+        },
+        {
+          "name": "endpoint_id",
+          "type": "string",
+          "required": false,
+          "description": "Optional, only used when defining.",
+          "in": "body"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "tags",
+          "type": "array<string>",
+          "required": false,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.resolve_registry_handle",
+      "description": "Resolve a registry handle to its agent. Resolve a registry handle to its agent",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/registries/{slug}/agents/{handle}"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.unpublish_agent",
+      "description": "Unpublish an agent from a registry. Unpublish an agent from a registry",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/registries/{slug}/agents/{handle}"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.list_registry_requests",
+      "description": "List pending publication requests. List pending publication requests",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/registries/{slug}/requests"
+      },
+      "params": [
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Maximum number of items to return (1-200).",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.decide_registry_request",
+      "description": "Approve or reject a publication request. Approve or reject a publication request",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/registries/{slug}/requests/{id}"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "decision",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.define_agent",
+      "description": "Define an agent identity. Define an agent identity",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/agents"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "address",
+          "type": "string",
+          "required": true,
+          "description": "The agent's globally unique email address; mail to it must route to an endpoint the account controls.",
+          "in": "body"
+        },
+        {
+          "name": "endpoint_id",
+          "type": "string",
+          "required": false,
+          "description": "Optional.",
+          "in": "body"
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "required": true,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "",
+          "in": "body"
+        },
+        {
+          "name": "tags",
+          "type": "array<string>",
+          "required": false,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_agent",
+      "description": "Get an agent's public profile by address. Get an agent's public profile by address",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/agents/{address}"
+      },
+      "params": []
+    },
+    {
+      "name": "primitive.list_templates",
+      "description": "List function templates. List approved Function templates available for browsing and installation. Results are cacheable and paginated with `data.next_cursor`",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/templates"
+      },
+      "params": [
+        {
+          "name": "q",
+          "type": "string",
+          "required": false,
+          "description": "Search templates by title, summary, or slug.",
+          "in": "query"
+        },
+        {
+          "name": "tag",
+          "type": "string",
+          "required": false,
+          "description": "Filter templates by an exact tag.",
+          "in": "query"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Cursor from a previous response `data.next_cursor` value.",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Maximum number of templates to return.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_template",
+      "description": "Get a function template. Fetch one approved Function template by slug, including its manifest snapshot and README. The stored source files used for install are not returned",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/templates/{id}"
+      },
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Template slug from the template manifest.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "primitive.install_template",
+      "description": "Install a function template. Start a one-shot deploy of an approved deploy-mode Function template. The response returns an install record immediately; poll `GET /templates/installs/{id}` for progress",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/templates/{id}/install"
+      },
+      "gated": "requires the developer plan \u2014 installs a template as a hosted Function",
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Template slug from the template manifest.",
+          "in": "path"
+        },
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "address",
+          "type": "string",
+          "required": false,
+          "description": "Localpart to claim on the selected inbound domain.",
+          "in": "body"
+        },
+        {
+          "name": "domain",
+          "type": "string",
+          "required": false,
+          "description": "Org domain name to claim the address on.",
+          "in": "body"
+        },
+        {
+          "name": "variables",
+          "type": "object",
+          "required": false,
+          "description": "Template variable values keyed by manifest variable key.",
+          "in": "body"
+        },
+        {
+          "name": "secrets",
+          "type": "object",
+          "required": false,
+          "description": "Secret values keyed by manifest secret key.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_template_install",
+      "description": "Get template install status. Fetch the current state of a template install. Reads may advance the self-test phase when a reply effect has been observed",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/templates/installs/{id}"
+      },
+      "gated": "requires the developer plan \u2014 tracks a hosted Function install",
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Template install UUID.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "primitive.send_mail_batch",
+      "description": "Send a batch of emails in one request. Send up to 100 independent messages in a single call. Each message uses the same body schema and the same send path as `POST /send-mail`, so auth, validation, rate limiting, and idempotency apply per message.",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/send-mail/batch"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "messages",
+          "type": "array<object>",
+          "required": true,
+          "description": "The messages to send.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.ask",
+      "description": "Ask about Primitive \u2014 NLWeb query (no authentication). Microsoft NLWeb natural-language query endpoint. POST `{ \"q\": \"...\" }`.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/ask"
+      },
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": false,
+          "description": "Optional client-supplied idempotency key.",
+          "in": "header"
+        },
+        {
+          "name": "q",
+          "type": "string",
+          "required": false,
+          "description": "Natural-language question about Primitive.",
+          "in": "body"
+        },
+        {
+          "name": "prefer",
+          "type": "object",
+          "required": false,
+          "description": "",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "primitive.get_health",
+      "description": "Service health check. Liveness probe for the API. Returns 200 with a small status payload whenever the service is up.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/health"
+      },
+      "params": []
+    }
+  ],
+  "listing": {
+    "display_name": "Primitive",
+    "tagline": "Email for AI agents \u2014 provision a managed inbox in one call, then send, receive, reply, and search real email over a single REST API.",
+    "app_description": "# Primitive \u2014 email infrastructure for AI agents\n\n[Primitive](https://www.primitive.dev) gives an agent a real, working email identity with **no SMTP credentials, no DNS, and no human in the loop**. One call to `primitive.signup` provisions a free account plus a managed `*.primitive.email` inbox (verified by construction). From then on the adapter **injects your API key on every call automatically** \u2014 you never see, store, or pass it. The key is minted by Primitive and cached locally under `~/.pilot`; call `primitive.signup` once and every other method authenticates as you.\n\n## What you can do on the free plan\n- **Send** outbound mail (`primitive.send_email`), **reply** on-thread (`primitive.reply_to_email`), and **batch-send** (`primitive.send_mail_batch`), with attachments and idempotency keys.\n- **Receive** at your managed inbox: list, get, search, download raw MIME + attachments, and follow conversations (`primitive.list_emails`, `primitive.search_emails`, `primitive.get_email`, `primitive.get_conversation`). Long-poll for new mail with `?since=<cursor>&wait=30`.\n- **Route & filter** inbound mail (`primitive.create_route`, `primitive.create_filter`), register **webhook endpoints** (`primitive.create_endpoint`), and read **inbox readiness** (`primitive.get_inbox_status`).\n- **Primitive Memories** \u2014 durable JSON key-value state across turns, retries, and inbound messages (`primitive.set_memory`, `primitive.get_memory`, `primitive.search_memories`).\n- **Semantic search** across received and sent mail (`primitive.semantic_search`).\n\n## Auth model\n`primitive.signup` is the only step. It POSTs Primitive's emailless account endpoint, which returns a `prim_` API key and a provisioned inbox; the adapter caches both to `secrets.json` and injects the key on the `Authorization` header of every subsequent call. It is **idempotent** \u2014 a host that already has a key keeps it (a repeat call never mints a new identity). Any method called before signup **soft-fails with exact activation instructions** instead of erroring.\n\n## Not on the free plan\nFour families need an account upgrade and are clearly marked in `primitive.help` under a free-plan disclaimer: **Functions** (hosted JavaScript on inbound mail \u2014 developer plan), **Wake** schedules, **x402** USDC payments over email (invite-only), and **custom Domains** (transactional send/receive from your own domain with managed SPF/DKIM/DMARC). They are implemented and callable, but return a plan/entitlement error until the account is upgraded at [primitive.dev](https://www.primitive.dev).\n",
+    "license": "Proprietary",
+    "homepage": "https://www.primitive.dev",
+    "source_url": "https://docs.primitive.dev/docs",
+    "categories": [
+      "communications"
+    ],
+    "keywords": [
+      "email",
+      "smtp",
+      "inbox",
+      "agents",
+      "mail",
+      "primitive",
+      "send",
+      "receive"
+    ]
+  },
+  "vendor": {
+    "name": "Primitive",
+    "url": "https://www.primitive.dev",
+    "contact": "https://www.primitive.dev",
+    "agent_usage": "Call primitive.signup once to provision a free account + managed inbox; the API key is cached locally and injected on every subsequent call automatically. Then send, receive, reply to, and search real email. Long-poll primitive.list_emails with since+wait to await inbound mail.",
+    "capabilities": "Programmatic email for agents: emailless signup, managed *.primitive.email inbox, outbound send/reply/batch with attachments, inbound listing/search/raw/attachments/conversations, routes, filters, webhook endpoints, durable Memories, and semantic search. Functions, Wake, x402 payments, and custom domains available on account upgrade."
+  }
+}

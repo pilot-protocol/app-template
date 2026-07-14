@@ -150,6 +150,7 @@ type SubMethod struct {
 	Local       *SubLocal   `json:"local"`       // local metadata route (no backend call)
 	Signup      *SubSignup  `json:"signup"`      // no-broker self-signup route (mints + caches a per-user key)
 	Params      []SubParam  `json:"params"`
+	Gated       string      `json:"gated"` // non-empty = usable only after an account upgrade; the reason is surfaced in the free-plan disclaimer at the bottom of <ns>.help
 }
 
 // SubSignup makes a method self-provision a per-user backend key with NO broker:
@@ -160,13 +161,15 @@ type SubMethod struct {
 // $APP/secrets.json under SecretKey, from which the byo ${TOKEN} headers resolve
 // it). One SubSignup describes one leg, selected by Step.
 type SubSignup struct {
-	Step        string `json:"step"`         // "register" | "verify" | "broker" | "account"
-	URL         string `json:"url"`          // register/verify: the provider endpoint POSTed
-	BrokerURL   string `json:"broker_url"`   // broker: the Pilot broker /signup endpoint (signed)
-	KeyPath     string `json:"key_path"`     // verify: dotted path to the key (default application.api_key)
-	SecretKey   string `json:"secret_key"`   // secrets.json key the minted key is stored under
-	EmailKey    string `json:"email_key"`    // secrets.json key for the account email (optional)
-	PasswordKey string `json:"password_key"` // secrets.json key for the account password (optional)
+	Step        string         `json:"step"`         // "create" | "register" | "verify" | "broker" | "account"
+	URL         string         `json:"url"`          // create/register/verify: the provider endpoint POSTed
+	BrokerURL   string         `json:"broker_url"`   // broker: the Pilot broker /signup endpoint (signed)
+	KeyPath     string         `json:"key_path"`     // create/verify: dotted path to the key (create defaults to data.api_key)
+	AddressPath string         `json:"address_path"` // create: dotted path to the provisioned address, cached under EmailKey (default data.address)
+	Body        map[string]any `json:"body"`         // create: the static JSON body POSTed (e.g. {"terms_accepted": true})
+	SecretKey   string         `json:"secret_key"`   // secrets.json key the minted key is stored under
+	EmailKey    string         `json:"email_key"`    // secrets.json key for the account email/address (optional)
+	PasswordKey string         `json:"password_key"` // secrets.json key for the account password (optional)
 }
 
 // HasSignup reports whether this method is a self-signup route (any step).
@@ -393,6 +396,15 @@ func validateSubSignupMethod(n string, m SubMethod) []string {
 		}
 	}
 	switch m.Signup.Step {
+	case "create":
+		if strings.TrimSpace(m.Signup.URL) == "" {
+			e = append(e, fmt.Sprintf("Method %q: signup.url is required", n))
+		} else {
+			https("url", m.Signup.URL)
+		}
+		if strings.TrimSpace(m.Signup.SecretKey) == "" {
+			e = append(e, fmt.Sprintf("Method %q: a create signup step needs signup.secret_key", n))
+		}
 	case "register", "verify":
 		if strings.TrimSpace(m.Signup.URL) == "" {
 			e = append(e, fmt.Sprintf("Method %q: signup.url is required", n))
@@ -416,7 +428,7 @@ func validateSubSignupMethod(n string, m SubMethod) []string {
 			e = append(e, fmt.Sprintf("Method %q: an account step needs signup.secret_key", n))
 		}
 	default:
-		e = append(e, fmt.Sprintf("Method %q: signup.step must be register|verify|broker|account", n))
+		e = append(e, fmt.Sprintf("Method %q: signup.step must be create|register|verify|broker|account", n))
 	}
 	if m.HasHTTP() || m.HasCLI() || m.HasLocal() {
 		e = append(e, fmt.Sprintf("Method %q: a signup method must not also declare an http/cli/local route", n))
@@ -626,6 +638,7 @@ func (s Submission) ToConfig() *scaffold.Config {
 			Duration: m.Latency,
 			Timeout:  m.Timeout, // explicit per-method timeout (overrides the latency-class default)
 			Params:   params,
+			Gated:    m.Gated, // free-plan disclaimer marker (surfaced at the bottom of <ns>.help)
 		}
 		// A hybrid app routes per method by which route it declares; cli/http apps
 		// route every method the same way. A local method (metadata read) has no
@@ -638,6 +651,8 @@ func (s Submission) ToConfig() *scaffold.Config {
 				URL:         m.Signup.URL,
 				BrokerURL:   m.Signup.BrokerURL,
 				KeyPath:     m.Signup.KeyPath,
+				AddressPath: m.Signup.AddressPath,
+				Body:        m.Signup.Body,
 				SecretKey:   m.Signup.SecretKey,
 				EmailKey:    m.Signup.EmailKey,
 				PasswordKey: m.Signup.PasswordKey,
