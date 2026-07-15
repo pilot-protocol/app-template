@@ -49,7 +49,7 @@ type Config struct {
 
 	// ProductDemo is the example-driven, skill-file shaped usage guide. It is
 	// copied verbatim into metadata.json (BuildMetadata) and rendered at install
-	// time, as an injected SKILL.md, and on the website "Full usage demo".
+	// time and on the website "Full usage demo".
 	ProductDemo *demo.Demo `yaml:"product_demo,omitempty"`
 
 	// Assets is the native-binary delivery set for a cli backend: the

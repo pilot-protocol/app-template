@@ -31,8 +31,8 @@ type Submission struct {
 	Pricing *SubPricing `json:"pricing"` // optional: shown in <ns>.help (cost model + rate card)
 
 	// ProductDemo is the example-driven, skill-file shaped usage guide shown at
-	// install time, injected as a SKILL.md, and rendered on the website as the
-	// "Full usage demo". Optional but strongly recommended: it is what turns an
+	// install time and rendered on the website as the "Full usage demo".
+	// Optional but strongly recommended: it is what turns an
 	// install into first-call usage for autonomous agents. Validated at submit
 	// time (see demo.Demo.Validate); flows verbatim into metadata.json.
 	ProductDemo *demo.Demo `json:"product_demo,omitempty"`
