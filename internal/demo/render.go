@@ -5,10 +5,11 @@ import (
 	"strings"
 )
 
-// RenderSkill produces a SKILL.md the harness injects into an agent's skill
-// directory when the app is installed. The frontmatter (name + when_to_use) is
-// what lets a small-context agent decide WHEN to reach for the app; the body is
-// WHAT to run. Deterministic output — safe to diff and test.
+// RenderSkill renders the demo in skill-file format: YAML frontmatter
+// (name + when_to_use — what lets a small-context agent decide WHEN to reach
+// for the app) followed by the WHAT-to-run body. It is a library helper for
+// harnesses that consume skills; it is NOT auto-injected at install time.
+// Deterministic output — safe to diff and test.
 func (d *Demo) RenderSkill(appID string) string {
 	var b strings.Builder
 	desc := fmt.Sprintf("%s — %s", d.TitleOr(), d.WhenToUse)

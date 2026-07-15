@@ -27,7 +27,7 @@ Three repos, up to three PRs:
 
 The **product demo** you author once in the app-template `submission.json` is the
 single source that flows into `pilotprotocol`'s `metadata.json` and out to the
-website's "Full usage demo" — and is printed at install and injected as a `SKILL.md`.
+website's "Full usage demo" — and is printed at the last step of install.
 See [`PRODUCT-DEMOS.md`](PRODUCT-DEMOS.md).
 
 Everything below is driven from **one spec file** (`pilot.app.yaml`) plus the
@@ -88,7 +88,7 @@ markdown — include a **bulleted feature list** and embed the tool's full `--he
 ### Step 1.5 — Author the product demo (REQUIRED)
 
 Every new submission **must** carry a `product_demo` — the compact, example-first
-usage guide that is printed at install, injected as a `SKILL.md`, and shown on the
+usage guide that is printed at the last step of install and shown on the
 website as the "Full usage demo". It is what turns an install into a correct **first
 call** for the ~250k autonomous agents that otherwise install apps and never use them.
 Author it in `submission.json` under the `product_demo` key; the golden examples are

@@ -2,14 +2,17 @@
 
 A **product demo** is a compact, example-driven, skill-file-shaped usage guide
 authored **once per app** in `submission.json` under the `product_demo` key. It is
-the single source that becomes three surfaces:
+the single source that becomes two shipping surfaces:
 
 1. the block `pilotctl` prints at the **last step of install**
-   (`pilotctl appstore install io.pilot.<app>`),
-2. a **`SKILL.md`** the harness injects into an agent's skill directory, and
-3. the **"Full usage demo"** section on the website store page.
+   (`pilotctl appstore install io.pilot.<app>`), and
+2. the **"Full usage demo"** section on the website store page.
 
-One source, three renders — authored where descriptions and metadata already live,
+A third renderer, `RenderSkill`, emits the demo in **skill-file format** (YAML
+frontmatter + body) as a library helper for harnesses that consume skills — it is
+**not auto-injected** anywhere in this iteration.
+
+One source, rendered where it is needed — authored where descriptions and metadata already live,
 validated at submit time, and copied verbatim into the catalogue `metadata.json`.
 
 The schema and every rule below come from
@@ -37,7 +40,7 @@ FIRST usage.**
 
 ### The skill-file rationale
 
-The demo renders as a `SKILL.md` with YAML frontmatter — the same shape the harness
+The demo also renders in skill-file format (YAML frontmatter + body) via `RenderSkill` — the same shape a harness
 already uses to decide which skill to load:
 
 ```yaml
@@ -65,7 +68,7 @@ The object authors write in `submission.json` maps 1:1 to the `Demo` struct in
 
 | Field | JSON key | Req? | Meaning |
 |---|---|:---:|---|
-| Skill | `skill` | **required** | Stable skill identifier. **MUST equal the app id** (`io.pilot.<name>`) so the injected `SKILL.md` and the app line up. |
+| Skill | `skill` | **required** | Stable skill identifier. **MUST equal the app id** (`io.pilot.<name>`) so the skill-format render and the app line up. |
 | Title | `title` | optional | Heading shown on the website and atop the install banner. Defaults to `"Full usage demo"`. |
 | WhenToUse | `when_to_use` | **required** | One sentence: *when* an agent should reach for this app. The frontmatter disambiguator. **≤ 240 chars.** |
 | Metered | `metered` | **required** | `true` for apps behind a paying broker. When `true`, `cost` is required and the worked example costs are budget-checked. |
@@ -219,7 +222,7 @@ These are **hard errors** — a demo that breaks one is not publishable. They li
 survive a small context window.
 
 1. **`skill` == the app id.** `product_demo.skill` must equal `io.pilot.<name>`
-   exactly, or the injected `SKILL.md` and the app do not line up.
+   exactly, or the skill-format render and the app do not line up.
 2. **`when_to_use` is required and ≤ 240 chars.** One sentence. It is the
    frontmatter disambiguator; keep it a sentence, not a paragraph.
 3. **2–6 examples.** Fewer than 2 is not a demo; more than 6 is documentation and
@@ -280,8 +283,9 @@ testable.
   cost suffixed when metered), and for metered apps a **▶ Cost** line (free budget +
   `worked_total` + balance command). This is the moment that turns an install into a
   first call.
-- **As a skill — `RenderSkill`.** The harness writes a `SKILL.md` into the agent's
-  skill dir with the `name` / `description` / `when_to_use` frontmatter, then the
+- **As a skill-format string — `RenderSkill`.** A library helper that emits the
+  demo with `name` / `description` / `when_to_use` frontmatter for harnesses that
+  consume skills (not auto-injected in this iteration); the
   body: **Run this first**, **Worked examples**, **Cost** (metered), **Gotchas**,
   **Go deeper** (`next`). The frontmatter is what lets a small-context agent decide
   *when* to reach for the app.

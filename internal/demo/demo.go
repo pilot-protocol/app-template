@@ -5,9 +5,11 @@
 //
 //   - RenderInstall — the block pilotctl prints at the last step of
 //     `pilotctl appstore install io.pilot.<app>` (drive right-away usage).
-//   - RenderSkill   — a SKILL.md the harness injects into the agent's skill dir,
-//     so a small-context agent knows WHEN to reach for the app and WHAT to run.
 //   - RenderMarkdown — the website "Full usage demo" section.
+//   - RenderSkill   — the same demo in skill-file format (YAML frontmatter +
+//     body), a library helper for agents/harnesses that consume skills. It is
+//     NOT auto-injected anywhere; install-time rendering and the website are
+//     the shipping surfaces.
 //
 // Unlike <ns>.help (which enumerates every capability), a demo is deliberately
 // short and copy-pasteable: one first call, a handful of worked examples, and —

@@ -114,7 +114,7 @@ pilotctl appstore call <id> <ns>.help '{}'
 which returns every method with params, `kind`, duration class, and measured
 roundtrip (§5.4). `appstore list`/`status` show the flat `exposes` names. Alongside
 `help` (the exhaustive reference), the app's **`product_demo`** (§5.6a) is rendered as
-a `SKILL.md` injected into the agent's skill dir and printed at install — the short,
+printed at the last step of install (and available in skill-file format) — the short,
 example-first surface that drives correct first usage.
 
 ### 3.8 Call
@@ -227,7 +227,7 @@ skill-file-shaped usage guide authored **once** in `submission.json` under the
 `Submission.Validate` calls `Demo.Validate(id, ns)` at submit time, and the object
 flows **verbatim** into the catalogue `metadata.json` (`BuildMetadata` copies it).
 From that one source it renders three ways: printed at the last step of
-`pilotctl appstore install`, injected as a `SKILL.md` into an agent's skill dir, and
+`pilotctl appstore install`, and
 shown on the website as the **"Full usage demo"** (§3.7). Its purpose is to drive
 correct **first** usage for autonomous agents that install apps but never call them —
 where `<ns>.help` (§5.4) is the exhaustive reference, the demo is short and
