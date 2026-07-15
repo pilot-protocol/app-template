@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/pilot-protocol/app-template/internal/nextsteps"
+	"github.com/pilot-protocol/app-template/internal/scaffold"
 )
 
 // TestAllSubmissionNextStepsValid is the CI gate for next-steps graphs. The
@@ -178,4 +179,57 @@ func TestSubmissionCrossAppStepsResolve(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestNextStepsSurvivesSubmissionToMetadata closes the one link the other gates
+// do not cover: the graph is authored in submission.json but CONSUMED from the
+// catalogue's metadata.json, and those are different structs in different
+// packages joined by ToConfig + BuildMetadata. A field that validates perfectly
+// and then silently fails to travel would be invisible to every other test here
+// and would ship as "the feature does nothing".
+//
+// This walks a REAL backfilled submission through the real code path and asserts
+// the graph arrives intact, as JSON, under the key pilotctl actually reads.
+func TestNextStepsSurvivesSubmissionToMetadata(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(submissionsDir, "io.pilot.sqlite", "submission.json"))
+	if err != nil {
+		t.Skipf("no sqlite submission: %v", err)
+	}
+	var s Submission
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.NextSteps == nil {
+		t.Fatal("io.pilot.sqlite carries no next_steps; the backfill regressed")
+	}
+	wantEdges := len(s.NextSteps.Edges)
+
+	md := scaffold.BuildMetadata(s.ToConfig())
+	if md.NextSteps == nil {
+		t.Fatal("next_steps did not survive ToConfig+BuildMetadata — authored but never shipped")
+	}
+	if got := len(md.NextSteps.Edges); got != wantEdges {
+		t.Fatalf("metadata carries %d edges, submission had %d", got, wantEdges)
+	}
+
+	// And it must serialise under exactly the key the client reads.
+	out, err := json.Marshal(md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back map[string]json.RawMessage
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := back["next_steps"]; !ok {
+		t.Fatalf("metadata.json has no next_steps key; pilotctl would find nothing. keys=%v", keysOf(back))
+	}
+}
+
+func keysOf(m map[string]json.RawMessage) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
