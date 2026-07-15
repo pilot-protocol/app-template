@@ -257,7 +257,7 @@
           {
             "cmd": "pilotctl appstore call io.pilot.miren miren.exec '{\"args\":[\"cluster\",\"add\",\"--cluster\",\"prod\",\"--address\",\"<cluster-host>:8443\"]}'",
             "why": "point miren at your cluster — the one setup step that unblocks every other method (`miren login` is interactive and unusable over IPC)",
-            "kind": "recovery"
+            "kind": "gateway"
           },
           {
             "cmd": "pilotctl appstore call io.pilot.miren miren.doctor '{}'",
