@@ -61,9 +61,39 @@ store card. (`Submission` in `internal/publish/submission.go`.)
 | `methods[]` | **required** | at least one; see [methods](#methods) |
 | `listing` | optional* | store-card fields; omit and the app renders a bare card |
 | `vendor` | optional* | publisher info + the two reviewer free-text sections |
+| `product_demo` | required-by-policy | the example-first usage guide; validated by `Demo.Validate()`, shown at install / as a `SKILL.md` / as the website "Full usage demo" — see [product demo](#product_demo-the-usage-guide) |
 
 \* `listing`/`vendor` are not enforced by `Validate()`, but a thin listing means a
 thin store page and a slower human review. Treat them as **strongly recommended**.
+
+### `product_demo` — the usage guide
+
+`product_demo` is a compact, example-driven, skill-file-shaped usage guide authored
+**once** in the submission. It is what an autonomous agent sees at install and as an
+injected `SKILL.md`, so it drives correct **first** usage (where `<ns>.help` is the
+exhaustive reference). It is optional in `Validate()` but **required by policy for new
+submissions** — the CI gate `TestAllSubmissionDemosValid` fails an invalid demo and
+flags a metered app that ships none.
+
+```json
+"product_demo": {
+  "skill": "io.pilot.duckdb",
+  "when_to_use": "When you need an in-process SQL/OLAP engine to query CSV/Parquet/JSON locally.",
+  "metered": false,
+  "quickstart": {
+    "goal": "Run your first query",
+    "command": "pilotctl appstore call io.pilot.duckdb duckdb.query '{\"sql\":\"SELECT 42\"}'",
+    "expect": "{\"rows\":[[42]]}"
+  },
+  "examples": [ /* 2–6 worked, copy-pasteable Steps, each a real <ns>.* call */ ]
+}
+```
+
+`skill` must equal the app id; `when_to_use` is one sentence (≤240 chars); 2–6
+`examples`, every `command` a real `pilotctl appstore call … <ns>.*`. **Metered apps
+MUST include a `cost` breakdown** with the worked flow ≤ the per-user budget. Full
+field-by-field guide, golden examples, and rules:
+[`PRODUCT-DEMOS.md`](PRODUCT-DEMOS.md).
 
 ### `backend`
 
@@ -257,3 +287,7 @@ alongside from your `listing:` block.
 - [ ] Binaries are the **full per-platform set** (or a true universal binary) —
       **not** a single-platform build.
 - [ ] `listing` + `vendor` filled in for a real store card and faster review.
+- [ ] `product_demo` authored: `skill` == id, `when_to_use` one sentence, 2–6 real
+      `<ns>.*` examples; **metered apps show costs ≤ the per-user budget**;
+      `go test ./internal/publish/ -run TestAllSubmissionDemosValid` green
+      ([`PRODUCT-DEMOS.md`](PRODUCT-DEMOS.md)).

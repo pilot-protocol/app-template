@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/pilot-protocol/app-template/internal/demo"
 	"github.com/pilot-protocol/app-template/internal/scaffold"
 )
 
@@ -28,6 +29,13 @@ type Submission struct {
 	Listing SubListing  `json:"listing"`
 	Vendor  SubVendor   `json:"vendor"`
 	Pricing *SubPricing `json:"pricing"` // optional: shown in <ns>.help (cost model + rate card)
+
+	// ProductDemo is the example-driven, skill-file shaped usage guide shown at
+	// install time and rendered on the website as the "Full usage demo".
+	// Optional but strongly recommended: it is what turns an
+	// install into first-call usage for autonomous agents. Validated at submit
+	// time (see demo.Demo.Validate); flows verbatim into metadata.json.
+	ProductDemo *demo.Demo `json:"product_demo,omitempty"`
 
 	// Artifacts is the native-binary delivery set for a cli app: the
 	// platform-specific binaries the publisher uploaded to the Pilot R2 artifact
@@ -370,6 +378,11 @@ func (s Submission) Validate() []string {
 			}
 		}
 	}
+	if s.ProductDemo != nil {
+		if err := s.ProductDemo.Validate(s.ID, ns); err != nil {
+			e = append(e, "Product demo: "+err.Error())
+		}
+	}
 	return e
 }
 
@@ -604,6 +617,9 @@ func (s Submission) ToConfig() *scaffold.Config {
 			CloudRateCard: s.Pricing.CloudRateCard,
 		}
 	}
+	// The product demo flows through verbatim: it is authored once here and
+	// rendered at install/skill/website time from the catalogue metadata.
+	cfg.ProductDemo = s.ProductDemo
 	// HTTP byo apps carry auth headers; managed apps are keyless (the broker
 	// holds the key) and cli apps have no HTTP headers at all.
 	if !s.Backend.IsCLI() && !s.Backend.Managed() {
