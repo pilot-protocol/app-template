@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/pilot-protocol/app-template/internal/demo"
+	"github.com/pilot-protocol/app-template/internal/nextsteps"
 	"github.com/pilot-protocol/app-template/internal/scaffold"
 )
 
@@ -36,6 +37,16 @@ type Submission struct {
 	// install into first-call usage for autonomous agents. Validated at submit
 	// time (see demo.Demo.Validate); flows verbatim into metadata.json.
 	ProductDemo *demo.Demo `json:"product_demo,omitempty"`
+
+	// NextSteps is the dynamic context an agent is shown after EVERY
+	// `pilotctl appstore call` on this app — the recommended next commands for
+	// where the agent now stands, on both success and failure. Where ProductDemo
+	// drives the install→first-call step once, this drives every call after it.
+	// Optional but strongly recommended; validated at submit time against the
+	// declared method list (see nextsteps.Graph.Validate) so a graph can never
+	// recommend a method the app does not expose. Flows verbatim into
+	// metadata.json.
+	NextSteps *nextsteps.Graph `json:"next_steps,omitempty"`
 
 	// Artifacts is the native-binary delivery set for a cli app: the
 	// platform-specific binaries the publisher uploaded to the Pilot R2 artifact
@@ -383,7 +394,28 @@ func (s Submission) Validate() []string {
 			e = append(e, "Product demo: "+err.Error())
 		}
 	}
+	if s.NextSteps != nil {
+		// Validate against the submission's own declared methods: this is what
+		// makes "recommends a method that does not exist" a submit-time failure
+		// rather than a dead end the agent hits at runtime.
+		if err := s.NextSteps.Validate(s.ID, s.MethodNames()); err != nil {
+			e = append(e, "Next steps: "+err.Error())
+		}
+	}
 	return e
+}
+
+// MethodNames returns the method names this submission declares, in order. It is
+// the authoring-time stand-in for the signed manifest's `exposes` list (which
+// only exists once the app is built), and is what nextsteps validates against.
+func (s *Submission) MethodNames() []string {
+	out := make([]string, 0, len(s.Methods))
+	for _, m := range s.Methods {
+		if n := strings.TrimSpace(m.Name); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // validateSubLocalMethod checks one method's local metadata route: a store path
@@ -620,6 +652,9 @@ func (s Submission) ToConfig() *scaffold.Config {
 	// The product demo flows through verbatim: it is authored once here and
 	// rendered at install/skill/website time from the catalogue metadata.
 	cfg.ProductDemo = s.ProductDemo
+	// Same for the next-steps graph: authored once here, rendered by pilotctl
+	// after every call from the sha-pinned catalogue metadata.
+	cfg.NextSteps = s.NextSteps
 	// HTTP byo apps carry auth headers; managed apps are keyless (the broker
 	// holds the key) and cli apps have no HTTP headers at all.
 	if !s.Backend.IsCLI() && !s.Backend.Managed() {

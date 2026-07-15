@@ -251,6 +251,41 @@ include a cost breakdown** — `cost.operations` prices every spending op, each 
 step declares its `cost`, and the worked flow sums to ≤ `hard_cap_usd` (0 marks a
 non-dollar request quota; dynamic-priced steps use a `"dynamic"` marker).
 
+### 5.6b `next_steps` (submission + catalogue metadata)
+
+The **next-steps graph**: the dynamic context pilotctl renders after *every*
+`pilotctl appstore call`, on success and failure. Where `product_demo` (§5.6a) fires
+once at install, this fires on every call. Optional field, authored in
+`submission.json` under `next_steps`, carried verbatim into `metadata.json`, cached by
+pilotctl at install to `$APP/next-steps.json` (so the call path does no network I/O).
+Schema is `internal/nextsteps` (`Graph`, `Edge`, `Step`).
+
+```jsonc
+{ "schema": 1, "app": "io.pilot.x",
+  "edges": [
+    // from: a "x.*" method or "*" (any) · on: "ok" (exit 0) | "err" (exit 1)
+    // match: regex over the OUTCOME PAYLOAD — error text on err, RESULT BODY on ok
+    // code:  exact backend HTTP status (err only) · then: 1–3 steps
+    { "from": "*", "on": "err", "code": 402, "why": "budget exhausted",
+      "then": [ { "cmd": "pilotctl appstore call io.pilot.x x.balance '{}'",
+                  "why": "check what is left", "kind": "recovery" } ] }
+  ] }
+```
+
+`match` tests the **result body** on an `on:"ok"` edge, not just error text — because
+the most important case is not an error: the scaffold's `requireKey` soft-fails an
+unauthenticated call with **exit 0** and `{"needs_signup":true,...}`, so a signup app's
+gateway edge is an `on:"ok"` + `match` edge (§ [`NEXT-STEPS-GRAPHS.md`](NEXT-STEPS-GRAPHS.md)).
+
+Rules enforced by `Graph.Validate`: `schema` == 1 and `app` == app id; `from` is a
+`<ns>.*` method **the app exposes** or `*`; every step `cmd` is a runnable `pilotctl`
+command whose method exists (cross-app steps allowed — the 402 path may point at
+`io.pilot.wallet` — but the namespace must match the app id it calls); every step has a
+`why`; ≤3 steps per edge, ≤40 edges; `match` must compile; `code` is `on:"err"` only;
+no duplicate edges. Precedence at runtime is by **specificity** (exact `from` + `code`
+> `match` > bare; wildcard last), ties first-in-file. Absent/malformed/unmatched →
+nothing printed, call unchanged.
+
 Status: **OPTIONAL + ADDITIVE** to the schema — it is an omit-able key, so older
 clients that don't know it simply ignore it (non-breaking; the catalogue stays
 `version: 2`). It is **REQUIRED-by-policy for new submissions**: the CI gate

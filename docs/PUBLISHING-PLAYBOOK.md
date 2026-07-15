@@ -266,6 +266,9 @@ a different signing key. Full detail in [`UPDATING.md`](UPDATING.md).
 - [ ] `app_version` == upstream tool version (for a wrapped tool)
 - [ ] `product_demo` present in `submission.json`; `TestAllSubmissionDemosValid` green
       and `demo-score` ≥ threshold; **metered apps show costs ≤ the per-user budget**
+- [ ] `next_steps` present in `submission.json`; `TestAllSubmissionNextStepsValid` and
+      `TestSubmissionGatewaysAreReachable` green; **every authored command actually run**
+      (see [`NEXT-STEPS-GRAPHS.md`](NEXT-STEPS-GRAPHS.md))
 - [ ] backend + auth chosen correctly; **no API key baked into any bundle**
 - [ ] managed apps: broker registration planned for go-live
 - [ ] native delivery: all 4 platforms built, relocation verified **on Linux too**, no `._*`
