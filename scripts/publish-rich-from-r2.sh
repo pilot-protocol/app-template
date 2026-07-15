@@ -134,11 +134,16 @@ CATEGORIES_JSON="$(jq -c '.categories // []' "$META")"
 VENDOR_JSON="$(jq -c --arg dn "$DISPLAY" --arg pub "$PUBLISHER" \
   '((.vendor // {name: $dn}) + {publisher_pubkey: $pub})' "$META")"
 METHODS_JSON="$(jq -c '[ (.methods // [])[] | {name: .name, summary: (.summary // .description // "")} ]' "$META")"
+# The product demo (example-driven "Full usage demo") rides verbatim into
+# metadata.json when the submission carries one; null → omitted. See
+# docs/PRODUCT-DEMOS.md.
+DEMO_JSON="$(jq -c '.product_demo // null' "$META")"
 METADATA_JSON="$(jq -n \
   --arg id "$ID" --arg dn "$DISPLAY" --arg desc "$DESC" \
   --arg src "$SOURCE" --arg lic "$LICENSE" \
   --argjson cats "$CATEGORIES_JSON" --argjson bb "$BUNDLE_BYTES" \
-  --arg ver "$VERSION" --argjson vendor "$VENDOR_JSON" --argjson methods "$METHODS_JSON" '
+  --arg ver "$VERSION" --argjson vendor "$VENDOR_JSON" --argjson methods "$METHODS_JSON" \
+  --argjson demo "$DEMO_JSON" '
   {
     schema_version: 1,
     id: $id,
@@ -152,7 +157,8 @@ METADATA_JSON="$(jq -n \
     size: {bundle_bytes: $bb},
     methods: $methods,
     changelog: [ {version: $ver, notes: (["Published v " + $ver])} ]
-  }')"
+  }
+  | if $demo != null then . + {product_demo: $demo} else . end')"
 
 # ── 6. open the catalogue PR on pilotprotocol ────────────────────────────────
 CATVER=2
@@ -187,9 +193,11 @@ mkdir -p "$APPDIR"
 # the runtime facts (publisher pubkey + primary bundle size). Otherwise write the
 # store page synthesised from submission.json.
 if [ -f "$APPDIR/metadata.json" ]; then
-  echo "==> reusing existing $APPDIR/metadata.json (refreshing publisher + size)"
-  jq --arg pub "$PUBLISHER" --argjson bb "$BUNDLE_BYTES" \
-     '.vendor = ((.vendor // {}) + {publisher_pubkey: $pub}) | .size = ((.size // {}) + {bundle_bytes: $bb})' \
+  echo "==> reusing existing $APPDIR/metadata.json (refreshing publisher + size + demo)"
+  # Backfill/refresh the product demo from the submission onto the existing store
+  # page too, so already-published apps pick up their "Full usage demo".
+  jq --arg pub "$PUBLISHER" --argjson bb "$BUNDLE_BYTES" --argjson demo "$DEMO_JSON" \
+     '.vendor = ((.vendor // {}) + {publisher_pubkey: $pub}) | .size = ((.size // {}) + {bundle_bytes: $bb}) | (if $demo != null then .product_demo = $demo else . end)' \
      "$APPDIR/metadata.json" > "$APPDIR/metadata.json.tmp" && mv "$APPDIR/metadata.json.tmp" "$APPDIR/metadata.json"
 else
   echo "$METADATA_JSON" | jq '.' > "$APPDIR/metadata.json"

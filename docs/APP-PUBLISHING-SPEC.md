@@ -112,8 +112,10 @@ The agent learns the method surface by calling the **required** discovery method
 pilotctl appstore call <id> <ns>.help '{}'
 ```
 which returns every method with params, `kind`, duration class, and measured
-roundtrip (§5.4). `appstore list`/`status` show the flat `exposes` names.
-*PLANNED:* a rendered `SKILL.md` push surface (§8) layered on the same metadata.
+roundtrip (§5.4). `appstore list`/`status` show the flat `exposes` names. Alongside
+`help` (the exhaustive reference), the app's **`product_demo`** (§5.6a) is rendered as
+a `SKILL.md` injected into the agent's skill dir and printed at install — the short,
+example-first surface that drives correct first usage.
 
 ### 3.8 Call
 ```
@@ -216,6 +218,44 @@ compat, methods[], changelog[], links[]`. **The generator emits it** from the
 spec's `listing:` block (`pilot-app init`), and `pilot-app submit` fills the
 post-build facts (publisher pubkey + sizes). Omit `listing:` and the app renders a
 bare card. Preserve existing entries; one entry per app (latest version).
+
+### 5.6a `product_demo` (submission + catalogue metadata)
+
+Every submission carries a **product demo** — a compact, example-driven,
+skill-file-shaped usage guide authored **once** in `submission.json` under the
+`product_demo` key. Schema is `internal/demo` (`Demo`, `Step`, `Cost`, `CostOp`);
+`Submission.Validate` calls `Demo.Validate(id, ns)` at submit time, and the object
+flows **verbatim** into the catalogue `metadata.json` (`BuildMetadata` copies it).
+From that one source it renders three ways: printed at the last step of
+`pilotctl appstore install`, injected as a `SKILL.md` into an agent's skill dir, and
+shown on the website as the **"Full usage demo"** (§3.7). Its purpose is to drive
+correct **first** usage for autonomous agents that install apps but never call them —
+where `<ns>.help` (§5.4) is the exhaustive reference, the demo is short and
+copy-pasteable.
+
+```json
+{ "skill":"io.pilot.x",                          // MUST equal the app id
+  "when_to_use":"one sentence (≤240 chars): when to reach for this app",
+  "metered":false,                               // true iff behind a paying broker
+  "quickstart":{ "goal":"…", "command":"pilotctl appstore call io.pilot.x x.foo '{}'", "expect":"…" },
+  "examples":[ /* 2–6 Steps, each command a real x.* call */ ],
+  "cost":{ "unit":"…","free_budget":"…","hard_cap_usd":5.0,"operations":[…] },  // required iff metered
+  "gotchas":["≤6 one-liners"], "next":["io.pilot.x x.help '{}'"] }
+```
+
+Rules enforced by `Demo.Validate` (full detail in
+[`PRODUCT-DEMOS.md`](PRODUCT-DEMOS.md)): `skill` == app id; `when_to_use` present and
+≤240 chars; **2–6** examples; every `command` starts `pilotctl appstore call ` and
+calls a `<ns>.*` method; length budgets on gotchas/next/notes. **Metered apps MUST
+include a cost breakdown** — `cost.operations` prices every spending op, each spending
+step declares its `cost`, and the worked flow sums to ≤ `hard_cap_usd` (0 marks a
+non-dollar request quota; dynamic-priced steps use a `"dynamic"` marker).
+
+Status: **OPTIONAL + ADDITIVE** to the schema — it is an omit-able key, so older
+clients that don't know it simply ignore it (non-breaking; the catalogue stays
+`version: 2`). It is **REQUIRED-by-policy for new submissions**: the CI gate
+`TestAllSubmissionDemosValid` (`internal/publish`) fails any submission whose
+`product_demo` is invalid, and flags a metered app that ships none.
 
 ### 5.6 Publisher registry *(RC1 identity, G4)*
 `pilot-protocol/catalog/publishers/registry.json`: maps publisher pubkey → human

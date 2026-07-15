@@ -4,5 +4,42 @@
   "namespace": "ideon-free",
   "description": "Free article generation for agents: ideon-free.generate(idea) returns a jobId; ideon-free.poll(jobId) returns the finished markdown article. Thin adapter over Ideon's ideon_write \u2014 no payment.",
   "bundle": "io.telepat.ideon-free-0.3.1.tar.gz",
-  "bundle_sha256": "dd8e37057f33eadefff6b7ff5fc99130667076ea398c10a154c345fd87dd1ad6"
+  "bundle_sha256": "dd8e37057f33eadefff6b7ff5fc99130667076ea398c10a154c345fd87dd1ad6",
+  "product_demo": {
+    "skill": "io.telepat.ideon-free",
+    "title": "Full usage demo",
+    "when_to_use": "When you need a finished long-form Markdown article generated from a one-line idea \u2014 kick off generation, then poll for the completed title, slug, and body. Free, no payment.",
+    "metered": false,
+    "quickstart": {
+      "goal": "Start an article generation job",
+      "command": "pilotctl appstore call io.telepat.ideon-free ideon-free.generate '{\"idea\":\"How vector databases work\"}'",
+      "expect": "{\"jobId\":\"<uuid>\"}"
+    },
+    "examples": [
+      {
+        "title": "Generate with style + length hints",
+        "command": "pilotctl appstore call io.telepat.ideon-free ideon-free.generate '{\"idea\":\"A beginner guide to Rust ownership\",\"style\":\"tutorial\",\"length\":\"long\"}'",
+        "expect": "{\"jobId\":\"<uuid>\"}"
+      },
+      {
+        "title": "Poll while still running",
+        "command": "pilotctl appstore call io.telepat.ideon-free ideon-free.poll '{\"jobId\":\"<uuid>\"}'",
+        "expect": "{\"jobId\":\"<uuid>\",\"status\":\"pending\"}"
+      },
+      {
+        "title": "Poll once finished",
+        "command": "pilotctl appstore call io.telepat.ideon-free ideon-free.poll '{\"jobId\":\"<uuid>\"}'",
+        "expect": "{\"status\":\"done\",\"ok\":true,\"title\":\"...\",\"slug\":\"...\",\"article\":\"# ...markdown...\"}"
+      }
+    ],
+    "gotchas": [
+      "Generation is async: generate returns a jobId immediately; poll it until status is \"done\" (~60\u201390s for a real run).",
+      "poll returns status \"pending\" until ready, then the finished Markdown in the article field.",
+      "An unknown or expired jobId polls back status \"error\".",
+      "Free \u2014 a thin adapter over Ideon's ideon_write (backend ideon-mcp.telepat.io), rate-limited to 30 calls/min."
+    ],
+    "next": [
+      "io.telepat.ideon-free ideon-free.help '{}'"
+    ]
+  }
 }

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pilot-protocol/app-template/internal/demo"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,6 +45,11 @@ type Config struct {
 	Grants    Grants    `yaml:"grants"`
 	Listing   Listing   `yaml:"listing"` // store-page metadata (catalogue v2)
 	Pricing   *Pricing  `yaml:"pricing"` // optional: shown in <ns>.help so an agent sees cost before a paid call
+
+	// ProductDemo is the example-driven, skill-file shaped usage guide. It is
+	// copied verbatim into metadata.json (BuildMetadata) and rendered at install
+	// time, as an injected SKILL.md, and on the website "Full usage demo".
+	ProductDemo *demo.Demo `yaml:"product_demo,omitempty"`
 
 	// Assets is the native-binary delivery set for a cli backend: the
 	// platform-specific binaries the publisher uploaded to the Pilot R2 artifact

@@ -5,6 +5,7 @@ backend and auth mode. It ties together the focused docs
 ([`PUBLISHING.md`](PUBLISHING.md), [`CLI-ADAPTER.md`](CLI-ADAPTER.md),
 [`NATIVE-APPS.md`](NATIVE-APPS.md), [`R2-ARTIFACT-REGISTRY.md`](R2-ARTIFACT-REGISTRY.md),
 [`MANAGED-KEY.md`](MANAGED-KEY.md), [`CI-AB-REPORT.md`](CI-AB-REPORT.md),
+[`PRODUCT-DEMOS.md`](PRODUCT-DEMOS.md),
 [`UPDATING.md`](UPDATING.md), [`APP-PUBLISHING-SPEC.md`](APP-PUBLISHING-SPEC.md)) into one
 checklist. If you only read one doc, read this one and follow the links when a step
 needs detail.
@@ -20,9 +21,14 @@ Three repos, up to three PRs:
 
 | Repo | What you add | Who merges |
 |---|---|---|
-| `pilot-protocol/app-template` | the **submission** (`submissions/<id>/`) | maintainer (CI-gated) |
-| `pilot-protocol/pilotprotocol` | the **catalogue entry** (signed `catalogue.json` + `metadata.json`) | release pipeline / maintainer |
-| `pilot-protocol/website` | the **store-page card** (optional but expected) | maintainer |
+| `pilot-protocol/app-template` | the **submission** (`submissions/<id>/`), including the **product demo** authored in `submission.json` | maintainer (CI-gated) |
+| `pilot-protocol/pilotprotocol` | the **catalogue entry** (signed `catalogue.json` + `metadata.json`, which carries the demo verbatim) | release pipeline / maintainer |
+| `pilot-protocol/website` | the **store-page card** + the demo rendered as the **"Full usage demo"** | maintainer |
+
+The **product demo** you author once in the app-template `submission.json` is the
+single source that flows into `pilotprotocol`'s `metadata.json` and out to the
+website's "Full usage demo" — and is printed at install and injected as a `SKILL.md`.
+See [`PRODUCT-DEMOS.md`](PRODUCT-DEMOS.md).
 
 Everything below is driven from **one spec file** (`pilot.app.yaml`) plus the
 `pilot-app` tool. Author once; the same inputs flow to the website publish-form path and
@@ -78,6 +84,36 @@ Curate a small set of named methods for the common operations, then add:
 `listing` carries the store page: `display_name`, `tagline`, `app_description` (long-form
 markdown — include a **bulleted feature list** and embed the tool's full `--help`),
 `license`, `homepage`, `source_url`, `categories`, `keywords`.
+
+### Step 1.5 — Author the product demo (REQUIRED)
+
+Every new submission **must** carry a `product_demo` — the compact, example-first
+usage guide that is printed at install, injected as a `SKILL.md`, and shown on the
+website as the "Full usage demo". It is what turns an install into a correct **first
+call** for the ~250k autonomous agents that otherwise install apps and never use them.
+Author it in `submission.json` under the `product_demo` key; the golden examples are
+[`product-demo/example.local.json`](product-demo/example.local.json) (non-metered) and
+[`product-demo/example.metered.json`](product-demo/example.metered.json) (metered). The
+full field-by-field guide, rules, and rendering are in
+[`PRODUCT-DEMOS.md`](PRODUCT-DEMOS.md). In short:
+
+- `skill` **==** the app id; `when_to_use` a single sentence (≤240 chars) telling an
+  agent *when* to reach for the app.
+- `quickstart` = the one fastest first call; **2–6** `examples`, **every** `command`
+  starting `pilotctl appstore call ` and calling a real `<ns>.*` method.
+- **Metered apps MUST include a `cost` breakdown**: set `metered:true`, price every
+  spending op in `cost.operations`, annotate each spending step's `cost`, and keep the
+  worked flow **≤ `hard_cap_usd`** and ≤ the real per-user budget
+  ([`BROKER_COSTS.md`](../../BROKER_COSTS.md) — $5.00/user credit apps; sixtyfour's
+  50-request quota). Request-quota apps use `hard_cap_usd: 0`; dynamic-priced steps use
+  a `"dynamic"` cost marker.
+
+Validate and score it before you PR:
+
+```bash
+go test ./internal/publish/ -run TestAllSubmissionDemosValid   # blocking CI gate
+pilot-app demo-score submissions/<id>/submission.json          # quality score ≥ threshold
+```
 
 ## Step 2 — (CLI + not-on-host only) Deliver the native binary from R2
 
@@ -228,6 +264,8 @@ a different signing key. Full detail in [`UPDATING.md`](UPDATING.md).
 ## Pre-flight checklist
 
 - [ ] `app_version` == upstream tool version (for a wrapped tool)
+- [ ] `product_demo` present in `submission.json`; `TestAllSubmissionDemosValid` green
+      and `demo-score` ≥ threshold; **metered apps show costs ≤ the per-user budget**
 - [ ] backend + auth chosen correctly; **no API key baked into any bundle**
 - [ ] managed apps: broker registration planned for go-live
 - [ ] native delivery: all 4 platforms built, relocation verified **on Linux too**, no `._*`

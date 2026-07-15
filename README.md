@@ -59,6 +59,12 @@ You only ever touch **one repo** (`app-template`); see
 > runbook across every backend (`http`/`cli`) and auth mode (`byo`/`managed`),
 > native-binary delivery, testing, and the submission → catalogue → website-card
 > steps, with edge cases and a pre-flight checklist.
+>
+> **Every submission carries a product demo.** Author a `product_demo` in
+> `submission.json` — a compact, example-first, skill-file-shaped usage guide shown at
+> install, injected as a `SKILL.md`, and rendered on the website as the "Full usage
+> demo". It drives correct first usage for autonomous agents. See
+> [`docs/PRODUCT-DEMOS.md`](docs/PRODUCT-DEMOS.md).
 
 ### Two ways to publish — same required fields, same result
 

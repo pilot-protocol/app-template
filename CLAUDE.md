@@ -27,6 +27,11 @@ needs detail.
 - **The catalogue is signed and fail-closed.** Keep the catalogue at `version: 2`; the
   publisher pin in the entry must match the bundle manifest's `store.publisher`.
 - **One stable publisher key per app id, forever** — back it up; the update gate requires it.
+- **Every submission carries a product demo.** Author a `product_demo` in
+  `submission.json` — the example-first, skill-file-shaped usage guide shown at install,
+  injected as a `SKILL.md`, and rendered on the website. Required by policy for new
+  submissions; metered apps MUST show costs ≤ the per-user budget. Guide:
+  [`docs/PRODUCT-DEMOS.md`](docs/PRODUCT-DEMOS.md).
 
 ## Tool entry points
 
