@@ -65,6 +65,11 @@ server {
     location / {
         proxy_pass $ORIGIN;
         proxy_set_header Host \$host;
+        # X-Real-IP is the ONLY source-IP signal the broker trusts (a
+        # client-supplied X-Forwarded-For is ignored). The per-IP grant cap
+        # depends on it: omit it and every caller reads as 127.0.0.1, collapsing
+        # every identity into one IP bucket. It must be set on EVERY location.
+        proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
     }

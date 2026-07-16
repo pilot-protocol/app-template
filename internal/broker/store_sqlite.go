@@ -2,6 +2,7 @@ package broker
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -69,6 +70,26 @@ func OpenSQLiteStore(path string) (*SQLiteStore, error) {
 	if _, err := db.Exec(`ALTER TABLE provision ADD COLUMN rot INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite migrate provision.rot: %w", err)
+	}
+	// ownership: the tenancy ledger — which caller owns which upstream resource,
+	// for apps on a shared partner account. The PRIMARY KEY is what enforces
+	// first-writer-wins: a concurrent takeover attempt loses on the unique
+	// constraint rather than on an application-level check-then-write race.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS ownership (
+		app     TEXT NOT NULL,
+		rtype   TEXT NOT NULL,
+		rid     TEXT NOT NULL,
+		caller  TEXT NOT NULL,
+		created INTEGER NOT NULL,
+		PRIMARY KEY (app, rtype, rid)
+	)`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("sqlite migrate ownership: %w", err)
+	}
+	// Listing a caller's own resources is the hot path for response filtering.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS ownership_owner ON ownership(app, rtype, caller)`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("sqlite migrate ownership index: %w", err)
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS provision_app_ip ON provision(app, ip)`); err != nil {
 		_ = db.Close()
@@ -308,4 +329,69 @@ func (s *SQLiteStore) Snapshot() map[string]struct {
 		}
 	}
 	return out
+}
+
+// Claim records ownership of a resource, first-writer-wins.
+//
+// The INSERT relies on the (app, rtype, rid) PRIMARY KEY: two concurrent callers
+// racing to claim the same id cannot both succeed, so ownership can never be
+// silently transferred. A repeat claim by the SAME caller is idempotent (no
+// error); a claim by a DIFFERENT caller returns ErrOwned.
+func (s *SQLiteStore) Claim(app, rtype, rid, caller string, now time.Time) error {
+	if rid == "" || caller == "" {
+		return errors.New("broker: claim requires a resource id and caller")
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO ownership (app, rtype, rid, caller, created) VALUES (?,?,?,?,?)
+		 ON CONFLICT(app, rtype, rid) DO NOTHING`,
+		app, rtype, rid, caller, now.Unix())
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err == nil && n > 0 {
+		return nil // we inserted: we are the owner
+	}
+	// Nothing inserted → a row already exists. It is ours only if the owner matches.
+	var cur string
+	if err := s.db.QueryRow(`SELECT caller FROM ownership WHERE app=? AND rtype=? AND rid=?`, app, rtype, rid).Scan(&cur); err != nil {
+		return err
+	}
+	if cur == caller {
+		return nil
+	}
+	return ErrOwned
+}
+
+func (s *SQLiteStore) OwnerOf(app, rtype, rid string) (string, bool, error) {
+	var caller string
+	err := s.db.QueryRow(`SELECT caller FROM ownership WHERE app=? AND rtype=? AND rid=?`, app, rtype, rid).Scan(&caller)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return caller, true, nil
+}
+
+func (s *SQLiteStore) OwnedSet(app, rtype, caller string) (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT rid FROM ownership WHERE app=? AND rtype=? AND caller=?`, app, rtype, caller)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var rid string
+		if err := rows.Scan(&rid); err != nil {
+			return nil, err
+		}
+		out[rid] = true
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) Release(app, rtype, rid string) error {
+	_, err := s.db.Exec(`DELETE FROM ownership WHERE app=? AND rtype=? AND rid=?`, app, rtype, rid)
+	return err
 }

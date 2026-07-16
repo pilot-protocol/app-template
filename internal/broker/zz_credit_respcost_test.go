@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -220,6 +221,10 @@ func TestCreditBalance_PerUserNotAccount(t *testing.T) {
 // pilot identity from the same source IP cannot claim a fresh budget — this is the
 // anti-Sybil guard that stops farming new $5 grants after depletion. Both callers
 // share httptest's default RemoteAddr (192.0.2.1).
+// TestCreditPath_PerIPIdentityCap pins the per-IP GRANT cap contract: one source
+// IP may mint at most N funded identities. The (N+1)th is not refused — it is
+// recorded with a ZERO grant, so it can still read but cannot spend. This is the
+// control that stops budget-farming while keeping a shared-NAT newcomer usable.
 func TestCreditPath_PerIPIdentityCap(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -227,10 +232,12 @@ func TestCreditPath_PerIPIdentityCap(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	t.Cleanup(up.Close)
+	// "/v1/read" is free; "/v1/act" costs $1. Cap = 1 funded identity per IP.
 	reg, err := ParseRegistry([]byte(`[{
 		"id":"io.pilot.orthogonal","upstream":"`+up.URL+`","key_env":"ORTH_KEY",
-		"auth_header":"Authorization","auth_scheme":"Bearer","allow":["/v1/search"],
-		"credit":{"seed_credits":5000000,"default_cost":0,"max_identities_per_ip":1}
+		"auth_header":"Authorization","auth_scheme":"Bearer","allow":["/v1/read","/v1/act"],
+		"credit":{"seed_credits":5000000,"default_cost":0,
+		          "cost_credits":{"POST /v1/act":1000000},"max_identities_per_ip":1}
 	}]`), func(string) string { return "MASTERKEY" })
 	if err != nil {
 		t.Fatalf("ParseRegistry: %v", err)
@@ -238,17 +245,26 @@ func TestCreditPath_PerIPIdentityCap(t *testing.T) {
 	b := New(reg, NewMemStore())
 	b.Verify = VerifyConfig{Now: fixedClock(now)}
 
-	_, priv1 := newKey(t)
-	rec1 := httptest.NewRecorder()
-	b.ServeHTTP(rec1, signedReq(t, priv1, "POST", "/io.pilot.orthogonal/v1/search", []byte(`{}`), now))
-	if rec1.Code != 200 {
-		t.Fatalf("first identity: status %d, want 200", rec1.Code)
+	call := func(priv ed25519.PrivateKey, path string) int {
+		rec := httptest.NewRecorder()
+		b.ServeHTTP(rec, signedReq(t, priv, "POST", "/io.pilot.orthogonal"+path, []byte(`{}`), now))
+		return rec.Code
 	}
-	// A different key = a different pilot identity from the same IP → capped.
+
+	// Identity 1 is funded: it can spend.
+	_, priv1 := newKey(t)
+	if got := call(priv1, "/v1/act"); got != 200 {
+		t.Fatalf("funded identity spend: status %d, want 200", got)
+	}
+
+	// Identity 2 on the SAME IP is over the cap → zero grant.
 	_, priv2 := newKey(t)
-	rec2 := httptest.NewRecorder()
-	b.ServeHTTP(rec2, signedReq(t, priv2, "POST", "/io.pilot.orthogonal/v1/search", []byte(`{}`), now))
-	if rec2.Code != http.StatusTooManyRequests {
-		t.Fatalf("second identity same IP: status %d, want 429 (IP cap)", rec2.Code)
+	// It is NOT locked out: a free read still works.
+	if got := call(priv2, "/v1/read"); got != 200 {
+		t.Errorf("capped identity read: status %d, want 200 (must not be hard-blocked)", got)
+	}
+	// But it has no budget, so a priced call is refused with 402 — no free money.
+	if got := call(priv2, "/v1/act"); got != http.StatusPaymentRequired {
+		t.Errorf("capped identity spend: status %d, want 402 (no grant)", got)
 	}
 }
