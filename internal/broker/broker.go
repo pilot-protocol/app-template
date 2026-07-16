@@ -3,9 +3,12 @@ package broker
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"strconv"
@@ -27,6 +30,10 @@ type Broker struct {
 	// IPTrust says which header carries the real source IP (set by the front
 	// proxy). Client-supplied X-Forwarded-For is never trusted.
 	IPTrust IPTrust
+	// AccessKeys authorizes callers of apps with require_access_key. A signed
+	// identity only proves possession of a self-minted key; this proves the
+	// caller is an authorized pilot client at all.
+	AccessKeys *AccessKeys
 
 	reg atomic.Pointer[Registry] // hot-swappable so the registry can reload without dropping traffic
 }
@@ -82,11 +89,14 @@ func (b *Broker) serveCreditBalance(w http.ResponseWriter, r *http.Request, app 
 	if err != nil {
 		switch err {
 		case ErrIPCap:
-			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "per-IP identity cap reached — too many pilot identities have claimed a budget from this network"})
+			// Deliberately vague: naming the per-IP cap as the reason tells a caller
+			// exactly which dimension to vary to evade it. The specific cause is
+			// logged, not returned.
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limited — try again later"})
 		case ErrCooldown:
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "re-provision cooldown — retry shortly"})
 		default:
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "balance: " + err.Error()})
+			b.internalError(w, http.StatusInternalServerError, app.ID, "balance", err)
 		}
 		return
 	}
@@ -115,6 +125,13 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	app := b.reg.Load().Get(appID)
 	if app == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown app: " + appID})
+		return
+	}
+
+	// Access key BEFORE anything else that costs or grants: an unauthorized caller
+	// must not be able to reach the credit ledger, seed a grant, or touch the
+	// master key. This is the gate that self-minted identities cannot walk past.
+	if !b.requireAccessKey(w, r, app) {
 		return
 	}
 
@@ -154,9 +171,24 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Is this an allowed method? (no open proxy onto the master key)
-	if !app.allowed(mpath) {
+	if !app.allowed(r.Method, mpath) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "method not allowed for this app: " + mpath})
 		return
+	}
+
+	// 3b. TENANCY: on a shared partner account the broker is the only thing that
+	//     knows which pilot user owns what. Every resource named in the path,
+	//     query, or body must belong to this caller. This runs BEFORE the forward,
+	//     so a refused write never reaches the partner.
+	//
+	//     The answer is 404, never 403: "not yours" and "does not exist" must be
+	//     indistinguishable, otherwise the broker is an oracle for enumerating
+	//     other tenants' resource ids.
+	if app.Tenancy != nil {
+		if _, ok := app.Tenancy.EnforceRequest(b.ownerStore(), appID, app.allowSegs, r.Method, mpath, r.URL.RawQuery, body, string(caller)); !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
 	}
 
 	// 4. Circuit breaker: if the partner has been failing, fail fast and don't
@@ -187,18 +219,20 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ip := clientIP(r.Header.Get, r.RemoteAddr, b.IPTrust)
-		// Seed the caller on first sight, enforcing the per-IP identity cap: once a
-		// caller depletes their budget (402 below) they can't farm a fresh $5 grant by
-		// minting a new pilot identity from the same IP — the (N+1)th distinct caller
-		// on that IP is refused here with 429.
+		// Seed the caller on first sight, enforcing the per-IP identity cap: the
+		// (N+1)th distinct caller seen on one source IP is refused here with 429, so
+		// a depleted caller cannot immediately re-seed from the same network.
 		if _, err := ps.Provision(appID, string(caller), ip, app.creditSeed, app.creditMaxPerIP, app.creditMintCooldown, b.now()); err != nil {
 			switch err {
 			case ErrIPCap:
-				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "per-IP identity cap reached — too many pilot identities have claimed a budget from this network"})
+				// Deliberately vague: naming the per-IP cap as the reason tells a caller
+				// exactly which dimension to vary to evade it. The specific cause is
+				// logged, not returned.
+				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limited — try again later"})
 			case ErrCooldown:
 				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "re-provision cooldown — retry shortly"})
 			default:
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "provision: " + err.Error()})
+				b.internalError(w, http.StatusInternalServerError, appID, "provision", err)
 			}
 			return
 		}
@@ -211,7 +245,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if billable {
 				bal, derr := ps.Credit(appID, string(caller))
 				if derr != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "credit: " + derr.Error()})
+					b.internalError(w, http.StatusInternalServerError, appID, "credit", derr)
 					return
 				}
 				if bal <= 0 {
@@ -227,7 +261,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			creditCost = app.costForCall(r.Method, mpath)
 			admittedCredit, remaining, derr := ps.Debit(appID, string(caller), creditCost)
 			if derr != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "debit: " + derr.Error()})
+				b.internalError(w, http.StatusInternalServerError, appID, "debit", derr)
 				return
 			}
 			if !admittedCredit {
@@ -262,7 +296,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ureq, err := http.NewRequestWithContext(ctx, r.Method, target, bytes.NewReader(body))
 	if err != nil {
 		refundCredit()
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "build upstream: " + err.Error()})
+		b.internalError(w, http.StatusBadGateway, appID, "build upstream", err)
 		return
 	}
 	ureq.Header.Set("Content-Type", "application/json")
@@ -272,7 +306,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		app.breaker.Record(false)
 		refundCredit()
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "upstream: " + err.Error()})
+		b.internalError(w, http.StatusBadGateway, appID, "upstream", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -296,6 +330,21 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 7. TENANCY on the way back out. Two jobs, both only on success:
+	//    - claim what this call created, so the caller owns it going forward;
+	//    - filter list answers down to the caller's own resources, because the
+	//      partner answered for the WHOLE shared account.
+	if app.Tenancy != nil && resp.StatusCode/100 == 2 {
+		os := b.ownerStore()
+		app.Tenancy.ClaimFrom(os, appID, r.Method, mpath, rb, string(caller), b.now())
+		app.Tenancy.ReleaseFrom(os, appID, app.allowSegs, r.Method, mpath)
+		if filtered, did := app.Tenancy.FilterResponse(os, appID, r.Method, mpath, rb, string(caller), b.now()); did {
+			rb = filtered
+		} else if filtered, did := app.Tenancy.FilterObject(os, appID, r.Method, mpath, rb, string(caller)); did {
+			rb = filtered
+		}
+	}
+
 	// Surface the caller's remaining budget on every metered response.
 	if app.creditEnabled() {
 		if bal, err := ps.Credit(appID, string(caller)); err == nil {
@@ -306,4 +355,30 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(rb)
+}
+
+// internalError logs the real cause server-side and returns an opaque reference
+// to the caller.
+//
+// Raw error strings from the store or the upstream dialer describe internal
+// topology — hostnames, private addresses, database paths, driver states. None
+// of that helps a legitimate caller (it is never something they can fix), and
+// all of it helps someone mapping the deployment. The caller gets a correlation
+// id to quote in a bug report; the detail stays in the log.
+func (b *Broker) internalError(w http.ResponseWriter, code int, appID, stage string, err error) {
+	ref := errorRef()
+	log.Printf("broker: %s: %s: ref=%s: %v", appID, stage, ref, err)
+	writeJSON(w, code, map[string]string{
+		"error": "the broker could not complete this call",
+		"ref":   ref,
+	})
+}
+
+// errorRef mints a short, non-guessable correlation id for one failure.
+func errorRef() string {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "unknown"
+	}
+	return hex.EncodeToString(b[:])
 }

@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,6 +36,17 @@ func main() {
 	reg, err := broker.LoadRegistry(*registryPath, os.Getenv)
 	if err != nil {
 		log.Fatalf("broker: %v", err)
+	}
+
+	// Access keys come from the environment only (never the registry file, which
+	// is world-readable config and lands in git).
+	accessKeys := broker.NewAccessKeys(strings.Split(os.Getenv("BROKER_ACCESS_KEYS"), ","))
+	// Refuse to boot if an app demands a key that does not exist. Without this the
+	// broker would come up "healthy" and 401 every caller — a config typo would
+	// read as a total outage with no explanation.
+	if n := reg.AppsRequiringAccessKey(); len(n) > 0 && accessKeys.Len() == 0 {
+		log.Fatalf("broker: apps %v require an access key but BROKER_ACCESS_KEYS is empty — "+
+			"set it (comma-separated, entries may be \"label:key\") or clear require_access_key", n)
 	}
 
 	// Durable store when BROKER_DB is set (prod); in-memory otherwise (dev).
@@ -61,6 +73,8 @@ func main() {
 	b := broker.New(reg, store)
 	b.Verify = broker.VerifyConfig{Window: *window}
 	b.IPTrust = broker.IPTrust{Header: *ipHeader}
+	b.AccessKeys = accessKeys
+	log.Printf("broker: %d access key(s) configured", accessKeys.Len())
 
 	// Usage meter: drain per-user credit by real machine usage, stopping machines
 	// at zero. Runs for provisioned apps whose registry entry carries a rate card.
