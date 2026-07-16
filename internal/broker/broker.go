@@ -85,17 +85,11 @@ func (b *Broker) serveCreditBalance(w http.ResponseWriter, r *http.Request, app 
 		return
 	}
 	ip := clientIP(r.Header.Get, r.RemoteAddr, b.IPTrust)
-	rec, err := ps.Provision(app.ID, caller, ip, app.creditSeed, app.creditMaxPerIP, app.creditMintCooldown, b.now())
+	rec, err := b.seedCaller(ps, app.ID, caller, ip, app)
 	if err != nil {
-		switch err {
-		case ErrIPCap:
-			// Deliberately vague: naming the per-IP cap as the reason tells a caller
-			// exactly which dimension to vary to evade it. The specific cause is
-			// logged, not returned.
-			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limited — try again later"})
-		case ErrCooldown:
+		if err == ErrCooldown {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "re-provision cooldown — retry shortly"})
-		default:
+		} else {
 			b.internalError(w, http.StatusInternalServerError, app.ID, "balance", err)
 		}
 		return
@@ -109,6 +103,30 @@ func (b *Broker) serveCreditBalance(w http.ResponseWriter, r *http.Request, app 
 		"scope":             "per-pilot-user",
 		"note":              "Your personal budget on this app. The shared provider account balance is not exposed.",
 	})
+}
+
+// seedCaller records the caller in the credit ledger, enforcing the per-IP
+// GRANT cap without ever hard-blocking access.
+//
+// On first sight it grants the app's seed budget, unless the caller is the
+// (N+1)th distinct identity on its source IP — in which case it is recorded with
+// a ZERO grant instead of being refused. The distinction matters: the cap exists
+// to bound how much free budget one network can mint, not to decide who may call
+// the broker. A zero-grant caller can still make free (read) calls; every priced
+// call it attempts hits 402 for lack of budget. A caller already in the ledger
+// keeps whatever balance it has (no re-seed, no second cap check).
+//
+// This is what lets the cap be set aggressively low: a tight economic bound
+// costs a shared-NAT newcomer only its free grant, not its access.
+func (b *Broker) seedCaller(ps ProvisionStore, app, caller, ip string, a *AppEntry) (ProvisionRecord, error) {
+	rec, err := ps.Provision(app, caller, ip, a.creditSeed, a.creditMaxPerIP, a.creditMintCooldown, b.now())
+	if err == ErrIPCap {
+		// Over the per-IP grant cap: record the identity with no budget and no cap
+		// (seed 0, maxPerIP 0). Idempotent, so a subsequent call takes the normal
+		// repeat path and stays at zero rather than ever back-filling a grant.
+		return ps.Provision(app, caller, ip, 0, 0, 0, b.now())
+	}
+	return rec, err
 }
 
 // ServeHTTP is the forward path for /<app-id>/<method-path>.
@@ -219,19 +237,16 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ip := clientIP(r.Header.Get, r.RemoteAddr, b.IPTrust)
-		// Seed the caller on first sight, enforcing the per-IP identity cap: the
-		// (N+1)th distinct caller seen on one source IP is refused here with 429, so
-		// a depleted caller cannot immediately re-seed from the same network.
-		if _, err := ps.Provision(appID, string(caller), ip, app.creditSeed, app.creditMaxPerIP, app.creditMintCooldown, b.now()); err != nil {
-			switch err {
-			case ErrIPCap:
-				// Deliberately vague: naming the per-IP cap as the reason tells a caller
-				// exactly which dimension to vary to evade it. The specific cause is
-				// logged, not returned.
-				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limited — try again later"})
-			case ErrCooldown:
+		// Seed the caller on first sight, enforcing the per-IP GRANT cap. The cap
+		// bounds free money, not access: the (N+1)th distinct identity on one source
+		// IP is recorded with a ZERO grant rather than refused outright. It can still
+		// make free (read) calls, but every priced call hits 402 — so nobody can farm
+		// a fresh budget by minting identities from one network, and a legitimate user
+		// behind a shared NAT is not hard-locked out of the app.
+		if _, err := b.seedCaller(ps, appID, string(caller), ip, app); err != nil {
+			if err == ErrCooldown {
 				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "re-provision cooldown — retry shortly"})
-			default:
+			} else {
 				b.internalError(w, http.StatusInternalServerError, appID, "provision", err)
 			}
 			return

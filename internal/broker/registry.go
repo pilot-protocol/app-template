@@ -352,6 +352,16 @@ func ParseRegistry(raw []byte, getenv func(string) string) (*Registry, error) {
 			return nil, fmt.Errorf("registry: app %s: env %s (master key) is empty", a.ID, a.KeyEnv)
 		}
 		a.injector = injectorFor(a.AuthStyle, a.AuthHeader, a.AuthScheme, a.AuthParam, a.AuthUser)
+		// A classic managed app that forwards with header-style auth but no header
+		// name builds an injector that sets an EMPTY header, which fails only when
+		// the first call is dialed (a 502). Catch it at load so a config typo is a
+		// boot failure, not a silent runtime outage on live traffic. Skipped for
+		// provisioned apps (they mint per-user keys, not a master-key header) and
+		// for empty-allow apps (which forward nothing).
+		if a.Provision == nil && len(a.Allow) > 0 &&
+			(a.AuthStyle == "" || a.AuthStyle == "header") && strings.TrimSpace(a.AuthHeader) == "" {
+			return nil, fmt.Errorf("registry: app %s: header auth needs a non-empty auth_header (set auth_style to query/basic if intended)", a.ID)
+		}
 		a.allowSet = map[string]bool{}
 		a.allowPatterns = nil
 		a.allowSegs = nil

@@ -36,10 +36,12 @@ DROP = {
     "/v1/messages/{message_id}/reactions",
 }
 
-# Spend routes remain withheld from the allow-list while the grant for a
-# self-minted identity is still unauthenticated. Re-add them together with the
-# access-key rollout, not before.
-SPEND = {"/v1/messages", "/v1/calls", "/v1/numbers"}
+# Spend routes. These are ENABLED: an AI agent cannot use AgentPhone without
+# buying a number and sending, so the app is unusable without them. They are now
+# safe to serve because (a) tenancy binds every send to a number/agent the caller
+# owns, and (b) the per-IP grant cap bounds how much free budget one network can
+# mint. Each still debits the caller's own $5 budget at its listed cost.
+SPEND = ["/v1/messages", "/v1/calls", "/v1/numbers"]
 
 TENANCY = {
     # Every {param} that appears in an allow pattern MUST be mapped here. A param
@@ -137,13 +139,19 @@ def main():
         if a["id"] != "io.pilot.agentphone":
             continue
         before = len(a["allow"])
-        a["allow"] = [p for p in a["allow"] if p not in DROP and p not in SPEND]
+        # Drop unsafe routes; then ensure spend routes are present (containment
+        # removed them, this re-enables them). Order-preserving, no duplicates.
+        allow = [p for p in a["allow"] if p not in DROP and p not in SPEND]
+        allow += [p for p in SPEND if p not in allow]
+        a["allow"] = allow
         a["tenancy"] = TENANCY
-        # Cap identities per source IP. This is a speed bump against bulk identity
-        # creation, not a boundary: it does not constrain a caller with many source
-        # addresses, so it must never be the only control on a grant.
+        # Per-IP GRANT cap: at most this many funded identities per source IP.
+        # It bounds free budget minted from one network; the (N+1)th identity is
+        # recorded with a zero grant (reads still work, spend 402s), so a shared
+        # NAT is not hard-locked out. It is a speed bump, not a boundary — a caller
+        # with many source IPs is not constrained — so it is never the only control.
         a.setdefault("credit", {})["max_identities_per_ip"] = 3
-        print("allow: %d -> %d" % (before, len(a["allow"])))
+        print("allow: %d -> %d  (spend enabled: %s)" % (before, len(allow), ", ".join(SPEND)))
 
         # Fail loudly if any {param} still lacks an ownership mapping: an unmapped
         # param is an unchecked resource, which is exactly the bug class this fixes.
