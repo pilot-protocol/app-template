@@ -31,6 +31,7 @@ func main() {
 	window := flag.Duration("window", 5*time.Minute, "signed-request freshness window")
 	ipHeader := flag.String("ip-header", envOr("BROKER_IP_HEADER", "X-Real-IP"), "header carrying the real source IP (set by the front proxy; client X-Forwarded-For is never trusted)")
 	meterInterval := flag.Duration("meter-interval", 60*time.Second, "usage-metering tick for provisioned apps")
+	brokerName := flag.String("broker-name", envOr("BROKER_NAME", defaultHostname()), "process label on every access event")
 	flag.Parse()
 
 	reg, err := broker.LoadRegistry(*registryPath, os.Getenv)
@@ -105,13 +106,25 @@ func main() {
 	})
 	mux.Handle("/", b)
 
-	log.Printf("broker: listening on %s", *addr)
+	// Access logging: one structured `ACCESS {json}` line per forwarded request
+	// to stdout → journald (read by the monitoring log crawler). /gw/ and
+	// unrouted (scanner-noise) requests are skipped.
+	handler := broker.WithAccessLog(mux, *brokerName, broker.StdoutSink{W: os.Stdout}, nil)
+
+	log.Printf("broker: listening on %s (name=%s)", *addr, *brokerName)
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Fatal(srv.ListenAndServe())
+}
+
+func defaultHostname() string {
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h
+	}
+	return "broker"
 }
 
 func envOr(k, def string) string {

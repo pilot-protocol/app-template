@@ -133,6 +133,7 @@ func (b *Broker) seedCaller(ps ProvisionStore, app, caller, ip string, a *AppEnt
 func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	appID, mpath, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	if !ok || appID == "" {
+		w.Header().Set(UnroutedHeader, "1") // not a managed-app call — monitoring skips it
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "route must be /<app-id>/<path>"})
 		return
 	}
@@ -142,6 +143,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// the app's artifact limit before reading.
 	app := b.reg.Load().Get(appID)
 	if app == nil {
+		w.Header().Set(UnroutedHeader, "1") // unknown app (typo / internet scanner) — not real broker usage
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown app: " + appID})
 		return
 	}
