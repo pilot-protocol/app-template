@@ -44,10 +44,26 @@
       "free_budget": "$5.00 per Pilot user",
       "hard_cap_usd": 5.0,
       "operations": [
-        {"op": "agentphone.place_call", "price": "$0.10", "note": "per call (per-minute, ~$0.05+ for a short call)"},
-        {"op": "agentphone.send_message", "price": "$0.02", "note": "per SMS/iMessage"},
-        {"op": "agentphone.buy_number", "price": "$3.00", "note": "per month; released numbers are gone forever, no refund"},
-        {"op": "agentphone.usage / list_* / get_call / get_transcript", "price": "$0.00", "note": "all reads are free"}
+        {
+          "op": "agentphone.place_call",
+          "price": "$0.10",
+          "note": "per call (per-minute, ~$0.05+ for a short call)"
+        },
+        {
+          "op": "agentphone.send_message",
+          "price": "$0.02",
+          "note": "per SMS/iMessage"
+        },
+        {
+          "op": "agentphone.buy_number",
+          "price": "$3.00",
+          "note": "per month; released numbers are gone forever, no refund"
+        },
+        {
+          "op": "agentphone.usage / list_* / get_call / get_transcript",
+          "price": "$0.00",
+          "note": "all reads are free"
+        }
       ],
       "worked_total": "This demo spends $0.12 of your $5.00 budget (1 call + 1 text; the two reads are free).",
       "check_balance": "pilotctl appstore call io.pilot.agentphone agentphone.usage '{}'"
@@ -64,10 +80,133 @@
       "io.pilot.agentphone agentphone.help '{}'"
     ]
   },
+  "next_steps": {
+    "schema": 1,
+    "app": "io.pilot.agentphone",
+    "edges": [
+      {
+        "from": "*",
+        "on": "err",
+        "code": 402,
+        "why": "your per-user $5 budget is spent — buy_number ($3), place_call (~$0.05+/min) and send_message (~$0.02) are blocked. The grant is one-time: there is no top-up or balance call. Reads stay free.",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.usage '{}'",
+            "why": "free — the closest thing to a balance: plan, number hold limit, and your call/message stats",
+            "kind": "recovery"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.mynumber '{}'",
+            "why": "free, local — a number you already bought is still yours; recall it instead of buying again",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "*",
+        "on": "err",
+        "code": 429,
+        "why": "a rate/identity limit, NOT an empty budget — per-caller quota or the per-IP identity cap. Your credit is intact; back off and retry rather than trying to pay.",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.mynumber '{}'",
+            "why": "reads this host's local record with no backend call, so it works while you are rate-limited",
+            "kind": "recovery"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.usage '{}'",
+            "why": "retry this free read after a short back-off to see whether the limit has cleared",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "*",
+        "on": "ok",
+        "why": "the flow is: find your agent, give it a number, then text or call from it",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.list_agents '{}'",
+            "why": "free — you get a starter agent on setup; its id is required by send_message and place_call",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.mynumber '{}'",
+            "why": "free, local — shows whether this host already provisioned a number (empty means you need buy_number)",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "agentphone.list_agents",
+        "on": "ok",
+        "why": "an agent can only call or text once a number is attached to it",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.list_numbers '{}'",
+            "why": "free — if a number is already listed, attach it rather than paying $3 for another",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.buy_number '{\"country\":\"US\",\"agentId\":\"agent_123\"}'",
+            "why": "only when you hold none: COSTS $3.00 of your $5 budget and attaches the number to that agent",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "agentphone.buy_number",
+        "on": "ok",
+        "why": "you now have a real US/CA number attached — this is the point of the app",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.send_message '{\"agent_id\":\"agent_123\",\"to_number\":\"+14155551234\",\"body\":\"On my way, 5 min out.\"}'",
+            "why": "cheapest paid action (~$0.02): iMessage with SMS fallback; the response channel says how it went",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.place_call '{\"agentId\":\"agent_123\",\"toNumber\":\"+14155551234\",\"systemPrompt\":\"Confirm the 7pm reservation for two under Alex.\"}'",
+            "why": "~$0.05+/min: the AI dials and holds the conversation itself; returns a call id immediately",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "agentphone.place_call",
+        "on": "ok",
+        "why": "place_call is async — it returned a call id, not a result. Nothing has been said yet.",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.get_call '{\"call_id\":\"call_123\"}'",
+            "why": "free — poll with the id you just got every few seconds until status is completed/failed to read the transcript",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "agentphone.send_message",
+        "on": "err",
+        "match": "missing required param",
+        "why": "send_message needs agent_id + to_number + body, and the agent must have a number attached",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.list_agents '{}'",
+            "why": "free — the agent_id you are missing, plus its attached numbers",
+            "kind": "recovery"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.agentphone agentphone.send_message '{\"agent_id\":\"agent_123\",\"to_number\":\"+14155551234\",\"body\":\"On my way, 5 min out.\"}'",
+            "why": "the complete shape — E.164 for to_number, never (415) 555-1234",
+            "kind": "recovery"
+          }
+        ]
+      }
+    ]
+  },
   "id": "io.pilot.agentphone",
   "version": "0.3.0",
   "namespace": "agentphone",
-  "description": "Give your AI agent a real US/Canada phone number: place and receive voice calls, send and receive SMS/iMessage, and hold threaded conversations \u2014 all over REST, metered per user against a $5 budget.",
+  "description": "Give your AI agent a real US/Canada phone number: place and receive voice calls, send and receive SMS/iMessage, and hold threaded conversations — all over REST, metered per user against a $5 budget.",
   "email": "apps@pilotprotocol.network",
   "backend": {
     "base_url": "https://api.agentphone.ai",
@@ -164,7 +303,7 @@
     },
     {
       "name": "agentphone.list_voices",
-      "description": "List available text-to-speech voices (voice_id, voice_name, provider, gender, accent, preview_audio_url) across ElevenLabs, Cartesia, OpenAI, and platform voices. gender/accent/preview may be null \u2014 do not crash on missing fields. Use voice_id when creating/updating an agent. Read-only.",
+      "description": "List available text-to-speech voices (voice_id, voice_name, provider, gender, accent, preview_audio_url) across ElevenLabs, Cartesia, OpenAI, and platform voices. gender/accent/preview may be null — do not crash on missing fields. Use voice_id when creating/updating an agent. Read-only.",
       "latency": "fast",
       "http": {
         "verb": "GET",
@@ -174,7 +313,7 @@
     },
     {
       "name": "agentphone.list_agents",
-      "description": "List your agents (phone personas: name, voiceMode, model tier, system prompt, attached numbers). You get one starter agent on account setup \u2014 ALWAYS list before creating another. Read-only.",
+      "description": "List your agents (phone personas: name, voiceMode, model tier, system prompt, attached numbers). You get one starter agent on account setup — ALWAYS list before creating another. Read-only.",
       "latency": "fast",
       "http": {
         "verb": "GET",
@@ -211,7 +350,7 @@
           "type": "string",
           "required": false,
           "in": "body",
-          "description": "\"hosted\" (recommended \u2014 AgentPhone runs the LLM) | \"webhook\" (each turn POSTed to your endpoint). Defaults to webhook."
+          "description": "\"hosted\" (recommended — AgentPhone runs the LLM) | \"webhook\" (each turn POSTed to your endpoint). Defaults to webhook."
         },
         {
           "name": "systemPrompt",
@@ -232,14 +371,14 @@
           "type": "string",
           "required": false,
           "in": "body",
-          "description": "voice_id from agentphone.list_voices (default: Skylar \u2014 Friendly Guide)"
+          "description": "voice_id from agentphone.list_voices (default: Skylar — Friendly Guide)"
         },
         {
           "name": "modelTier",
           "type": "string",
           "required": false,
           "in": "body",
-          "description": "\"turbo\" | \"balanced\" (default) | \"max\" \u2014 speed vs quality"
+          "description": "\"turbo\" | \"balanced\" (default) | \"max\" — speed vs quality"
         },
         {
           "name": "transferNumber",
@@ -260,14 +399,14 @@
           "type": "number",
           "required": false,
           "in": "body",
-          "description": "0.5\u20132.0 speech-speed multiplier (1.0 normal)"
+          "description": "0.5–2.0 speech-speed multiplier (1.0 normal)"
         },
         {
           "name": "interruptionSensitivity",
           "type": "number",
           "required": false,
           "in": "body",
-          "description": "0.0\u20131.0, how easily callers can barge in (default 0.8)"
+          "description": "0.0–1.0, how easily callers can barge in (default 0.8)"
         },
         {
           "name": "enableBackchannel",
@@ -340,7 +479,7 @@
     },
     {
       "name": "agentphone.update_agent",
-      "description": "Update an agent \u2014 only the fields you send change. Any create field is updatable (systemPrompt, voice, modelTier, \u2026). Free.",
+      "description": "Update an agent — only the fields you send change. Any create field is updatable (systemPrompt, voice, modelTier, …). Free.",
       "latency": "med",
       "http": {
         "verb": "PATCH",
@@ -379,7 +518,7 @@
     },
     {
       "name": "agentphone.delete_agent",
-      "description": "Delete an agent. Irreversible \u2014 clears the agent's references on its numbers/conversations/calls (those are NOT deleted). Confirm with your human first. Free.",
+      "description": "Delete an agent. Irreversible — clears the agent's references on its numbers/conversations/calls (those are NOT deleted). Confirm with your human first. Free.",
       "latency": "fast",
       "http": {
         "verb": "DELETE",
@@ -529,7 +668,7 @@
     },
     {
       "name": "agentphone.buy_number",
-      "description": "Provision a new US/CA phone number. COSTS $3.00 from your $5 Pilot budget (402 if it would overdraw). The provisioned number is saved to this host's ~/.pilot/.agentphone so you can recall it later with agentphone.mynumber \u2014 no need to store it yourself. Optionally attach to an agent and request an area code.",
+      "description": "Provision a new US/CA phone number. COSTS $3.00 from your $5 Pilot budget (402 if it would overdraw). The provisioned number is saved to this host's ~/.pilot/.agentphone so you can recall it later with agentphone.mynumber — no need to store it yourself. Optionally attach to an agent and request an area code.",
       "latency": "med",
       "http": {
         "verb": "POST",
@@ -580,7 +719,7 @@
     },
     {
       "name": "agentphone.release_number",
-      "description": "Release (delete) a number. IRREVERSIBLE \u2014 the number returns to the carrier pool; no refund for the unused month. Confirm with your human first. Free to call.",
+      "description": "Release (delete) a number. IRREVERSIBLE — the number returns to the carrier pool; no refund for the unused month. Confirm with your human first. Free to call.",
       "latency": "fast",
       "http": {
         "verb": "DELETE",
@@ -624,14 +763,14 @@
           "type": "string",
           "required": false,
           "in": "query",
-          "description": "ISO timestamp cursor \u2014 messages before this time"
+          "description": "ISO timestamp cursor — messages before this time"
         },
         {
           "name": "after",
           "type": "string",
           "required": false,
           "in": "query",
-          "description": "ISO timestamp cursor \u2014 messages after this time (advance it each poll)"
+          "description": "ISO timestamp cursor — messages after this time (advance it each poll)"
         }
       ]
     },
@@ -751,7 +890,7 @@
     },
     {
       "name": "agentphone.send_message",
-      "description": "Send an SMS/iMessage. COSTS MONEY (~$0.01\u20130.02, debited from your $5 budget \u2192 402 if over). Auto-delivers over iMessage when both sides support it, else SMS/MMS \u2014 the response `channel` (sms|mms|imessage) tells you how it went. E.164 for `to_number` (or a group id grp_\u2026 for an iMessage group). iMessage-only extras (send_style, reply_to_message_id) are silently ignored on SMS.",
+      "description": "Send an SMS/iMessage. COSTS MONEY (~$0.01–0.02, debited from your $5 budget → 402 if over). Auto-delivers over iMessage when both sides support it, else SMS/MMS — the response `channel` (sms|mms|imessage) tells you how it went. E.164 for `to_number` (or a group id grp_… for an iMessage group). iMessage-only extras (send_style, reply_to_message_id) are silently ignored on SMS.",
       "latency": "med",
       "http": {
         "verb": "POST",
@@ -770,7 +909,7 @@
           "type": "string",
           "required": true,
           "in": "body",
-          "description": "recipient in E.164 (+14155551234) or an iMessage group id (grp_\u2026)"
+          "description": "recipient in E.164 (+14155551234) or an iMessage group id (grp_…)"
         },
         {
           "name": "body",
@@ -812,20 +951,20 @@
           "type": "string",
           "required": false,
           "in": "body",
-          "description": "iMessage only \u2014 thread inline under an earlier message id"
+          "description": "iMessage only — thread inline under an earlier message id"
         },
         {
           "name": "send_style",
           "type": "string",
           "required": false,
           "in": "body",
-          "description": "iMessage only \u2014 slam|loud|gentle|invisible|confetti|balloons|fireworks|celebration|lasers|spotlight|echo|love"
+          "description": "iMessage only — slam|loud|gentle|invisible|confetti|balloons|fireworks|celebration|lasers|spotlight|echo|love"
         }
       ]
     },
     {
       "name": "agentphone.react",
-      "description": "Send a tapback reaction to a message. iMessage ONLY \u2014 returns 400 on SMS. Free.",
+      "description": "Send a tapback reaction to a message. iMessage ONLY — returns 400 on SMS. Free.",
       "latency": "fast",
       "http": {
         "verb": "POST",
@@ -889,7 +1028,7 @@
     },
     {
       "name": "agentphone.place_call",
-      "description": "Place an OUTBOUND voice call. COSTS MONEY (per-minute, ~$0.05+, debited from your $5 budget \u2192 402 if over). With `systemPrompt` the AI runs the call autonomously (recommended); without it, each turn is POSTed to the agent's webhook. Returns a call id IMMEDIATELY (async) \u2014 the phone rings in a second or two. Then POLL agentphone.get_call every few seconds until status is completed/failed to read the transcript. Cannot call 911 / N11 / crisis lines (blocked).",
+      "description": "Place an OUTBOUND voice call. COSTS MONEY (per-minute, ~$0.05+, debited from your $5 budget → 402 if over). With `systemPrompt` the AI runs the call autonomously (recommended); without it, each turn is POSTed to the agent's webhook. Returns a call id IMMEDIATELY (async) — the phone rings in a second or two. Then POLL agentphone.get_call every few seconds until status is completed/failed to read the transcript. Cannot call 911 / N11 / crisis lines (blocked).",
       "latency": "med",
       "http": {
         "verb": "POST",
@@ -967,7 +1106,7 @@
     },
     {
       "name": "agentphone.end_call",
-      "description": "Terminate an in-progress call. status/endedAt settle shortly after via the provider \u2014 keep polling agentphone.get_call until terminal. Free.",
+      "description": "Terminate an in-progress call. status/endedAt settle shortly after via the provider — keep polling agentphone.get_call until terminal. Free.",
       "latency": "fast",
       "http": {
         "verb": "POST",
@@ -985,7 +1124,7 @@
     },
     {
       "name": "agentphone.get_transcript",
-      "description": "Get the full ordered transcript of a call as plain JSON (user utterance + agent response per turn). This is the REST/polling alternative to the SSE live-transcript stream \u2014 the adapter never uses the stream. Read-only.",
+      "description": "Get the full ordered transcript of a call as plain JSON (user utterance + agent response per turn). This is the REST/polling alternative to the SSE live-transcript stream — the adapter never uses the stream. Read-only.",
       "latency": "fast",
       "http": {
         "verb": "GET",
@@ -1260,7 +1399,7 @@
     },
     {
       "name": "agentphone.update_contact",
-      "description": "Update a contact \u2014 only the fields you send change (phone is re-normalized; 409 on conflict). Free.",
+      "description": "Update a contact — only the fields you send change (phone is re-normalized; 409 on conflict). Free.",
       "latency": "fast",
       "http": {
         "verb": "PATCH",
@@ -1334,7 +1473,7 @@
     },
     {
       "name": "agentphone.set_webhook",
-      "description": "Set the account-level webhook URL (returns a signing `secret`; a new one each call). NOTE: on the shared Pilot AgentPhone account this is a GLOBAL setting \u2014 prefer per-agent webhooks or polling. Free.",
+      "description": "Set the account-level webhook URL (returns a signing `secret`; a new one each call). NOTE: on the shared Pilot AgentPhone account this is a GLOBAL setting — prefer per-agent webhooks or polling. Free.",
       "latency": "fast",
       "http": {
         "verb": "POST",
@@ -1366,7 +1505,7 @@
     },
     {
       "name": "agentphone.delete_webhook",
-      "description": "Remove the account-level webhook. Global on the shared account \u2014 use with care. Free.",
+      "description": "Remove the account-level webhook. Global on the shared account — use with care. Free.",
       "latency": "fast",
       "http": {
         "verb": "DELETE",
@@ -1462,7 +1601,7 @@
     },
     {
       "name": "agentphone.set_agent_webhook",
-      "description": "Set an agent-specific webhook URL (overrides the account default for THIS agent only \u2014 safer than the account-level webhook on a shared account). Free.",
+      "description": "Set an agent-specific webhook URL (overrides the account default for THIS agent only — safer than the account-level webhook on a shared account). Free.",
       "latency": "fast",
       "http": {
         "verb": "POST",
@@ -1519,7 +1658,7 @@
     },
     {
       "name": "agentphone.mynumber",
-      "description": "Recall the phone number(s) THIS daemon provisioned (local, no backend call, free). Reads ~/.pilot/.agentphone, populated automatically by agentphone.buy_number. Returns {entries:[{id,phoneNumber,status,agentId,...}]} \u2014 empty if this host hasn't provisioned one yet. Use it to find 'my number' without listing the shared account.",
+      "description": "Recall the phone number(s) THIS daemon provisioned (local, no backend call, free). Reads ~/.pilot/.agentphone, populated automatically by agentphone.buy_number. Returns {entries:[{id,phoneNumber,status,agentId,...}]} — empty if this host hasn't provisioned one yet. Use it to find 'my number' without listing the shared account.",
       "latency": "fast",
       "local": {
         "store": "~/.pilot/.agentphone"
@@ -1529,8 +1668,8 @@
   ],
   "listing": {
     "display_name": "AgentPhone",
-    "tagline": "A real phone number for your agent \u2014 voice calls, SMS/iMessage, and conversations over REST",
-    "app_description": "# AgentPhone \u2014 a real phone number for your AI agent\n\nAgentPhone gives your agent its **own real US/Canada phone number**: place and receive **voice calls**, send and receive **SMS & iMessage**, and hold threaded **conversations** with real people \u2014 all over plain REST. This is the managed Pilot front door: you bring **nothing** (no signup, no API key). Pilot holds one AgentPhone master key behind the broker and gives **each Pilot user a $5 budget**; calls and texts debit against it, and once it's spent the paid endpoints return `402 Payment Required` (reads stay free).\n\n## What you can do\n\n- **Call people.** `agentphone.place_call` with a `systemPrompt` runs an autonomous voice call \u2014 the phone rings in ~1\u20132s and the AI holds the conversation. Book a reservation, chase a shipment, return a missed call, or call another agent.\n- **Text people.** `agentphone.send_message` delivers over **iMessage** when both sides support it (unlocking threaded replies, tapback reactions, send effects, typing indicators, group chats) and transparently falls back to **SMS/MMS** otherwise \u2014 same call either way.\n- **Answer & follow up.** Poll `agentphone.list_number_messages` / `agentphone.list_conversation_messages` for inbound texts and `agentphone.get_call` for call transcripts \u2014 **no websockets required**.\n- **Manage your setup.** Buy/release numbers, create and tune agents (voice, model tier, system prompt, ambience), keep an address book of contacts, and attach numbers to agents.\n\n## How it works (no signup step)\n\nBecause this is the **managed** app, the AgentPhone account already exists behind the Pilot broker \u2014 you skip the `/v0/agent/sign-up` + `/v0/agent/verify` flow entirely. Just call the `/v1` methods below; the broker authenticates you as your Pilot identity, injects the master key, meters your spend, and forwards to `https://api.agentphone.ai`.\n\n**Async, poll-based (no streaming):**\n1. `agentphone.place_call` \u2192 returns a call `id` immediately; the call runs in the background.\n2. Poll `agentphone.get_call` every few seconds until `status` is `completed` or `failed`, then read `transcripts[]` (or `agentphone.get_transcript`).\n3. For inbound SMS, poll `agentphone.list_number_messages` with the `after` cursor and filter `direction == \"inbound\"`.\n\n## Critical gotchas (read once)\n\n- **You cannot call 911**, N11 numbers, or crisis lines \u2014 they're blocked. If your human has an emergency, tell them to dial directly.\n- **Released numbers are gone forever** \u2014 no refund for the unused month. Confirm before `agentphone.release_number`.\n- **Always use E.164**: `+14155551234` \u2713 \u2014 never `(415) 555-1234` or `415-555-1234`. Assume `+1` for a bare US number and confirm if it matters.\n- **Inbound calls need hosted mode OR a webhook.** Create agents with `voiceMode: \"hosted\"` explicitly (the backend defaults to `webhook`, which fails inbound if no webhook is set).\n- **iMessage-only features** (reactions, send effects, typing, backgrounds, contact cards) are silently ignored on SMS \u2014 check the response `channel`.\n- **Don't spam.** Unsolicited bulk calls/texts are illegal and get the account suspended.\n\n## Cost & the $5 budget\n\nReads are free. Spending operations debit your per-user $5 Pilot budget: buying a number (**$3.00/mo**), placing a call (**per-minute**), and sending a text (**~$0.01\u20130.02**). When a call would overdraw, the broker returns `402` before anything is charged, and every response carries your remaining balance in the `X-Pilot-Credits-Remaining` header (micro-dollars).\n\nEvery method's parameters, kind, and latency class are discoverable at runtime via `agentphone.help`.\n",
+    "tagline": "A real phone number for your agent — voice calls, SMS/iMessage, and conversations over REST",
+    "app_description": "# AgentPhone — a real phone number for your AI agent\n\nAgentPhone gives your agent its **own real US/Canada phone number**: place and receive **voice calls**, send and receive **SMS & iMessage**, and hold threaded **conversations** with real people — all over plain REST. This is the managed Pilot front door: you bring **nothing** (no signup, no API key). Pilot holds one AgentPhone master key behind the broker and gives **each Pilot user a $5 budget**; calls and texts debit against it, and once it's spent the paid endpoints return `402 Payment Required` (reads stay free).\n\n## What you can do\n\n- **Call people.** `agentphone.place_call` with a `systemPrompt` runs an autonomous voice call — the phone rings in ~1–2s and the AI holds the conversation. Book a reservation, chase a shipment, return a missed call, or call another agent.\n- **Text people.** `agentphone.send_message` delivers over **iMessage** when both sides support it (unlocking threaded replies, tapback reactions, send effects, typing indicators, group chats) and transparently falls back to **SMS/MMS** otherwise — same call either way.\n- **Answer & follow up.** Poll `agentphone.list_number_messages` / `agentphone.list_conversation_messages` for inbound texts and `agentphone.get_call` for call transcripts — **no websockets required**.\n- **Manage your setup.** Buy/release numbers, create and tune agents (voice, model tier, system prompt, ambience), keep an address book of contacts, and attach numbers to agents.\n\n## How it works (no signup step)\n\nBecause this is the **managed** app, the AgentPhone account already exists behind the Pilot broker — you skip the `/v0/agent/sign-up` + `/v0/agent/verify` flow entirely. Just call the `/v1` methods below; the broker authenticates you as your Pilot identity, injects the master key, meters your spend, and forwards to `https://api.agentphone.ai`.\n\n**Async, poll-based (no streaming):**\n1. `agentphone.place_call` → returns a call `id` immediately; the call runs in the background.\n2. Poll `agentphone.get_call` every few seconds until `status` is `completed` or `failed`, then read `transcripts[]` (or `agentphone.get_transcript`).\n3. For inbound SMS, poll `agentphone.list_number_messages` with the `after` cursor and filter `direction == \"inbound\"`.\n\n## Critical gotchas (read once)\n\n- **You cannot call 911**, N11 numbers, or crisis lines — they're blocked. If your human has an emergency, tell them to dial directly.\n- **Released numbers are gone forever** — no refund for the unused month. Confirm before `agentphone.release_number`.\n- **Always use E.164**: `+14155551234` ✓ — never `(415) 555-1234` or `415-555-1234`. Assume `+1` for a bare US number and confirm if it matters.\n- **Inbound calls need hosted mode OR a webhook.** Create agents with `voiceMode: \"hosted\"` explicitly (the backend defaults to `webhook`, which fails inbound if no webhook is set).\n- **iMessage-only features** (reactions, send effects, typing, backgrounds, contact cards) are silently ignored on SMS — check the response `channel`.\n- **Don't spam.** Unsolicited bulk calls/texts are illegal and get the account suspended.\n\n## Cost & the $5 budget\n\nReads are free. Spending operations debit your per-user $5 Pilot budget: buying a number (**$3.00/mo**), placing a call (**per-minute**), and sending a text (**~$0.01–0.02**). When a call would overdraw, the broker returns `402` before anything is charged, and every response carries your remaining balance in the `X-Pilot-Credits-Remaining` header (micro-dollars).\n\nEvery method's parameters, kind, and latency class are discoverable at runtime via `agentphone.help`.\n",
     "license": "Apache-2.0",
     "homepage": "https://agentphone.ai",
     "source_url": "https://github.com/AgentPhone-AI/skills",

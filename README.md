@@ -65,6 +65,13 @@ You only ever touch **one repo** (`app-template`); see
 > install, injected as a `SKILL.md`, and rendered on the website as the "Full usage
 > demo". It drives correct first usage for autonomous agents. See
 > [`docs/PRODUCT-DEMOS.md`](docs/PRODUCT-DEMOS.md).
+>
+> **Every submission carries a next-steps graph.** Author a `next_steps` in
+> `submission.json` — the recommended next commands pilotctl prints after *every*
+> `appstore call`, on success and on failure (402 → how to top up, `needs_signup` → the
+> gateway, bad params → a corrected call). The demo drives install→first-call; the graph
+> drives first-call→actual usage. See
+> [`docs/NEXT-STEPS-GRAPHS.md`](docs/NEXT-STEPS-GRAPHS.md).
 
 ### Two ways to publish — same required fields, same result
 

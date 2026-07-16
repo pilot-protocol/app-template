@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/pilot-protocol/app-template/internal/demo"
+	"github.com/pilot-protocol/app-template/internal/nextsteps"
 )
 
 // descOr returns the long-form app description when set, else the one-line
@@ -41,8 +42,13 @@ type Metadata struct {
 	// SKILL.md. Optional and additive — older clients ignore it. Rendered from a
 	// single source via demo.Demo's RenderInstall/RenderSkill/RenderMarkdown.
 	ProductDemo *demo.Demo `json:"product_demo,omitempty"`
-	PublishedAt string     `json:"published_at,omitempty"`
-	UpdatedAt   string     `json:"updated_at,omitempty"`
+	// NextSteps is the dynamic context pilotctl renders after every `appstore
+	// call` on this app. pilotctl caches it to $APP/next-steps.json at install so
+	// the per-call lookup is a local file read — no network on the call path.
+	// Optional and additive — older clients ignore it.
+	NextSteps   *nextsteps.Graph `json:"next_steps,omitempty"`
+	PublishedAt string           `json:"published_at,omitempty"`
+	UpdatedAt   string           `json:"updated_at,omitempty"`
 }
 
 type MetaVendor struct {
@@ -129,6 +135,7 @@ func BuildMetadata(c *Config) Metadata {
 		Changelog:   changelog,
 		Links:       links,
 		ProductDemo: c.ProductDemo,
+		NextSteps:   c.NextSteps,
 	}
 }
 

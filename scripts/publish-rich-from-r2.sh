@@ -138,12 +138,18 @@ METHODS_JSON="$(jq -c '[ (.methods // [])[] | {name: .name, summary: (.summary /
 # metadata.json when the submission carries one; null → omitted. See
 # docs/PRODUCT-DEMOS.md.
 DEMO_JSON="$(jq -c '.product_demo // null' "$META")"
+# The next-steps graph (the dynamic context pilotctl renders after every
+# `appstore call`) rides along the same way; null → omitted. Because it travels
+# inside metadata.json, its bytes are covered by metadata_sha256 under the
+# catalogue signature, and a content fix ships as a metadata republish with no
+# app rebuild. See docs/NEXT-STEPS-GRAPHS.md.
+STEPS_JSON="$(jq -c '.next_steps // null' "$META")"
 METADATA_JSON="$(jq -n \
   --arg id "$ID" --arg dn "$DISPLAY" --arg desc "$DESC" \
   --arg src "$SOURCE" --arg lic "$LICENSE" \
   --argjson cats "$CATEGORIES_JSON" --argjson bb "$BUNDLE_BYTES" \
   --arg ver "$VERSION" --argjson vendor "$VENDOR_JSON" --argjson methods "$METHODS_JSON" \
-  --argjson demo "$DEMO_JSON" '
+  --argjson demo "$DEMO_JSON" --argjson steps "$STEPS_JSON" '
   {
     schema_version: 1,
     id: $id,
@@ -158,7 +164,8 @@ METADATA_JSON="$(jq -n \
     methods: $methods,
     changelog: [ {version: $ver, notes: (["Published v " + $ver])} ]
   }
-  | if $demo != null then . + {product_demo: $demo} else . end')"
+  | if $demo != null then . + {product_demo: $demo} else . end
+  | if $steps != null then . + {next_steps: $steps} else . end')"
 
 # ── 6. open the catalogue PR on pilotprotocol ────────────────────────────────
 CATVER=2
@@ -193,11 +200,13 @@ mkdir -p "$APPDIR"
 # the runtime facts (publisher pubkey + primary bundle size). Otherwise write the
 # store page synthesised from submission.json.
 if [ -f "$APPDIR/metadata.json" ]; then
-  echo "==> reusing existing $APPDIR/metadata.json (refreshing publisher + size + demo)"
-  # Backfill/refresh the product demo from the submission onto the existing store
-  # page too, so already-published apps pick up their "Full usage demo".
-  jq --arg pub "$PUBLISHER" --argjson bb "$BUNDLE_BYTES" --argjson demo "$DEMO_JSON" \
-     '.vendor = ((.vendor // {}) + {publisher_pubkey: $pub}) | .size = ((.size // {}) + {bundle_bytes: $bb}) | (if $demo != null then .product_demo = $demo else . end)' \
+  echo "==> reusing existing $APPDIR/metadata.json (refreshing publisher + size + demo + next_steps)"
+  # Backfill/refresh the product demo AND the next-steps graph from the
+  # submission onto the existing store page, so an already-published app picks
+  # both up on its next republish without a hand edit. This is the rollout path
+  # for the 20 apps that were published before either field existed.
+  jq --arg pub "$PUBLISHER" --argjson bb "$BUNDLE_BYTES" --argjson demo "$DEMO_JSON" --argjson steps "$STEPS_JSON" \
+     '.vendor = ((.vendor // {}) + {publisher_pubkey: $pub}) | .size = ((.size // {}) + {bundle_bytes: $bb}) | (if $demo != null then .product_demo = $demo else . end) | (if $steps != null then .next_steps = $steps else . end)' \
      "$APPDIR/metadata.json" > "$APPDIR/metadata.json.tmp" && mv "$APPDIR/metadata.json.tmp" "$APPDIR/metadata.json"
 else
   echo "$METADATA_JSON" | jq '.' > "$APPDIR/metadata.json"

@@ -32,6 +32,13 @@ needs detail.
   injected as a `SKILL.md`, and rendered on the website. Required by policy for new
   submissions; metered apps MUST show costs ≤ the per-user budget. Guide:
   [`docs/PRODUCT-DEMOS.md`](docs/PRODUCT-DEMOS.md).
+- **Every submission carries a next-steps graph.** Author a `next_steps` in
+  `submission.json` — the recommended next commands pilotctl prints after *every*
+  `appstore call`, on success and failure. The demo drives install→first-call; the graph
+  drives first-call→usage. Recommended, not exhaustive: name the flow, not the method
+  list. If your app has a mandatory gateway (`signup`, `start`), a `from:"*"` edge must
+  route a cold agent to it. Guide:
+  [`docs/NEXT-STEPS-GRAPHS.md`](docs/NEXT-STEPS-GRAPHS.md).
 
 ## Tool entry points
 
