@@ -57,10 +57,6 @@ func TestAccessKeys_NoKeysFailsClosed(t *testing.T) {
 	}
 }
 
-func hdrFn(m map[string]string) func(string) string {
-	return func(k string) string { return m[k] }
-}
-
 // TestRequireAccessKey_GatesApp: an app with require_access_key returns 401
 // without a valid key and forwards with one. Also covers AppsRequiringAccessKey.
 func TestRequireAccessKey_GatesApp(t *testing.T) {
