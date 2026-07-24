@@ -29,8 +29,26 @@ gh pr create     # against pilot-protocol/app-template
   cross-compiled by `make package` to **every** target (`darwin × linux × arm64 ×
   amd64`) — never a single-platform build.
 - `submission.json` — a post-build **pointer**:
-  `{id, version, namespace, description, bundle, bundle_sha256}`. The app's full
+  `{id, version, namespace, description, bundle, bundle_sha256}`, **plus a
+  `product_demo`** — the example-first usage guide shown at install, injected as a
+  `SKILL.md`, and rendered on the website as the "Full usage demo". The app's full
   surface is already baked + signed inside the bundle.
+
+Author the `product_demo` in `submission.json` (required by policy for new
+submissions). Minimal shape:
+
+```json
+"product_demo": {
+  "skill": "io.pilot.<name>",
+  "when_to_use": "One sentence (≤240 chars): when an agent should reach for this app.",
+  "metered": false,
+  "quickstart": { "command": "pilotctl appstore call io.pilot.<name> <ns>.<verb> '{}'", "expect": "…" },
+  "examples": [ /* 2–6 real <ns>.* calls; metered apps also need a cost breakdown */ ]
+}
+```
+
+Validate it with `go test ./internal/publish/ -run TestAllSubmissionDemosValid`. Full
+guide: [`../docs/PRODUCT-DEMOS.md`](../docs/PRODUCT-DEMOS.md).
 
 This PR path and the website form are **at parity** — same required fields, same
 validation, same generated adapter. The form sends the rich `Submission` JSON and

@@ -31,7 +31,7 @@ func TestAllowPatternMatching(t *testing.T) {
 		{"/v1/usage/daily", false},           // longer than the exact entry
 	}
 	for _, c := range cases {
-		if got := app.allowed(c.path); got != c.want {
+		if got := app.allowed("GET", c.path); got != c.want {
 			t.Errorf("allowed(%q) = %v, want %v", c.path, got, c.want)
 		}
 	}
@@ -44,7 +44,7 @@ func TestAllowEmptyDeniesAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRegistry: %v", err)
 	}
-	if reg.Get("io.pilot.y").allowed("/anything") {
+	if reg.Get("io.pilot.y").allowed("GET", "/anything") {
 		t.Error("empty allow-list must deny all")
 	}
 }

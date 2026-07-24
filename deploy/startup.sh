@@ -55,6 +55,8 @@ sudo -u pilot HOME=/opt/pilot bash -c '
   go build -o /opt/pilot/publish-server   ./cmd/publish-server
   go build -o /opt/pilot/broker           ./cmd/broker
   go build -o /opt/pilot/otpsignup-broker ./cmd/otpsignup-broker
+  # Sidecar signup broker (installed below only when its metadata env is set).
+  go build -o /opt/pilot/insforge-signup-broker ./cmd/insforge-signup-broker || true
 '
 install -d -o pilot -g pilot /opt/pilot/registry   # shared: publish-server writes apps.json, broker reads it
 
@@ -150,7 +152,9 @@ EnvironmentFile=/opt/pilot/broker.env
 Environment=OTPSIGNUP_LISTEN=127.0.0.1:8091
 Environment=OTPSIGNUP_DB=/opt/pilot/otpsignup-data/accounts.db
 WorkingDirectory=/opt/pilot
-ExecStartPre=/usr/bin/install -d -o pilot -g pilot /opt/pilot/otpsignup-data
+# 0700: the at-rest ledger (accounts.db) holds encrypted-but-sensitive per-user
+# signup state; keep the directory unreadable by anyone but the pilot user.
+ExecStartPre=/usr/bin/install -d -m 0700 -o pilot -g pilot /opt/pilot/otpsignup-data
 ExecStart=/opt/pilot/otpsignup-broker
 Restart=always
 RestartSec=3
@@ -160,15 +164,35 @@ WantedBy=multi-user.target
 UNIT
 fi
 
-# Operator-provided extra nginx location blocks (e.g. a signup broker's public
-# route → 127.0.0.1:8091), from instance metadata. setup-broker-tls.sh injects
-# this file before the default `location /`. Keeps app-specific routes out of the
-# repo — the operator supplies them per deployment.
-EXTRA_LOCATIONS="$(meta broker-extra-locations)"
-if [ -n "$EXTRA_LOCATIONS" ]; then
-  printf '%s\n' "$EXTRA_LOCATIONS" >/opt/pilot/broker-extra-locations.conf
-else
-  rm -f /opt/pilot/broker-extra-locations.conf
+# Sidecar: the InsForge signup broker (provisions a per-user InsForge project via
+# one managed master account). Installed ONLY when the `insforge-signup-env`
+# metadata key is set (a newline-separated INSFORGE_SIGNUP_* KEY=VALUE block,
+# incl. the master refresh token + at-rest enc key), so this is a no-op on VMs
+# that don't run it. Its nginx route is added by setup-broker-tls.sh from
+# `broker-extra-locations`, so a regenerated broker.conf keeps it.
+INSFORGE_SIGNUP_ENV="$(meta insforge-signup-env)"
+if [ -n "$INSFORGE_SIGNUP_ENV" ] && [ -f /opt/pilot/insforge-signup-broker ]; then
+  install -o root -g root -m 0755 /opt/pilot/insforge-signup-broker /usr/local/bin/insforge-signup-broker
+  printf '%s\n' "$INSFORGE_SIGNUP_ENV" >/etc/insforge-signup-broker.env
+  chown root:root /etc/insforge-signup-broker.env && chmod 600 /etc/insforge-signup-broker.env
+  install -d /var/lib/insforge-signup
+  cat >/etc/systemd/system/insforge-signup-broker.service <<'UNIT'
+[Unit]
+Description=InsForge signup broker (provisions a per-user InsForge project)
+After=network-online.target
+[Service]
+EnvironmentFile=/etc/insforge-signup-broker.env
+ExecStart=/usr/local/bin/insforge-signup-broker
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable insforge-signup-broker
+  systemctl restart insforge-signup-broker
+  echo "insforge-signup-broker (re)started"
 fi
 
 systemctl daemon-reload
@@ -187,5 +211,6 @@ echo "pilot-publish + pilot-broker (re)started on freshly built binaries"
 # resolve to this VM yet, it logs and leaves publish/broker untouched.
 BROKER_HOST="$(meta broker-host)"; BROKER_HOST="${BROKER_HOST:-broker.pilotprotocol.network}"
 CERT_EMAIL="$(meta mail-from)"; CERT_EMAIL="${CERT_EMAIL:-apps@pilotprotocol.network}"
+BROKER_EXTRA_LOCATIONS="$(meta broker-extra-locations)" \
 BROKER_HOST="$BROKER_HOST" CERT_EMAIL="$CERT_EMAIL" \
   bash /opt/pilot/app-template/deploy/setup-broker-tls.sh || true

@@ -47,6 +47,89 @@ type signupVerifyConfig struct {
 	emailKey  string // secrets.json key the register step cached the email under
 }
 
+// signupCreateConfig is baked in at generation time for the single-call
+// emailless mint: one POST to url with the static body returns the key directly.
+type signupCreateConfig struct {
+	url         string // POST {body...} — mints and returns the key in one call
+	body        string // static JSON body baked at generation time (e.g. {"terms_accepted":true})
+	keyPath     string // dotted path to the minted key in the response
+	addressPath string // dotted path to the provisioned address/handle (cached under emailKey)
+	secretKey   string // secrets.json key the minted key is stored under
+	emailKey    string // secrets.json key the provisioned address is cached under
+}
+
+// signupCreateHandler mints a per-user key in ONE unauthenticated call: it POSTs
+// the baked-in body (with any caller payload fields overlaid), extracts the key
+// at keyPath and the provisioned address at addressPath, and caches both to
+// $APP/secrets.json. Idempotent: if a key is already cached, it is returned and
+// no new account is minted (the cached identity is preserved).
+func signupCreateHandler(sc signupCreateConfig, manifestPath string, timeout time.Duration) ipc.Handler {
+	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
+		dir := signupAppDir(manifestPath)
+		if dir == "" {
+			return nil, errors.New("signup: cannot locate the app directory to cache the key")
+		}
+		secretsFile := filepath.Join(dir, "secrets.json")
+		cached := signupReadSecrets(secretsFile)
+
+		// Idempotent: an account already exists on this host — never clobber it.
+		if cached[sc.secretKey] != "" {
+			return signupResult(map[string]any{
+				"ok": true, "already": true, "address": cached[sc.emailKey],
+				"key_field": sc.secretKey,
+				"message":   "already signed up; the cached key authenticates every call — use the account method to read it, or the upgrade methods to lift limits",
+			})
+		}
+
+		// Static body, then overlay any caller-supplied fields (e.g. device_name).
+		body := map[string]any{}
+		if sc.body != "" {
+			_ = json.Unmarshal([]byte(sc.body), &body)
+		}
+		if len(req.Payload) > 0 {
+			var over map[string]any
+			if json.Unmarshal(req.Payload, &over) == nil {
+				for k, v := range over {
+					body[k] = v
+				}
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
+		status, raw, err := signupPostJSON(ctx, sc.url, body)
+		if err != nil {
+			return nil, fmt.Errorf("signup: create: %w", err)
+		}
+		if status != 200 && status != 201 {
+			if status == 429 {
+				return nil, errors.New("signup: account creation rate-limited by the backend — wait and retry")
+			}
+			return nil, fmt.Errorf("signup: create HTTP %d: %s", status, signupSnippet(raw))
+		}
+		key := signupDigString(raw, sc.keyPath)
+		if key == "" {
+			return nil, fmt.Errorf("signup: create response had no key at %q", sc.keyPath)
+		}
+		add := map[string]string{sc.secretKey: key}
+		if sc.addressPath != "" && sc.emailKey != "" {
+			if addr := signupDigString(raw, sc.addressPath); addr != "" {
+				add[sc.emailKey] = addr
+			}
+		}
+		if err := signupMergeSecrets(secretsFile, add); err != nil {
+			return nil, fmt.Errorf("signup: cache key: %w", err)
+		}
+
+		return signupResult(map[string]any{
+			"ok": true, "signed_up": true, "address": add[sc.emailKey],
+			"key_field": sc.secretKey, "api_key": "saved",
+			"message": "signed up; a fresh key + managed inbox were provisioned and cached to secrets.json — the key authenticates every subsequent call",
+		})
+	}
+}
+
 // signupRegisterHandler starts registration for the caller-supplied email.
 func signupRegisterHandler(sc signupRegisterConfig, manifestPath string, timeout time.Duration) ipc.Handler {
 	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
@@ -181,6 +264,7 @@ func signupVerifyHandler(sc signupVerifyConfig, manifestPath string, timeout tim
 type accountConfig struct {
 	secretKey string
 	emailKey  string
+	urlKey    string // secrets.json key holding a per-user backend URL (empty = none)
 }
 
 func accountHandler(ac accountConfig, manifestPath string) ipc.Handler {
@@ -189,11 +273,15 @@ func accountHandler(ac accountConfig, manifestPath string) ipc.Handler {
 		if dir := signupAppDir(manifestPath); dir != "" {
 			m = signupReadSecrets(filepath.Join(dir, "secrets.json"))
 		}
-		return signupResult(map[string]any{
+		out := map[string]any{
 			"signed_up": m[ac.secretKey] != "",
 			"email":     m[ac.emailKey],
 			"api_key":   m[ac.secretKey],
-		})
+		}
+		if ac.urlKey != "" {
+			out["backend_url"] = m[ac.urlKey]
+		}
+		return signupResult(out)
 	}
 }
 
@@ -256,6 +344,29 @@ var signupHTTP = &http.Client{Timeout: 30 * time.Second}
 
 // signupPost does one JSON POST and returns (status, body, transport-error).
 func signupPost(ctx context.Context, url string, body map[string]string) (int, json.RawMessage, error) {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return 0, nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := signupHTTP.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return resp.StatusCode, json.RawMessage(raw), nil
+}
+
+// signupPostJSON does one JSON POST of an arbitrary object body and returns
+// (status, body, transport-error). Used by the single-call create leg, whose
+// body may carry non-string fields (e.g. {"terms_accepted": true}).
+func signupPostJSON(ctx context.Context, url string, body map[string]any) (int, json.RawMessage, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return 0, nil, err

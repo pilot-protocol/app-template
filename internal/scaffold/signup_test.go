@@ -76,6 +76,98 @@ methods:
     http: {verb: GET, path: /billing/balance/}
 `
 
+// createSignupSpec is a byo http app whose signup is the single-call emailless
+// "create" step: one unauthenticated POST mints + caches the key (no email, no
+// OTP, no broker). A second method is marked gated to exercise the free-plan
+// disclaimer, and a plain method exercises the requireKey soft-fail wrap.
+const createSignupSpec = `
+id: io.pilot.primitive
+app_version: 1.0.0
+description: "Email infrastructure for AI agents with emailless self-signup."
+backend:
+  type: http
+  base_url: https://api.primitive.dev/v1
+  auth: byo
+  headers:
+    Authorization: "Bearer ${PRIMITIVE_API_KEY}"
+methods:
+  - name: primitive.signup
+    summary: "Provision a free account + managed inbox in one call (no email)."
+    duration: med
+    signup:
+      step: create
+      url: https://api.primitive.dev/v1/agent/accounts
+      secret_key: PRIMITIVE_API_KEY
+      email_key: PRIMITIVE_ADDRESS
+      body: {terms_accepted: true, device_name: "pilot appstore adapter"}
+  - name: primitive.get_account
+    summary: "Get account info."
+    duration: fast
+    http: {verb: GET, path: /account}
+  - name: primitive.create_function
+    summary: "Deploy a hosted JavaScript function."
+    duration: slow
+    gated: "requires the developer plan — confirm an email at primitive.dev to upgrade"
+    http: {verb: POST, path: /functions}
+`
+
+func TestCreateSignupGrantsAndCompiles(t *testing.T) {
+	cfg := parseSpec(t, createSignupSpec)
+	if !cfg.HasSignup() || !cfg.HasKeyMintSignup() {
+		t.Fatal("HasSignup() and HasKeyMintSignup() should be true")
+	}
+	if got := cfg.AuthSecretKey(); got != "PRIMITIVE_API_KEY" {
+		t.Errorf("AuthSecretKey()=%q, want PRIMITIVE_API_KEY", got)
+	}
+	if got := cfg.SignupMethodName(); got != "primitive.signup" {
+		t.Errorf("SignupMethodName()=%q, want primitive.signup", got)
+	}
+	// create-step defaults: key + address paths under the {success,data} envelope.
+	var create *Method
+	for i := range cfg.Methods {
+		if cfg.Methods[i].Signup != nil && cfg.Methods[i].Signup.IsCreate() {
+			create = &cfg.Methods[i]
+		}
+	}
+	if create == nil {
+		t.Fatal("expected a create signup method")
+	}
+	if create.Signup.KeyPath != "data.api_key" {
+		t.Errorf("KeyPath default = %q, want data.api_key", create.Signup.KeyPath)
+	}
+	if create.Signup.AddressPath != "data.address" {
+		t.Errorf("AddressPath default = %q, want data.address", create.Signup.AddressPath)
+	}
+	dir := t.TempDir()
+	if _, err := Generate(cfg, dir); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	mf, _ := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	for _, want := range []string{
+		`"cap": "fs.write", "target": "$APP/secrets.json"`,
+		`"cap": "fs.read", "target": "$APP/secrets.json"`,
+		`"target": "api.primitive.dev"`,
+		`"primitive.signup"`,
+	} {
+		if !strings.Contains(string(mf), want) {
+			t.Errorf("manifest missing %q", want)
+		}
+	}
+	main, _ := os.ReadFile(filepath.Join(dir, "cmd", cfg.BinaryName, "main.go"))
+	for _, want := range []string{"signupCreateHandler", "requireKey(", "GatedNote", "NOT AVAILABLE ON THE FREE PLAN"} {
+		if !strings.Contains(string(main), want) {
+			t.Errorf("generated main.go missing %q", want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cmd", cfg.BinaryName, "signup.go")); err != nil {
+		t.Errorf("expected generated signup.go: %v", err)
+	}
+	if testing.Short() {
+		return
+	}
+	compileGenerated(t, dir)
+}
+
 func TestBrokerSignupGrantsAndCompiles(t *testing.T) {
 	cfg := parseSpec(t, brokerSignupSpec)
 	if !cfg.HasBrokerSignup() {

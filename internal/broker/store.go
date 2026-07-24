@@ -2,6 +2,7 @@ package broker
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"time"
 )
@@ -97,13 +98,64 @@ type cell struct {
 // MemStore is the default in-memory Store + ProvisionStore (single instance,
 // non-durable). Used in dev and tests; prod uses SQLiteStore for durability.
 type MemStore struct {
-	mu   sync.Mutex
-	m    map[string]*cell
-	prov map[string]*ProvisionRecord // keyed "app|caller"
+	mu    sync.Mutex
+	m     map[string]*cell
+	prov  map[string]*ProvisionRecord // keyed "app|caller"
+	owner map[string]string           // keyed "app|rtype|rid" -> caller (tenancy ledger)
 }
 
 func NewMemStore() *MemStore {
-	return &MemStore{m: map[string]*cell{}, prov: map[string]*ProvisionRecord{}}
+	return &MemStore{m: map[string]*cell{}, prov: map[string]*ProvisionRecord{}, owner: map[string]string{}}
+}
+
+// ownKey keys the ownership ledger. rtype is part of the key so ids are never
+// confused across resource types (an agent id must not authorize a number).
+func ownKey(app, rtype, rid string) string { return app + "|" + rtype + "|" + rid }
+
+// Claim is first-writer-wins under the lock: a second caller claiming the same
+// resource gets ErrOwned rather than taking it over.
+func (s *MemStore) Claim(app, rtype, rid, caller string, _ time.Time) error {
+	if rid == "" || caller == "" {
+		return errors.New("broker: claim requires a resource id and caller")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := ownKey(app, rtype, rid)
+	if cur, ok := s.owner[k]; ok {
+		if cur == caller {
+			return nil // idempotent re-claim by the same owner
+		}
+		return ErrOwned
+	}
+	s.owner[k] = caller
+	return nil
+}
+
+func (s *MemStore) OwnerOf(app, rtype, rid string) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.owner[ownKey(app, rtype, rid)]
+	return c, ok, nil
+}
+
+func (s *MemStore) OwnedSet(app, rtype, caller string) (map[string]bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]bool{}
+	prefix := app + "|" + rtype + "|"
+	for k, c := range s.owner {
+		if c == caller && strings.HasPrefix(k, prefix) {
+			out[strings.TrimPrefix(k, prefix)] = true
+		}
+	}
+	return out, nil
+}
+
+func (s *MemStore) Release(app, rtype, rid string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.owner, ownKey(app, rtype, rid))
+	return nil
 }
 
 func (s *MemStore) Provision(app, caller, ip string, seed, maxPerIP int, cooldown time.Duration, now time.Time) (ProvisionRecord, error) {

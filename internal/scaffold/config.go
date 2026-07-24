@@ -9,6 +9,7 @@
 package scaffold
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -16,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pilot-protocol/app-template/internal/demo"
+	"github.com/pilot-protocol/app-template/internal/nextsteps"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,6 +47,16 @@ type Config struct {
 	Grants    Grants    `yaml:"grants"`
 	Listing   Listing   `yaml:"listing"` // store-page metadata (catalogue v2)
 	Pricing   *Pricing  `yaml:"pricing"` // optional: shown in <ns>.help so an agent sees cost before a paid call
+
+	// ProductDemo is the example-driven, skill-file shaped usage guide. It is
+	// copied verbatim into metadata.json (BuildMetadata) and rendered at install
+	// time and on the website "Full usage demo".
+	ProductDemo *demo.Demo `yaml:"product_demo,omitempty"`
+
+	// NextSteps is the per-call dynamic context: the recommended next commands
+	// pilotctl prints after every `appstore call`, keyed by (method, outcome).
+	// Copied verbatim into metadata.json (BuildMetadata).
+	NextSteps *nextsteps.Graph `yaml:"next_steps,omitempty"`
 
 	// Assets is the native-binary delivery set for a cli backend: the
 	// platform-specific binaries the publisher uploaded to the Pilot R2 artifact
@@ -245,6 +258,17 @@ type Backend struct {
 	// shared broker.pilotprotocol.network. Empty ⇒ the shared broker.
 	BrokerURL string `yaml:"broker_url"`
 
+	// URLSecret names a $APP/secrets.json key holding this app's backend base
+	// URL, resolved PER REQUEST (falling back to base_url when absent). It exists
+	// for apps whose backend endpoint is provisioned per user at runtime — a
+	// broker-signup route that mints an isolated backend and returns its URL, not
+	// just a key. The broker-signup handler caches the returned backend_url under
+	// this key; the HTTP client then re-reads it each call (like HeaderFunc for
+	// the auth key), so calls made after signup reach the user's own backend with
+	// no restart. base_url stays required as the pre-signup default. e.g.
+	//   url_secret: INSFORGE_BACKEND_URL
+	URLSecret string `yaml:"url_secret"`
+
 	// Auth selects how the adapter authenticates to the backend:
 	//   "" / "byo"   — each user supplies their own key (the ${TOKEN} headers above)
 	//   "managed"    — Pilot holds ONE master key and meters per user. The generated
@@ -286,6 +310,45 @@ func (c *Config) HasSignup() bool {
 		}
 	}
 	return false
+}
+
+// HasKeyMintSignup reports whether any method mints the byo auth key itself (a
+// create/verify/broker signup route). When true, the generated adapter soft-fails
+// unauthenticated calls with activation instructions instead of a raw 401.
+func (c *Config) HasKeyMintSignup() bool {
+	for _, m := range c.Methods {
+		if m.Signup != nil && (m.Signup.IsCreate() || m.Signup.IsVerify() || m.Signup.IsBroker()) {
+			return true
+		}
+	}
+	return false
+}
+
+// AuthSecretKey returns the secrets.json key the minted auth key is stored under
+// (the first key-minting signup route's SecretKey), or "".
+func (c *Config) AuthSecretKey() string {
+	for _, m := range c.Methods {
+		if m.Signup != nil && (m.Signup.IsCreate() || m.Signup.IsVerify() || m.Signup.IsBroker()) {
+			return m.Signup.SecretKey
+		}
+	}
+	return ""
+}
+
+// SignupMethodName returns the method an agent calls to mint the key (preferring
+// the single-call create leg, else register/broker), for the activation hint.
+func (c *Config) SignupMethodName() string {
+	for _, m := range c.Methods {
+		if m.Signup != nil && m.Signup.IsCreate() {
+			return m.Name
+		}
+	}
+	for _, m := range c.Methods {
+		if m.Signup != nil && (m.Signup.IsBroker() || strings.EqualFold(m.Signup.Step, "register")) {
+			return m.Name
+		}
+	}
+	return ""
 }
 
 // HasBrokerSignup reports whether any signup route is the broker step — the
@@ -498,6 +561,7 @@ type Method struct {
 	Signup    *SignupRoute      `yaml:"signup"`    // no-broker self-signup route (mints + saves a per-user key)
 	Params    map[string]string `yaml:"params"`    // name -> human description, for help
 	Roundtrip string            `yaml:"roundtrip"` // measured warm roundtrip, for help
+	Gated     string            `yaml:"gated"`     // non-empty = usable only after an account upgrade; the string is the reason, surfaced in a disclaimer at the bottom of <ns>.help
 }
 
 // SignupRoute makes a method self-provision a per-user API key WITHOUT a Pilot
@@ -530,20 +594,39 @@ type Method struct {
 //     {email, api_key}. The adapter caches BOTH to secrets.json; ops stay byo.
 //     No user email, no code, one call.
 type SignupRoute struct {
-	Step        string `yaml:"step"`         // "register" | "verify" | "broker"
-	URL         string `yaml:"url"`          // register/verify: the provider endpoint POSTed
-	BrokerURL   string `yaml:"broker_url"`   // broker: the Pilot broker /signup endpoint (signed)
-	KeyPath     string `yaml:"key_path"`     // verify: dotted path to the key in the response (default application.api_key)
-	SecretKey   string `yaml:"secret_key"`   // secrets.json key the minted key is stored under (e.g. DIDIT_API_KEY)
-	EmailKey    string `yaml:"email_key"`    // secrets.json key for the account email (default ACCOUNT_EMAIL)
-	PasswordKey string `yaml:"password_key"` // secrets.json key for the account password (default ACCOUNT_PASSWORD)
+	Step        string         `yaml:"step"`         // "create" | "register" | "verify" | "broker" | "account"
+	URL         string         `yaml:"url"`          // create/register/verify: the provider endpoint POSTed
+	BrokerURL   string         `yaml:"broker_url"`   // broker: the Pilot broker /signup endpoint (signed)
+	KeyPath     string         `yaml:"key_path"`     // create/verify: dotted path to the key in the response (default application.api_key; create defaults to data.api_key)
+	AddressPath string         `yaml:"address_path"` // create: dotted path to the provisioned address/handle to cache under EmailKey (default data.address)
+	Body        map[string]any `yaml:"body"`         // create: the static JSON body POSTed (e.g. {terms_accepted: true}); caller payload fields overlay it
+	SecretKey   string         `yaml:"secret_key"`   // secrets.json key the minted key is stored under (e.g. PRIMITIVE_API_KEY)
+	EmailKey    string         `yaml:"email_key"`    // secrets.json key for the account email/address (default ACCOUNT_EMAIL)
+	PasswordKey string         `yaml:"password_key"` // secrets.json key for the account password (default ACCOUNT_PASSWORD)
 }
+
+// IsCreate is the single-call emailless leg: one unauthenticated POST mints and
+// returns the key directly (no email, no OTP, no broker), cached immediately.
+func (s *SignupRoute) IsCreate() bool { return strings.EqualFold(s.Step, "create") }
 
 // IsVerify is the no-broker leg that redeems the OTP + caches the key.
 func (s *SignupRoute) IsVerify() bool { return strings.EqualFold(s.Step, "verify") }
 
 // IsBroker is the fully-autonomous leg that signs a call to the Pilot broker.
 func (s *SignupRoute) IsBroker() bool { return strings.EqualFold(s.Step, "broker") }
+
+// BodyJSON renders the static create body as a compact JSON object literal (or
+// "{}"), baked into the generated adapter and re-parsed at runtime.
+func (s *SignupRoute) BodyJSON() string {
+	if len(s.Body) == 0 {
+		return "{}"
+	}
+	b, err := json.Marshal(s.Body)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
 
 // LocalRoute makes a method run entirely on the host with NO backend call: it
 // reads a local JSON metadata file (see HTTPRoute.CaptureTo, which writes it) and
@@ -607,6 +690,13 @@ type HTTPRoute struct {
 	HeaderParams []string `yaml:"-"`
 	QueryParams  []string `yaml:"-"`
 	BodyParams   []string `yaml:"-"`
+
+	// BodyRawParam is derived in Resolve: a param given `in: body_raw`, whose
+	// VALUE becomes the entire request body verbatim (a bare JSON array/scalar/
+	// object), instead of being wrapped into the JSON body object. At most one per
+	// method — for APIs that take a top-level array (e.g. a bulk insert) which a
+	// wrapped `{field:[...]}` body cannot express.
+	BodyRawParam string `yaml:"-"`
 }
 
 // BodyVerb reports whether this route sends remaining payload fields as a JSON
@@ -774,7 +864,14 @@ func (c *Config) Resolve() {
 			}
 			m.Signup.Step = strings.ToLower(m.Signup.Step)
 			if m.Signup.KeyPath == "" {
-				m.Signup.KeyPath = "application.api_key"
+				if m.Signup.IsCreate() {
+					m.Signup.KeyPath = "data.api_key"
+				} else {
+					m.Signup.KeyPath = "application.api_key"
+				}
+			}
+			if m.Signup.IsCreate() && m.Signup.AddressPath == "" {
+				m.Signup.AddressPath = "data.address"
 			}
 			if m.Signup.EmailKey == "" {
 				m.Signup.EmailKey = "ACCOUNT_EMAIL"
@@ -792,12 +889,13 @@ const (
 	InPath    = "path"
 	InPathRaw = "path_raw"
 	InBody    = "body"
+	InBodyRaw = "body_raw"
 	InHeader  = "header"
 )
 
 // validParamIn is the closed set of param locations (empty = verb/path default).
 var validParamIn = map[string]bool{
-	InQuery: true, InPath: true, InPathRaw: true, InBody: true, InHeader: true,
+	InQuery: true, InPath: true, InPathRaw: true, InBody: true, InBodyRaw: true, InHeader: true,
 }
 
 // resolveParamLocs derives the per-location param buckets from the path
@@ -812,6 +910,7 @@ func (h *HTTPRoute) resolveParamLocs() {
 	h.QueryParams = nil
 	h.BodyParams = nil
 	h.HeaderParams = nil
+	h.BodyRawParam = ""
 	placeholder := map[string]bool{}
 	for _, name := range pathParamNames(h.Path) {
 		placeholder[name] = true
@@ -836,6 +935,8 @@ func (h *HTTPRoute) resolveParamLocs() {
 			h.QueryParams = append(h.QueryParams, name)
 		case InBody:
 			h.BodyParams = append(h.BodyParams, name)
+		case InBodyRaw:
+			h.BodyRawParam = name
 		case InHeader:
 			h.HeaderParams = append(h.HeaderParams, name)
 		}
@@ -986,6 +1087,16 @@ func (c *Config) validateSignupMethod(i int, m Method) []error {
 		}
 	}
 	switch m.Signup.Step {
+	case "create":
+		// Single-call emailless mint: one POST returns the key directly.
+		if strings.TrimSpace(m.Signup.URL) == "" {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.url is required", i, m.Name))
+		} else {
+			httpsURL("url", m.Signup.URL)
+		}
+		if strings.TrimSpace(m.Signup.SecretKey) == "" {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): a create signup step needs signup.secret_key (the key the minted secret is cached under)", i, m.Name))
+		}
 	case "register", "verify":
 		if strings.TrimSpace(m.Signup.URL) == "" {
 			errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.url is required", i, m.Name))
@@ -1010,7 +1121,7 @@ func (c *Config) validateSignupMethod(i int, m Method) []error {
 			errs = append(errs, fmt.Errorf("methods[%d] (%s): an account step needs signup.secret_key", i, m.Name))
 		}
 	default:
-		errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.step %q must be register|verify|broker|account", i, m.Name, m.Signup.Step))
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.step %q must be create|register|verify|broker|account", i, m.Name, m.Signup.Step))
 	}
 	if c.Managed() {
 		errs = append(errs, fmt.Errorf("methods[%d] (%s): a signup (no-broker) route cannot be combined with managed/provisioned auth", i, m.Name))
@@ -1053,7 +1164,7 @@ func (c *Config) validateHTTPMethod(i int, m Method) []error {
 	for _, name := range inNames {
 		loc := m.HTTP.ParamIn[name]
 		if !validParamIn[loc] {
-			errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q in %q must be query|path|path_raw|body|header", i, m.Name, name, loc))
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q in %q must be query|path|path_raw|body|body_raw|header", i, m.Name, name, loc))
 		}
 		if _, ok := m.Params[name]; !ok {
 			errs = append(errs, fmt.Errorf("methods[%d] (%s): param %q has an `in` location but is not declared under params", i, m.Name, name))

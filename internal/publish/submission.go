@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/pilot-protocol/app-template/internal/demo"
+	"github.com/pilot-protocol/app-template/internal/nextsteps"
 	"github.com/pilot-protocol/app-template/internal/scaffold"
 )
 
@@ -28,6 +30,23 @@ type Submission struct {
 	Listing SubListing  `json:"listing"`
 	Vendor  SubVendor   `json:"vendor"`
 	Pricing *SubPricing `json:"pricing"` // optional: shown in <ns>.help (cost model + rate card)
+
+	// ProductDemo is the example-driven, skill-file shaped usage guide shown at
+	// install time and rendered on the website as the "Full usage demo".
+	// Optional but strongly recommended: it is what turns an
+	// install into first-call usage for autonomous agents. Validated at submit
+	// time (see demo.Demo.Validate); flows verbatim into metadata.json.
+	ProductDemo *demo.Demo `json:"product_demo,omitempty"`
+
+	// NextSteps is the dynamic context an agent is shown after EVERY
+	// `pilotctl appstore call` on this app — the recommended next commands for
+	// where the agent now stands, on both success and failure. Where ProductDemo
+	// drives the install→first-call step once, this drives every call after it.
+	// Optional but strongly recommended; validated at submit time against the
+	// declared method list (see nextsteps.Graph.Validate) so a graph can never
+	// recommend a method the app does not expose. Flows verbatim into
+	// metadata.json.
+	NextSteps *nextsteps.Graph `json:"next_steps,omitempty"`
 
 	// Artifacts is the native-binary delivery set for a cli app: the
 	// platform-specific binaries the publisher uploaded to the Pilot R2 artifact
@@ -78,6 +97,10 @@ type SubBackend struct {
 	// Quota is the per-caller call cap the broker enforces for a managed app
 	// (0 = unlimited). Set at publish time so the rate limit ships with the app.
 	Quota int `json:"quota"`
+	// URLSecret names a secrets.json key holding a per-user backend base URL
+	// resolved per request (for a broker-signup app whose backend is provisioned
+	// per user). See scaffold.Backend.URLSecret.
+	URLSecret string `json:"url_secret"`
 
 	// --- cli fields ---
 	// Command is the base argv the adapter execs (e.g. ["gh"] or ["python","-m","tool"]).
@@ -146,6 +169,7 @@ type SubMethod struct {
 	Local       *SubLocal   `json:"local"`       // local metadata route (no backend call)
 	Signup      *SubSignup  `json:"signup"`      // no-broker self-signup route (mints + caches a per-user key)
 	Params      []SubParam  `json:"params"`
+	Gated       string      `json:"gated"` // non-empty = usable only after an account upgrade; the reason is surfaced in the free-plan disclaimer at the bottom of <ns>.help
 }
 
 // SubSignup makes a method self-provision a per-user backend key with NO broker:
@@ -156,13 +180,15 @@ type SubMethod struct {
 // $APP/secrets.json under SecretKey, from which the byo ${TOKEN} headers resolve
 // it). One SubSignup describes one leg, selected by Step.
 type SubSignup struct {
-	Step        string `json:"step"`         // "register" | "verify" | "broker" | "account"
-	URL         string `json:"url"`          // register/verify: the provider endpoint POSTed
-	BrokerURL   string `json:"broker_url"`   // broker: the Pilot broker /signup endpoint (signed)
-	KeyPath     string `json:"key_path"`     // verify: dotted path to the key (default application.api_key)
-	SecretKey   string `json:"secret_key"`   // secrets.json key the minted key is stored under
-	EmailKey    string `json:"email_key"`    // secrets.json key for the account email (optional)
-	PasswordKey string `json:"password_key"` // secrets.json key for the account password (optional)
+	Step        string         `json:"step"`         // "create" | "register" | "verify" | "broker" | "account"
+	URL         string         `json:"url"`          // create/register/verify: the provider endpoint POSTed
+	BrokerURL   string         `json:"broker_url"`   // broker: the Pilot broker /signup endpoint (signed)
+	KeyPath     string         `json:"key_path"`     // create/verify: dotted path to the key (create defaults to data.api_key)
+	AddressPath string         `json:"address_path"` // create: dotted path to the provisioned address, cached under EmailKey (default data.address)
+	Body        map[string]any `json:"body"`         // create: the static JSON body POSTed (e.g. {"terms_accepted": true})
+	SecretKey   string         `json:"secret_key"`   // secrets.json key the minted key is stored under
+	EmailKey    string         `json:"email_key"`    // secrets.json key for the account email/address (optional)
+	PasswordKey string         `json:"password_key"` // secrets.json key for the account password (optional)
 }
 
 // HasSignup reports whether this method is a self-signup route (any step).
@@ -363,7 +389,33 @@ func (s Submission) Validate() []string {
 			}
 		}
 	}
+	if s.ProductDemo != nil {
+		if err := s.ProductDemo.Validate(s.ID, ns); err != nil {
+			e = append(e, "Product demo: "+err.Error())
+		}
+	}
+	if s.NextSteps != nil {
+		// Validate against the submission's own declared methods: this is what
+		// makes "recommends a method that does not exist" a submit-time failure
+		// rather than a dead end the agent hits at runtime.
+		if err := s.NextSteps.Validate(s.ID, s.MethodNames()); err != nil {
+			e = append(e, "Next steps: "+err.Error())
+		}
+	}
 	return e
+}
+
+// MethodNames returns the method names this submission declares, in order. It is
+// the authoring-time stand-in for the signed manifest's `exposes` list (which
+// only exists once the app is built), and is what nextsteps validates against.
+func (s *Submission) MethodNames() []string {
+	out := make([]string, 0, len(s.Methods))
+	for _, m := range s.Methods {
+		if n := strings.TrimSpace(m.Name); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // validateSubLocalMethod checks one method's local metadata route: a store path
@@ -389,6 +441,15 @@ func validateSubSignupMethod(n string, m SubMethod) []string {
 		}
 	}
 	switch m.Signup.Step {
+	case "create":
+		if strings.TrimSpace(m.Signup.URL) == "" {
+			e = append(e, fmt.Sprintf("Method %q: signup.url is required", n))
+		} else {
+			https("url", m.Signup.URL)
+		}
+		if strings.TrimSpace(m.Signup.SecretKey) == "" {
+			e = append(e, fmt.Sprintf("Method %q: a create signup step needs signup.secret_key", n))
+		}
 	case "register", "verify":
 		if strings.TrimSpace(m.Signup.URL) == "" {
 			e = append(e, fmt.Sprintf("Method %q: signup.url is required", n))
@@ -412,7 +473,7 @@ func validateSubSignupMethod(n string, m SubMethod) []string {
 			e = append(e, fmt.Sprintf("Method %q: an account step needs signup.secret_key", n))
 		}
 	default:
-		e = append(e, fmt.Sprintf("Method %q: signup.step must be register|verify|broker|account", n))
+		e = append(e, fmt.Sprintf("Method %q: signup.step must be create|register|verify|broker|account", n))
 	}
 	if m.HasHTTP() || m.HasCLI() || m.HasLocal() {
 		e = append(e, fmt.Sprintf("Method %q: a signup method must not also declare an http/cli/local route", n))
@@ -454,7 +515,7 @@ func validateSubHTTPMethod(n string, m SubMethod) []string {
 
 // subParamIn is the closed set of param request locations (empty = default).
 var subParamIn = map[string]bool{
-	"query": true, "path": true, "path_raw": true, "body": true, "header": true,
+	"query": true, "path": true, "path_raw": true, "body": true, "body_raw": true, "header": true,
 }
 
 // validateParamLocations checks the per-param `in` rules for an http method, so
@@ -473,7 +534,7 @@ func validateParamLocations(method string, m SubMethod) []string {
 			continue
 		}
 		if !subParamIn[p.In] {
-			e = append(e, fmt.Sprintf("Method %q, param %q: in %q must be one of query, path, path_raw, body, header", method, name, p.In))
+			e = append(e, fmt.Sprintf("Method %q, param %q: in %q must be one of query, path, path_raw, body, body_raw, header", method, name, p.In))
 			continue
 		}
 		if (p.In == "path" || p.In == "path_raw") && !placeholder[name] {
@@ -553,7 +614,7 @@ func (s Submission) validateArtifacts() []string {
 // the generator needs). Review-only fields (vendor free-text, agent-usage,
 // capabilities, binary URL) are intentionally not part of it.
 func (s Submission) ToConfig() *scaffold.Config {
-	backend := scaffold.Backend{Type: "http", BaseURL: s.Backend.BaseURL, Auth: s.Backend.Auth}
+	backend := scaffold.Backend{Type: "http", BaseURL: s.Backend.BaseURL, Auth: s.Backend.Auth, URLSecret: s.Backend.URLSecret}
 	if s.Backend.IsCLI() {
 		backend = scaffold.Backend{Type: "cli", Command: s.Backend.Command, EnvPassthrough: s.Backend.EnvPassthrough}
 	}
@@ -588,6 +649,12 @@ func (s Submission) ToConfig() *scaffold.Config {
 			CloudRateCard: s.Pricing.CloudRateCard,
 		}
 	}
+	// The product demo flows through verbatim: it is authored once here and
+	// rendered at install/skill/website time from the catalogue metadata.
+	cfg.ProductDemo = s.ProductDemo
+	// Same for the next-steps graph: authored once here, rendered by pilotctl
+	// after every call from the sha-pinned catalogue metadata.
+	cfg.NextSteps = s.NextSteps
 	// HTTP byo apps carry auth headers; managed apps are keyless (the broker
 	// holds the key) and cli apps have no HTTP headers at all.
 	if !s.Backend.IsCLI() && !s.Backend.Managed() {
@@ -622,6 +689,7 @@ func (s Submission) ToConfig() *scaffold.Config {
 			Duration: m.Latency,
 			Timeout:  m.Timeout, // explicit per-method timeout (overrides the latency-class default)
 			Params:   params,
+			Gated:    m.Gated, // free-plan disclaimer marker (surfaced at the bottom of <ns>.help)
 		}
 		// A hybrid app routes per method by which route it declares; cli/http apps
 		// route every method the same way. A local method (metadata read) has no
@@ -634,6 +702,8 @@ func (s Submission) ToConfig() *scaffold.Config {
 				URL:         m.Signup.URL,
 				BrokerURL:   m.Signup.BrokerURL,
 				KeyPath:     m.Signup.KeyPath,
+				AddressPath: m.Signup.AddressPath,
+				Body:        m.Signup.Body,
 				SecretKey:   m.Signup.SecretKey,
 				EmailKey:    m.Signup.EmailKey,
 				PasswordKey: m.Signup.PasswordKey,
