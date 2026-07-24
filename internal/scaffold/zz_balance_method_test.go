@@ -34,6 +34,19 @@ methods:
     http: { verb: GET, path: /v1/run }
 `
 
+const provisionedBalanceSpec = `
+id: io.pilot.provapi
+app_version: 0.1.0
+description: "A provisioned (per-user broker-minted key) API."
+backend:
+  base_url: https://api.example.com
+  auth: provisioned
+methods:
+  - name: provapi.run
+    summary: "Do a thing."
+    http: { verb: POST, path: /v1/run }
+`
+
 // hasMethod reports whether the resolved config carries a method by name.
 func hasMethod(c *Config, name string) *Method {
 	for i := range c.Methods {
@@ -63,6 +76,31 @@ func TestBalanceMethod_InjectedForManagedOnly(t *testing.T) {
 	byo := parseSpec(t, byoBalanceSpec)
 	if hasMethod(byo, "freeapi.balance") != nil {
 		t.Error("byo app should NOT get a balance method (no broker/budget)")
+	}
+}
+
+// TestBalanceMethod_NotInjectedForProvisioned pins the fix for the provisioned
+// scaffold-injection bug: a provisioned app (auth: provisioned) routes every
+// call through the broker's serveProvisioned, which only ever recognizes its
+// OWN ProvisionSpec.BalancePath (default "/_balance", registry-only config
+// scaffold cannot see) — never the canonical BalanceMetaPath
+// ("/_pilot/balance"). Before the fix, Provisioned() apps satisfied
+// Managed() (true for both "managed" and "provisioned") and so got the
+// canonical route auto-wired anyway, shipping a `<ns>.balance` method that
+// would 403 on every single call. A provisioned app must instead author its
+// own balance method pointed at its real path (see io.pilot.smol's
+// hand-authored `smol.balance` -> "/_balance") — so scaffold must NOT
+// auto-inject one it cannot correctly target.
+func TestBalanceMethod_NotInjectedForProvisioned(t *testing.T) {
+	prov := parseSpec(t, provisionedBalanceSpec)
+	if !prov.Managed() {
+		t.Fatal("test spec sanity: provisioned app must report Managed() == true")
+	}
+	if !prov.Provisioned() {
+		t.Fatal("test spec sanity: provisioned app must report Provisioned() == true")
+	}
+	if bal := hasMethod(prov, "provapi.balance"); bal != nil {
+		t.Fatalf("provisioned app should NOT get an auto-injected balance method (it would always 403 — the broker only answers the canonical route for classic managed apps); got %+v", bal)
 	}
 }
 
