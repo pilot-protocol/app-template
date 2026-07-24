@@ -38,8 +38,20 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 		if cfg.Backend.X402 != nil {
 			files = append(files, file{filepath.Join("internal", "backend", "x402.go"), "x402.go.tmpl"})
 		}
-		if cfg.Managed() {
+		// A byo app with a broker-signup route also needs the ed25519 signer to
+		// sign its keyless broker call (Managed apps already get it).
+		if cfg.Managed() || cfg.HasBrokerSignup() {
 			files = append(files, file{filepath.Join("internal", "backend", "signer.go"), "signer.go.tmpl"})
+		}
+		// Self-signup runtime (register→OTP→verify→cache) + the account reader,
+		// next to main.go (package main) when any method declares a signup route.
+		if cfg.HasSignup() {
+			files = append(files, file{filepath.Join("cmd", cfg.BinaryName, "signup.go"), "signup.go.tmpl"})
+		}
+		// The broker-call runtime is a separate file emitted only for broker apps
+		// (it imports the signer, absent from a plain register/verify app).
+		if cfg.HasBrokerSignup() {
+			files = append(files, file{filepath.Join("cmd", cfg.BinaryName, "broker_signup.go"), "broker_signup.go.tmpl"})
 		}
 	case "cli":
 		files = append(files, file{filepath.Join("internal", "backend", "exec.go"), "client_cli.go.tmpl"})

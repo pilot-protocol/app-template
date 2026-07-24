@@ -1,0 +1,43 @@
+[
+  {
+    "label": "version",
+    "vanilla": [
+      "--version"
+    ],
+    "method": "tldr.version",
+    "payload": {}
+  },
+  {
+    "label": "cli_help",
+    "vanilla": [
+      "--help"
+    ],
+    "method": "tldr.cli_help",
+    "payload": {}
+  },
+  {
+    "label": "get_tar",
+    "vanilla": [
+      "--quiet",
+      "--color",
+      "never",
+      "tar"
+    ],
+    "method": "tldr.get",
+    "payload": {
+      "command": "tar"
+    }
+  },
+  {
+    "label": "search_compress",
+    "vanilla": [
+      "--quiet",
+      "--search",
+      "compress"
+    ],
+    "method": "tldr.search",
+    "payload": {
+      "keyword": "compress"
+    }
+  }
+]

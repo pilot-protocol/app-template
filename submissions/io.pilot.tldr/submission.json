@@ -1,0 +1,372 @@
+{
+  "id": "io.pilot.tldr",
+  "version": "1.13.1",
+  "description": "tldr (tlrc 1.13.1) as native, example-first documentation for agents: simplified, community-driven man pages for ~7,350+ command-line tools, delivered to the host and fronted as typed methods. Look up a command's cheat-sheet as clean text or raw Markdown, search the whole catalog by keyword, list the directory of documented tools, refresh or inspect the local cache, render a local page, and reach every client flag (--platform, --language, --list-all, --offline, \u2026) via a verbatim-argv passthrough. Open source \u2014 MIT client, CC-BY-4.0 pages \u2014 self-contained and offline after the first fetch, on macOS and Linux.",
+  "email": "apps@pilotprotocol.network",
+  "backend": {
+    "type": "cli",
+    "command": [
+      "tldr"
+    ],
+    "env_passthrough": [
+      "HOME",
+      "TMPDIR",
+      "XDG_CACHE_HOME",
+      "XDG_CONFIG_HOME",
+      "LANG",
+      "LANGUAGE"
+    ]
+  },
+  "methods": [
+    {
+      "name": "tldr.get",
+      "description": "Look up a command's tldr page and return the concise, example-first cheat-sheet as clean text (color stripped). The fastest way to recall exactly how to invoke a CLI. This is `tldr --quiet --color never <command>`. The page cache auto-downloads on first use.",
+      "latency": "fast",
+      "params": [
+        {
+          "name": "command",
+          "type": "string",
+          "required": true,
+          "description": "The command / page to look up, e.g. \"tar\", \"docker\", \"kubectl\". For multi-word pages join the words with a hyphen \u2014 \"git-commit\", \"docker-compose\", \"gh-repo\" \u2014 or pass the words as separate argv elements via tldr.exec ([\"git\",\"commit\"])."
+        }
+      ],
+      "cli": {
+        "args": [
+          "--quiet",
+          "--color",
+          "never",
+          "${command}"
+        ]
+      }
+    },
+    {
+      "name": "tldr.raw",
+      "description": "Return a page as raw Markdown (unrendered) \u2014 the most machine-parseable form, ideal for an agent that wants to extract the example commands programmatically. This is `tldr --quiet --raw <command>`.",
+      "latency": "fast",
+      "params": [
+        {
+          "name": "command",
+          "type": "string",
+          "required": true,
+          "description": "The command / page to look up, e.g. \"tar\", \"docker\", \"kubectl\". For multi-word pages join the words with a hyphen \u2014 \"git-commit\", \"docker-compose\", \"gh-repo\" \u2014 or pass the words as separate argv elements via tldr.exec ([\"git\",\"commit\"])."
+        }
+      ],
+      "cli": {
+        "args": [
+          "--quiet",
+          "--raw",
+          "${command}"
+        ]
+      }
+    },
+    {
+      "name": "tldr.search",
+      "description": "Full-text search across the entire tldr catalog for a keyword and return each matching page as `language  platform  page`. First-class content search \u2014 find the right tool when you only know the task (\"compress\", \"screenshot\", \"json\"). This is `tldr --quiet --search <keyword>`.",
+      "latency": "fast",
+      "params": [
+        {
+          "name": "keyword",
+          "type": "string",
+          "required": true,
+          "description": "A keyword to search page contents for, e.g. \"compress\", \"kubernetes\", \"certificate\"."
+        }
+      ],
+      "cli": {
+        "args": [
+          "--quiet",
+          "--search",
+          "${keyword}"
+        ]
+      }
+    },
+    {
+      "name": "tldr.list",
+      "description": "List every documented command for the current platform plus the cross-platform `common` set \u2014 a directory of all tools tldr covers, one name per line. Pair with tldr.search to explore the catalog. This is `tldr --quiet --list`. (Use tldr.exec with [\"--list-all\"] for every platform.)",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "--quiet",
+          "--list"
+        ]
+      }
+    },
+    {
+      "name": "tldr.info",
+      "description": "Show cache information: the on-disk cache path, its age, the installed languages, and the total page count. This is `tldr --info`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "--info"
+        ]
+      }
+    },
+    {
+      "name": "tldr.update",
+      "description": "Refresh the local page cache from the tldr-pages archive (downloads only the languages that changed). Needs network; the cache also auto-downloads on first use, so this is only for an explicit refresh. This is `tldr --update`.",
+      "latency": "slow",
+      "cli": {
+        "args": [
+          "--update"
+        ]
+      }
+    },
+    {
+      "name": "tldr.render",
+      "description": "Render a local tldr page file (a `.md` in tldr format) as clean text \u2014 preview a page you are authoring or one written elsewhere. This is `tldr --quiet --color never --render <file>`.",
+      "latency": "fast",
+      "params": [
+        {
+          "name": "file",
+          "type": "string",
+          "required": true,
+          "description": "Absolute path to a local tldr-format Markdown page to render."
+        }
+      ],
+      "cli": {
+        "args": [
+          "--quiet",
+          "--color",
+          "never",
+          "--render",
+          "${file}"
+        ]
+      }
+    },
+    {
+      "name": "tldr.exec",
+      "description": "Run the tldr client with a verbatim argv \u2014 the full surface beyond the curated methods. Payload is {\"args\":[...]} forwarded straight to `tldr`, plus optional {\"stdin\":\"...\"}. Use it for any flag or combination the curated methods don't cover: `--platform linux systemctl` to force a platform, `--list-all`/`--list-platforms`/`--list-languages`, `-L es` for another language, `--short-options`/`--long-options`, `--edit`, `--offline`, `--gen-config`, or a multi-word page as separate args. Examples: {\"args\":[\"--platform\",\"linux\",\"systemctl\"]}; {\"args\":[\"--list-all\"]}; {\"args\":[\"git\",\"commit\"]}; {\"args\":[\"-L\",\"es\",\"tar\"]}.",
+      "latency": "med",
+      "params": [
+        {
+          "name": "args",
+          "type": "array",
+          "required": true,
+          "description": "Verbatim argv forwarded to `tldr` (e.g. [\"--platform\",\"linux\",\"systemctl\"])."
+        },
+        {
+          "name": "stdin",
+          "type": "string",
+          "required": false,
+          "description": "Optional text piped to the process stdin."
+        }
+      ],
+      "cli": {
+        "passthrough": true
+      }
+    },
+    {
+      "name": "tldr.cli_help",
+      "description": "Return the complete tldr command-palette reference \u2014 every operation and modifier flag, its values and defaults, the platform list, cache/offline behavior, search & directory usage, worked examples, and licensing \u2014 as clean, color-free text. The full contract for what tldr.get / tldr.exec accept. This is `tldr --help`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "--help"
+        ]
+      }
+    },
+    {
+      "name": "tldr.version",
+      "description": "Print the delivered client and tldr-client-spec version, e.g. \"tlrc v1.13.1 (implementing the tldr client specification v2.3)\". Needs no cache. This is `tldr --version`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "--version"
+        ]
+      }
+    }
+  ],
+  "listing": {
+    "display_name": "tldr",
+    "tagline": "Simplified man pages for ~7,350+ CLIs \u2014 instant, example-first command recall for agents",
+    "app_description": "# tldr \u2014 simplified man pages for almost every CLI, native for agents\n\nThis app installs the official **tldr-pages** client **tlrc v1.13.1** on the host and fronts it as typed\nmethods. tldr is *\"simplified, community-driven man pages\"* \u2014 concise, **example-first** cheat-sheets for\n**~7,350+ command-line tools**, the practical opposite of a dense `man` page. Instead of scrolling a manual,\nan agent asks `tldr docker` and gets the handful of commands it actually needs, each with a one-line\ndescription. The bundle is the upstream tlrc binary (sha-pinned per OS/arch, fetched from the Pilot artifact\nregistry at install) plus a tiny wrapper that serves a complete, color-free command-palette reference.\n\n**Open source, and every command is tested.** The tlrc client is **MIT**; the pages are written by the\ntldr-pages community and licensed **CC-BY-4.0**. The full page catalog (~3 MiB) auto-downloads on first use\nand then works offline.\n\n## Why an agent wants this\n\n- **Recall any CLI instantly.** `tldr <tool>` returns the 5\u201310 invocations that matter \u2014 no manual to parse,\n  no web search. The dictionary of man pages, for the whole toolbox an agent builds and deploys with.\n- **Discover tools by task.** `tldr.search <keyword>` does first-class full-text search across the catalog\n  (\"compress\", \"screenshot\", \"certificate\"); `tldr.list` prints the whole directory of documented commands.\n- **Machine-parseable.** `tldr.raw` returns raw Markdown so an agent can lift the exact example lines\n  programmatically; `tldr.get` returns clean rendered text for humans-in-the-loop.\n- **Self-contained + offline.** One static binary, no dependencies; after the first fetch, lookups need no\n  network. Runs on macOS and Linux (arm64 + amd64).\n- **The complete palette.** Every flag is reachable \u2014 platform overrides, languages, list/search, render a\n  local page \u2014 via curated methods plus a verbatim-argv `tldr.exec` passthrough.\n\n## What it documents (a taste \u2014 all verbatim from real tldr pages)\n\n**Version control & GitHub**\n- `git` \u2014 Clone a repository: `git clone https://example.com/repo.git` \u00b7 View status: `git status`\n- `gh` \u2014 Clone a repo: `gh repo clone owner/repository` \u00b7 List open issues: `gh issue list`\n\n**Containers, orchestration & IaC**\n- `docker` \u2014 List all containers: `docker ps -a` \u00b7 Run a named container: `docker run --name name image`\n- `kubectl` \u2014 Wide resource listing: `kubectl get pods -o wide` \u00b7 Everything: `kubectl get all`\n- `terraform` \u2014 Initialize: `terraform init` \u00b7 Format config: `terraform fmt`\n- `ansible` \u2014 Ping a host group: `ansible group -m ping` \u00b7 Gather facts: `ansible group -m setup`\n- `helm` \u2014 Create a chart: `helm create chart_name` \u00b7 Add a repo: `helm repo add repository_name`\n\n**Cloud**\n- `aws` \u2014 Configure SSO: `aws configure sso` \u00b7 Who am I: `aws sts get-caller-identity`\n- `ssh` \u2014 Connect: `ssh username@remote_host` \u00b7 With an identity key: `ssh username@remote_host -i key`\n\n**Languages & package managers**\n- `npm` \u2014 Install deps: `npm install` \u00b7 A pinned version: `npm install package@version`\n- `cargo` \u2014 Install a crate: `cargo install crate_name` \u00b7 List installed: `cargo install --list`\n- `go` \u2014 Run a file: `go run file.go` \u00b7 Build a binary: `go build -o executable file.go`\n\n**Data & text**\n- `jq` \u2014 Pretty-print JSON: `jq '.' file.json`\n- `sed` \u2014 Replace text: `command | sed 's/apple/mango/g'` \u00b7 First line: `command | sed -n '1p'`\n- `awk` \u2014 Print a column: `awk '{print $5}' file` \u00b7 Last field, comma-separated: `awk -F ',' '{print $NF}' file`\n- `grep` \u2014 Recursive search: `grep -rI \"pattern\" path/to/dir`\n- `psql` \u2014 Connect: `psql -h host -p port -U username database`\n\n**Networking, files & archives**\n- `curl` \u2014 GET a URL: `curl https://example.com` \u00b7 Save to a file: `curl -O https://example.com/file.zip`\n- `rsync` \u2014 Archive-mode copy: `rsync -a path/to/source path/to/destination`\n- `tar` \u2014 Create a gzipped archive: `tar czf target.tar.gz file1 file2`\n- `find` \u2014 By extension: `find path/to/dir -name '*.ext'`\n- `openssl` \u2014 Self-signed cert: `openssl req -new -x509 -key private.key -out certificate.crt -days 365`\n- `ffmpeg` \u2014 Extract audio: `ffmpeg -i video.mp4 -vn sound.mp3`\n\n**System & services (Linux)**\n- `systemctl` \u2014 Failed units: `systemctl --failed` \u00b7 Manage a service: `systemctl start|stop|status unit`\n- `journalctl` \u2014 Follow a unit's logs: `journalctl -u unit -f`\n\n\u2026and ~7,300 more, across `common`, `linux`, `osx`, `windows`, `android`, and `sunos`.\n\n## Methods\n\n- `tldr.get` \u2014 a command's cheat-sheet as clean text.\n- `tldr.raw` \u2014 a page as raw Markdown (machine-parseable).\n- `tldr.search` \u2014 full-text search across the whole catalog for a keyword.\n- `tldr.list` \u2014 the directory of every documented command for this platform.\n- `tldr.info` \u2014 cache path / age / languages / page count.\n- `tldr.update` \u2014 refresh the local page cache.\n- `tldr.render` \u2014 render a local tldr-format `.md` page.\n- `tldr.exec` \u2014 run the client with a verbatim argv (any flag: `--platform`, `-L`, `--list-all`, \u2026) + optional stdin.\n- `tldr.cli_help` \u2014 the complete command-palette reference as clean text.\n- `tldr.version` \u2014 the delivered client + spec version. `tldr.help` \u2014 the self-describing method list.\n\n## How to use it\n\n1. **Recall a tool (no setup):** `tldr.get` `{ \"command\": \"tar\" }` \u2192 the tar cheat-sheet. First call auto-downloads the cache.\n2. **Multi-word page:** `tldr.get` `{ \"command\": \"git-commit\" }` (hyphen-joined) or `tldr.exec` `{ \"args\": [\"git\",\"commit\"] }`.\n3. **Find a tool by task:** `tldr.search` `{ \"keyword\": \"compress\" }` \u2192 every page mentioning compression.\n4. **Browse the catalog:** `tldr.list` \u2192 all documented commands for this platform.\n5. **Anything else:** `tldr.exec` `{ \"args\": [\"--platform\",\"linux\",\"systemctl\"] }` to force a platform.\n\n## Good to know\n\n- The page cache (~3 MiB, ~7,350+ pages) auto-downloads on first use and refreshes when stale; progress goes\n  to stderr so method output on stdout stays clean. Use `tldr.update` to refresh, `--offline` (via `tldr.exec`)\n  to pin the current cache.\n- On a non-zero exit the reply is `{stdout, stderr, exit}` so the caller sees everything the CLI produced.\n- Runs on **macOS and Linux** (arm64 + amd64); the binary is fetched from the Pilot artifact registry and\n  sha-pinned on install. Client license **MIT** (tlrc); pages content **CC-BY-4.0**, \u00a9 tldr-pages contributors.\n- `tldr.help` lists every method with its latency class \u2014 the self-describing discovery contract.\n\n## tldr command palette (`tldr.cli_help`)\n```\ntldr \u2014 simplified, community-driven man pages (io.pilot.tldr)\n================================================================================\nPowered by tlrc v1.13.1, the official tldr-pages client (tldr client spec v2.3).\ntldr gives you concise, example-first help for ~7,350+ command-line tools \u2014 a\npractical cheat-sheet for almost every CLI an agent uses to build, deploy, and\noperate software. Open source: the tlrc client is MIT; the pages are authored by\nthe tldr-pages community and licensed CC-BY-4.0. Every command below is tested.\n\nUSAGE\n--------------------------------------------------------------------------------\n  tldr [OPTIONS] [PAGE]...\n\n  PAGE            The command to look up, e.g. `tar`, `docker`, `kubectl`.\n                  Multi-word pages: join with a hyphen  ->  `git-commit`,\n                  `docker-compose`, `gh-repo`  (or pass the words as separate\n                  arguments via the passthrough method: [\"git\",\"commit\"]).\n\nOPERATIONS  (choose at most one per invocation)\n--------------------------------------------------------------------------------\n  <PAGE>                       Show the tldr page for a command (rendered).\n  -u, --update                 Update the local page cache (downloads only the\n                               languages that changed). Needs network.\n  -l, --list                   List every page for the current platform (plus\n                               the cross-platform `common` set) \u2014 a directory of\n                               all documented tools, one name per line.\n  -a, --list-all               List every page across ALL platforms.\n  -s, --search <KEYWORD>       Search page CONTENTS for a keyword and print each\n                               match as `language  platform  page`. First-class\n                               full-text search across the whole catalog.\n      --list-platforms         List the available platforms.\n      --list-languages         List the installed languages.\n  -i, --info                   Show cache info: path, age, installed languages,\n                               and total page count.\n  -r, --render <FILE>          Render a local tldr page file (`.md`) \u2014 preview a\n                               page you are authoring or one you fetched.\n      --clean-cache            Interactively delete the cache directory contents.\n      --gen-config             Print the default config (TOML) to stdout.\n      --config-path            Print the default config path (creates the dir).\n  -v, --version                Print the client + spec version.\n  -h, --help                   Print this complete command-palette reference.\n\nMODIFIERS  (change how an operation behaves)\n--------------------------------------------------------------------------------\n  -p, --platform <PLATFORM>    Force a platform instead of the host's.\n                               Values: linux, osx (macOS), windows, android,\n                               sunos, common.  Default: the OS you are on.\n  -L, --language <CODE>        Force a language (repeatable), e.g. `-L es`,\n                               `-L fr`, `-L ja`. Default: config, else $LANG.\n      --short-options          Prefer short option forms in placeholders (-s).\n      --long-options           Prefer long option forms in placeholders (--long).\n      --edit                   Show a GitHub \"edit this page\" link for the page.\n  -o, --offline                Never touch the network, even if the cache is\n                               stale (use the pages already downloaded).\n  -c, --compact                Strip empty lines from the output.\n      --no-compact             Keep empty lines (overrides --compact).\n  -R, --raw                    Print the page as raw Markdown (no rendering) \u2014\n                               the most machine-parseable form.\n      --no-raw                 Render instead of raw (overrides --raw).\n  -q, --quiet                  Suppress status/progress messages and warnings.\n      --verbose                Print debug info (repeatable).\n      --color <WHEN>           Color output: auto (default), always, never.\n      --config <FILE>          Use an alternative config file path.\n\nPLATFORM VALUES\n--------------------------------------------------------------------------------\n  common   Cross-platform tools (the largest bucket: git, docker, curl, jq, ...)\n  linux    Linux-specific pages (systemctl, journalctl, apt, ip, ...)\n  osx      macOS-specific pages (brew, pbcopy, launchctl, ...)\n  windows  Windows-specific pages (choco, taskkill, ...)\n  android  Android tool pages (adb, pm, ...)\n  sunos    illumos / SunOS pages\n\nCACHE & OFFLINE\n--------------------------------------------------------------------------------\n  The page cache auto-downloads on first use (a ~3 MiB archive of ~7,350+ pages)\n  and thereafter refreshes automatically when it goes stale. After the first\n  fetch, lookups (`get`, `raw`, `search`, `list`, `info`, `render`) are fully\n  local and offline. Progress messages are written to stderr, so method output\n  on stdout stays clean. Use --offline to pin the current cache and --update to\n  refresh on demand. Cache path: `tldr --info`.\n\nEXAMPLES\n--------------------------------------------------------------------------------\n  tldr tar                     # show the tar cheat-sheet\n  tldr git-commit              # multi-word page (hyphen-joined)\n  tldr --raw docker            # raw Markdown for docker\n  tldr --search compress       # find every page mentioning \"compress\"\n  tldr --list                  # directory of all tools for this platform\n  tldr --list-all              # every page across all platforms\n  tldr --platform linux systemctl   # force the linux page\n  tldr --update                # refresh the cache\n  tldr --info                  # cache path / age / page count\n\nLICENSING\n--------------------------------------------------------------------------------\n  Client (tlrc): MIT \u2014 https://github.com/tldr-pages/tlrc\n  Pages content: CC-BY-4.0, (c) tldr-pages contributors \u2014\n                 https://github.com/tldr-pages/tldr\n  Project home:  https://tldr.sh\n\n```\n",
+    "license": "MIT",
+    "homepage": "https://tldr.sh",
+    "source_url": "https://github.com/tldr-pages/tldr",
+    "categories": [
+      "developer-tools",
+      "documentation",
+      "cli"
+    ],
+    "keywords": [
+      "tldr",
+      "tldr-pages",
+      "tlrc",
+      "man-pages",
+      "cheatsheet",
+      "cli-reference",
+      "documentation",
+      "examples",
+      "terminal",
+      "offline-docs",
+      "command-examples"
+    ]
+  },
+  "vendor": {
+    "name": "Pilot Protocol",
+    "url": "https://pilotprotocol.network",
+    "contact": "apps@pilotprotocol.network",
+    "agent_usage": "Agents recall any CLI with tldr.get (clean text) or tldr.raw (raw Markdown), discover tools by task with tldr.search, browse the catalog with tldr.list, keep the cache current with tldr.update / inspect it with tldr.info, render a local page with tldr.render, and reach every client flag (--platform, --language, --list-all, --offline) via tldr.exec (verbatim argv + optional stdin). Output is clean text/Markdown, or {stdout,stderr,exit} on a non-zero exit.",
+    "capabilities": "Delivers the official tldr-pages client (tlrc 1.13.1, MIT) as a sha-pinned, relocatable per-OS/arch bundle fronting simplified, example-first man pages for ~7,350+ commands. The ~3 MiB page catalog (CC-BY-4.0, \u00a9 tldr-pages contributors) auto-downloads on first use and works offline thereafter. Repackaged unmodified from the upstream tlrc release with a thin wrapper that serves a complete, color-free command-palette reference."
+  },
+  "artifacts": [
+    {
+      "role": "binary",
+      "os": "darwin",
+      "arch": "arm64",
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.tldr/1.13.1/darwin-arm64/tldr-1.13.1-darwin-arm64.tar.gz",
+      "sha256": "78e90549928e6aa1d60779a1f92c1d75ea2a5c6a973263f1a45deb84685e49b3",
+      "unpack": "tar.gz",
+      "exec_path": "tldr-1.13.1-darwin-arm64/tldr",
+      "order": 1
+    },
+    {
+      "role": "binary",
+      "os": "darwin",
+      "arch": "amd64",
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.tldr/1.13.1/darwin-amd64/tldr-1.13.1-darwin-amd64.tar.gz",
+      "sha256": "3178e2ae1a1fcb46613504c4e9f500acba3b68bdc402e5b8805b8a66f4f3268b",
+      "unpack": "tar.gz",
+      "exec_path": "tldr-1.13.1-darwin-amd64/tldr",
+      "order": 1
+    },
+    {
+      "role": "binary",
+      "os": "linux",
+      "arch": "amd64",
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.tldr/1.13.1/linux-amd64/tldr-1.13.1-linux-amd64.tar.gz",
+      "sha256": "0a906f3d7d83171f21e7a3acf814591f6cb2097996bdb40fb61ed4a9db9cc820",
+      "unpack": "tar.gz",
+      "exec_path": "tldr-1.13.1-linux-amd64/tldr",
+      "order": 1
+    },
+    {
+      "role": "binary",
+      "os": "linux",
+      "arch": "arm64",
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.tldr/1.13.1/linux-arm64/tldr-1.13.1-linux-arm64.tar.gz",
+      "sha256": "5146fb22fbc740a79dd4deef2dcc626049c44a16fc3e5cd59d5d1b6daabf56f3",
+      "unpack": "tar.gz",
+      "exec_path": "tldr-1.13.1-linux-arm64/tldr",
+      "order": 1
+    }
+  ],
+  "product_demo": {
+    "skill": "io.pilot.tldr",
+    "title": "Full usage demo",
+    "when_to_use": "When you need to recall exactly how to invoke a CLI \u2014 get a command's example-first cheat-sheet, or find the right tool by task \u2014 instead of parsing a man page or web searching.",
+    "metered": false,
+    "quickstart": {
+      "goal": "Look up a command's cheat-sheet",
+      "command": "pilotctl appstore call io.pilot.tldr tldr.get '{\"command\":\"tar\"}'",
+      "expect": "clean-text tldr page for tar with the handful of example invocations that matter"
+    },
+    "examples": [
+      {
+        "title": "Raw Markdown (machine-parseable)",
+        "command": "pilotctl appstore call io.pilot.tldr tldr.raw '{\"command\":\"docker\"}'",
+        "expect": "the docker page as unrendered Markdown, ideal for lifting example lines programmatically"
+      },
+      {
+        "title": "Multi-word page (hyphen-joined)",
+        "command": "pilotctl appstore call io.pilot.tldr tldr.get '{\"command\":\"git-commit\"}'",
+        "expect": "the git commit cheat-sheet"
+      },
+      {
+        "title": "Find a tool by task",
+        "command": "pilotctl appstore call io.pilot.tldr tldr.search '{\"keyword\":\"compress\"}'",
+        "expect": "each matching page as `language  platform  page`"
+      },
+      {
+        "title": "Browse the whole catalog",
+        "command": "pilotctl appstore call io.pilot.tldr tldr.list '{}'",
+        "expect": "every documented command for this platform + the common set, one name per line"
+      },
+      {
+        "title": "Force a platform via verbatim argv",
+        "command": "pilotctl appstore call io.pilot.tldr tldr.exec '{\"args\":[\"--platform\",\"linux\",\"systemctl\"]}'",
+        "expect": "the linux systemctl page even on macOS"
+      }
+    ],
+    "gotchas": [
+      "The page cache (~3 MiB, ~7,350+ pages) auto-downloads on first use and then works offline.",
+      "Multi-word pages: hyphen-join (\"git-commit\") or pass the words as argv via tldr.exec ([\"git\",\"commit\"]).",
+      "tldr.raw returns raw Markdown (best for extraction); tldr.get returns clean rendered text.",
+      "On a non-zero exit the reply is {stdout, stderr, exit}."
+    ],
+    "next": [
+      "io.pilot.tldr tldr.help '{}'"
+    ]
+  },
+  "next_steps": {
+    "schema": 1,
+    "app": "io.pilot.tldr",
+    "edges": [
+      {
+        "from": "*",
+        "on": "ok",
+        "match": "page not found",
+        "why": "no such page \u2014 note the call exited 0; the failure is \"exit\":1 in the body. Usually the page NAME, not the cache: multi-word pages must be hyphen-joined (\"git commit\" is not a page, \"git-commit\" is)",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.tldr tldr.search '{\"keyword\":\"commit\"}'",
+            "why": "find the real page name by content \u2014 the third column of each hit is exactly what tldr.get wants",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.tldr tldr.update '{}'",
+            "why": "only if the name is right: refresh the local page cache, which the app also suggests",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "*",
+        "on": "err",
+        "match": "missing required param",
+        "why": "tldr needs the page to look up \u2014 there is no default",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.tldr tldr.get '{\"command\":\"tar\"}'",
+            "why": "pass command (the page name) \u2014 this is the corrected shape of the call above",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "tldr.search",
+        "on": "ok",
+        "match": "no pages matched",
+        "why": "the keyword matched no page contents \u2014 search is literal, so a narrower term finds less, not more",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.tldr tldr.search '{\"keyword\":\"compress\"}'",
+            "why": "retry with one broader, single word \u2014 \"compress\" not \"compress a folder\"",
+            "kind": "recovery"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.tldr tldr.list '{}'",
+            "why": "or browse every page name for this platform when you do not know the vocabulary",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "tldr.search",
+        "on": "ok",
+        "why": "each hit is `language platform page` \u2014 the page column is the lookup key",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.tldr tldr.get '{\"command\":\"tar\"}'",
+            "why": "fetch a hit's cheat-sheet as clean text \u2014 the point of the search",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.tldr tldr.raw '{\"command\":\"tar\"}'",
+            "why": "or take it as raw Markdown when you want to lift the example lines programmatically",
+            "kind": "flow"
+          }
+        ]
+      }
+    ]
+  }
+}

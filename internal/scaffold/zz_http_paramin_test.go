@@ -44,6 +44,25 @@ func TestParamInResolvesBuckets(t *testing.T) {
 	}
 }
 
+// body_raw sorts a param into the single BodyRawParam slot (its value becomes
+// the whole request body), leaving the other buckets empty.
+func TestBodyRawResolvesToSingleSlot(t *testing.T) {
+	h := parseResolved(t, paramInYAML(
+		"/records/{table}",
+		"table: t, records: rows to insert",
+		"table: path, records: body_raw",
+	)).Methods[0].HTTP
+	if h.BodyRawParam != "records" {
+		t.Errorf("BodyRawParam = %q, want records", h.BodyRawParam)
+	}
+	if len(h.BodyParams) != 0 {
+		t.Errorf("BodyParams = %v, want [] (records is body_raw)", h.BodyParams)
+	}
+	if len(h.PathParams) != 1 || h.PathParams[0] != "table" {
+		t.Errorf("PathParams = %v, want [table]", h.PathParams)
+	}
+}
+
 // A {name} placeholder with no explicit `in` stays an escaped path param —
 // the historical default, so existing specs are unchanged.
 func TestPlaceholderDefaultsToEscapedPath(t *testing.T) {
@@ -63,7 +82,7 @@ func TestParamInValidation(t *testing.T) {
 	}
 	// invalid `in` value.
 	c = parseResolved(t, paramInYAML("/search", "q: a query", "q: cookie"))
-	if !hasErrContaining(c.Validate(), "must be query|path|path_raw|body|header") {
+	if !hasErrContaining(c.Validate(), "must be query|path|path_raw|body|body_raw|header") {
 		t.Errorf("expected invalid-in error, got %v", c.Validate())
 	}
 	// `in` on an undeclared param.

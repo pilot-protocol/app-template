@@ -15,6 +15,12 @@ HOST="${BROKER_HOST:-broker.pilotprotocol.network}"
 EMAIL="${CERT_EMAIL:-apps@pilotprotocol.network}"
 ORIGIN="${BROKER_ORIGIN:-http://127.0.0.1:8099}"
 LIVE="/etc/letsencrypt/live/$HOST"
+# Extra nginx location blocks injected before `location /` — verbatim nginx
+# config for sidecar brokers that live behind the same vhost (e.g. a signup
+# broker on another port). Supplied by startup.sh from the `broker-extra-locations`
+# instance-metadata key so a regenerated broker.conf keeps those routes instead of
+# silently dropping them. Empty ⇒ just the default `location /`.
+EXTRA_LOCATIONS="${BROKER_EXTRA_LOCATIONS:-}"
 
 echo "→ installing nginx + certbot"
 export DEBIAN_FRONTEND=noninteractive
@@ -59,11 +65,30 @@ server {
     location / {
         proxy_pass $ORIGIN;
         proxy_set_header Host \$host;
+        # X-Real-IP is the ONLY source-IP signal the broker trusts (a
+        # client-supplied X-Forwarded-For is ignored). The per-IP grant cap
+        # depends on it: omit it and every caller reads as 127.0.0.1, collapsing
+        # every identity into one IP bucket. It must be set on EVERY location.
+        proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
     }
 }
 NGINX
+  # Inject any sidecar location blocks BEFORE `location /` (literal — the value
+  # carries nginx vars like $host/$remote_addr that bash must not expand).
+  if [ -n "$EXTRA_LOCATIONS" ]; then
+    EXTRA_LOCATIONS="$EXTRA_LOCATIONS" python3 - <<'PY'
+import os
+p = "/etc/nginx/sites-available/broker.conf"
+extra = os.environ["EXTRA_LOCATIONS"].strip("\n")
+s = open(p).read()
+if extra and extra not in s:
+    s = s.replace("    location / {", extra + "\n\n    location / {", 1)
+    open(p, "w").write(s)
+    print("  → injected broker-extra-locations")
+PY
+  fi
   ln -sf /etc/nginx/sites-available/broker.conf /etc/nginx/sites-enabled/broker.conf
   # Remove nginx's default site — it binds :80, which publish-server owns, so
   # nginx would fail to start. The broker vhost is :443-only.

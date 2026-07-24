@@ -1,9 +1,12 @@
-# On merge to main, publish any new/changed submission: release the bundle on
-# pilot-protocol/catalog and open a catalogue.json PR on TeoSlayer/pilotprotocol.
+# On merge to main, publish any new/changed POINTER submission (pre-built,
+# publisher-signed .bundle): release the bundle on pilot-protocol/catalog and
+# open a catalogue.json PR on pilot-protocol/pilotprotocol. RICH submissions
+# (backend/methods spec, no .bundle) are built+signed by the publisher's own
+# key via pilot-app submit / publish-api and are skipped here with a notice.
 #
 # Requires repo secret CATALOG_PUBLISH_TOKEN — a PAT or GitHub App token with:
 #   - contents:write on pilot-protocol/catalog (create releases)
-#   - contents:write + pull_requests:write on TeoSlayer/pilotprotocol (catalogue PR)
+#   - contents:write + pull_requests:write on pilot-protocol/pilotprotocol (catalogue PR)
 # Without it, this job no-ops with a clear message (submissions still validate on PR).
 name: publish-on-merge
 
@@ -12,6 +15,12 @@ on:
     branches: [main]
     paths:
       - "submissions/**"
+  workflow_dispatch:
+    inputs:
+      submission:
+        description: "submissions/<id> directory to (re)publish, e.g. submissions/io.pilot.tldr"
+        required: true
+        type: string
 
 jobs:
   publish:
@@ -47,7 +56,13 @@ jobs:
           CATALOG_SIGN_KEY: ${{ secrets.CATALOG_SIGN_KEY }}
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only HEAD~1 HEAD -- 'submissions/**/submission.json' || true)"
+          # Manual (re)publish of a single submission via workflow_dispatch.
+          if [ -n "${{ github.event.inputs.submission || '' }}" ]; then
+            scripts/publish-submission.sh "${{ github.event.inputs.submission }}"
+            exit 0
+          fi
+          # --diff-filter=d: a DELETED submission.json has nothing to publish.
+          changed="$(git diff --diff-filter=d --name-only HEAD~1 HEAD -- 'submissions/**/submission.json' || true)"
           [ -n "$changed" ] || { echo "no submission.json changed"; exit 0; }
           for sub in $changed; do
             scripts/publish-submission.sh "$(dirname "$sub")"

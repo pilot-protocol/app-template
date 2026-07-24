@@ -1,0 +1,20 @@
+[
+  {
+    "label": "version",
+    "vanilla": [
+      "mysql",
+      "--version"
+    ],
+    "method": "mysql.version",
+    "payload": {}
+  },
+  {
+    "label": "mysql_help",
+    "vanilla": [
+      "mysql",
+      "--help"
+    ],
+    "method": "mysql.mysql_help",
+    "payload": {}
+  }
+]

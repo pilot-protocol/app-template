@@ -49,6 +49,8 @@ func main() {
 		cmdSubmit(os.Args[2:])
 	case "update":
 		cmdUpdate(os.Args[2:])
+	case "demo-score":
+		cmdDemoScore(os.Args[2:])
 	case "example":
 		fmt.Print(scaffold.ExampleSpec)
 	case "-h", "--help", "help":
@@ -74,6 +76,9 @@ Usage:
                                                   enforce the update gate: same publisher key + higher version
   pilot-app submit   -C <project-dir> --prepare <app-template-fork>
                                                   write a submission PR payload (the single front door)
+  pilot-app demo-score [submissions-dir] [-min N]
+                                                  score every product demo (quality + first-call proxy);
+                                                  exits nonzero if any demo scores below -min (default 60)
   pilot-app example                               print a starter pilot.app.yaml
 
 After init:
@@ -651,7 +656,7 @@ func cmdSubmit(args []string) {
 
 	fmt.Printf("\nTo publish via the single central repo, run `pilot-app submit -C %s --prepare <app-template-fork>`.\n", *dir)
 	fmt.Printf("\nDirect path (org maintainers only):\n── Step 1: release on pilot-protocol/catalog ──\n%s\n", relCmd)
-	fmt.Printf("\n── Step 2: add to catalogue/catalogue.json on TeoSlayer/pilotprotocol@main (PR) ──\n%s\n", catEntry)
+	fmt.Printf("\n── Step 2: add to catalogue/catalogue.json on pilot-protocol/pilotprotocol@main (PR) ──\n%s\n", catEntry)
 }
 
 // writeEnrichedMetadata reads the project's metadata.json (from init), fills the

@@ -3,6 +3,9 @@ package scaffold
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/pilot-protocol/app-template/internal/demo"
+	"github.com/pilot-protocol/app-template/internal/nextsteps"
 )
 
 // descOr returns the long-form app description when set, else the one-line
@@ -34,8 +37,18 @@ type Metadata struct {
 	Methods       []MetaMethod   `json:"methods"`
 	Changelog     []ChangelogRel `json:"changelog,omitempty"`
 	Links         []MetaLink     `json:"links,omitempty"`
-	PublishedAt   string         `json:"published_at,omitempty"`
-	UpdatedAt     string         `json:"updated_at,omitempty"`
+	// ProductDemo is the example-driven "Full usage demo" the store page renders,
+	// pilotctl prints at the last step of install, and the harness injects as a
+	// SKILL.md. Optional and additive — older clients ignore it. Rendered from a
+	// single source via demo.Demo's RenderInstall/RenderSkill/RenderMarkdown.
+	ProductDemo *demo.Demo `json:"product_demo,omitempty"`
+	// NextSteps is the dynamic context pilotctl renders after every `appstore
+	// call` on this app. pilotctl caches it to $APP/next-steps.json at install so
+	// the per-call lookup is a local file read — no network on the call path.
+	// Optional and additive — older clients ignore it.
+	NextSteps   *nextsteps.Graph `json:"next_steps,omitempty"`
+	PublishedAt string           `json:"published_at,omitempty"`
+	UpdatedAt   string           `json:"updated_at,omitempty"`
 }
 
 type MetaVendor struct {
@@ -112,15 +125,17 @@ func BuildMetadata(c *Config) Metadata {
 			URL:     c.Listing.Vendor.URL,
 			Contact: c.Listing.Vendor.Contact,
 		},
-		Homepage:   c.Listing.Homepage,
-		SourceURL:  c.Listing.SourceURL,
-		License:    c.Listing.License,
-		Categories: c.Listing.Categories,
-		Keywords:   c.Listing.Keywords,
-		Compat:     MetaCompat{MinPilotVersion: minPilot, Runtimes: []string{"go"}},
-		Methods:    methods,
-		Changelog:  changelog,
-		Links:      links,
+		Homepage:    c.Listing.Homepage,
+		SourceURL:   c.Listing.SourceURL,
+		License:     c.Listing.License,
+		Categories:  c.Listing.Categories,
+		Keywords:    c.Listing.Keywords,
+		Compat:      MetaCompat{MinPilotVersion: minPilot, Runtimes: []string{"go"}},
+		Methods:     methods,
+		Changelog:   changelog,
+		Links:       links,
+		ProductDemo: c.ProductDemo,
+		NextSteps:   c.NextSteps,
 	}
 }
 

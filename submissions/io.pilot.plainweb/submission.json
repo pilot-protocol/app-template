@@ -10,9 +10,12 @@
   "methods": [
     {
       "name": "plainweb.fetch",
-      "description": "Fetch any web page and return it as clean Markdown — no HTML, no JavaScript. Pass the full target URL as `url`; it is placed verbatim in the request path (GET /<url>). Scheme-less hosts (e.g. example.com) are sanitized to https://. The reply is `{\"content_type\":\"text/markdown; charset=utf-8\",\"content\":\"<markdown>\"}`. Open and free — no API key needed.",
+      "description": "Fetch any web page and return it as clean Markdown \u2014 no HTML, no JavaScript. Pass the full target URL as `url`; it is placed verbatim in the request path (GET /<url>). Scheme-less hosts (e.g. example.com) are sanitized to https://. The reply is `{\"content_type\":\"text/markdown; charset=utf-8\",\"content\":\"<markdown>\"}`. Open and free \u2014 no API key needed.",
       "latency": "med",
-      "http": { "verb": "GET", "path": "/{url}" },
+      "http": {
+        "verb": "GET",
+        "path": "/{url}"
+      },
       "params": [
         {
           "name": "url",
@@ -26,18 +29,89 @@
   ],
   "listing": {
     "display_name": "Plainweb",
-    "tagline": "Any web page as clean Markdown — no HTML, no JS, one call",
-    "app_description": "Plainweb is a Pilot-owned URL→Markdown service: give it any web page and get back clean, accurate Markdown — no HTML, no JavaScript, just plain text structured as Markdown.\n\nWhat an agent gets:\n- **One call** — `plainweb.fetch(url)` fetches the page and returns it as Markdown (GFM tables, fenced code with language, task lists). The target URL goes straight in the path.\n- **Accurate extraction** — a cost-aware static→headless-Chrome fetch ladder (most pages never launch Chrome), go-readability primary (preserves code blocks and tables) with go-trafilatura fallback, converted via html-to-markdown v2.\n- **Scheme-less OK** — bare hosts like `example.com` are sanitized to `https://`.\n\nGood to know:\n- **Free and open — no API key required.** Public endpoints are open to every caller.\n- **Rate limit:** anonymous callers get **1000 requests/second** (burst 2000); a master key only elevates a caller past that limit.\n- The reply is `text/markdown`, returned by the adapter as `{ \"content_type\", \"content\" }` (the Markdown is in `content`).\n- In-house Pilot Protocol tool, deployed on Cloud Run.",
+    "tagline": "Any web page as clean Markdown \u2014 no HTML, no JS, one call",
+    "app_description": "Plainweb is a Pilot-owned URL\u2192Markdown service: give it any web page and get back clean, accurate Markdown \u2014 no HTML, no JavaScript, just plain text structured as Markdown.\n\nWhat an agent gets:\n- **One call** \u2014 `plainweb.fetch(url)` fetches the page and returns it as Markdown (GFM tables, fenced code with language, task lists). The target URL goes straight in the path.\n- **Accurate extraction** \u2014 a cost-aware static\u2192headless-Chrome fetch ladder (most pages never launch Chrome), go-readability primary (preserves code blocks and tables) with go-trafilatura fallback, converted via html-to-markdown v2.\n- **Scheme-less OK** \u2014 bare hosts like `example.com` are sanitized to `https://`.\n\nGood to know:\n- **Free and open \u2014 no API key required.** Public endpoints are open to every caller.\n- **Rate limit:** anonymous callers get **1000 requests/second** (burst 2000); a master key only elevates a caller past that limit.\n- The reply is `text/markdown`, returned by the adapter as `{ \"content_type\", \"content\" }` (the Markdown is in `content`).\n- In-house Pilot Protocol tool, deployed on Cloud Run.",
     "license": "Proprietary",
     "homepage": "https://pilotprotocol.network",
     "source_url": "https://github.com/pilot-protocol/plainweb",
-    "categories": ["web", "content", "markdown"],
-    "keywords": ["plainweb", "markdown", "web", "fetch", "scrape", "extract", "readability", "html", "url", "content"]
+    "categories": [
+      "web",
+      "content",
+      "markdown"
+    ],
+    "keywords": [
+      "plainweb",
+      "markdown",
+      "web",
+      "fetch",
+      "scrape",
+      "extract",
+      "readability",
+      "html",
+      "url",
+      "content"
+    ]
   },
   "vendor": {
     "name": "Pilot Protocol",
     "url": "https://pilotprotocol.network",
-    "agent_usage": "Agents call plainweb.fetch with a target URL to retrieve the page as clean Markdown (no HTML/JS) in one call — for reading, summarizing, or extracting content from any public web page.",
-    "capabilities": "Fetch any web page and convert it to clean Markdown (GFM tables, fenced code, task lists); scheme-less URL sanitization; static→headless fetch ladder with readability + trafilatura extraction."
+    "agent_usage": "Agents call plainweb.fetch with a target URL to retrieve the page as clean Markdown (no HTML/JS) in one call \u2014 for reading, summarizing, or extracting content from any public web page.",
+    "capabilities": "Fetch any web page and convert it to clean Markdown (GFM tables, fenced code, task lists); scheme-less URL sanitization; static\u2192headless fetch ladder with readability + trafilatura extraction."
+  },
+  "product_demo": {
+    "skill": "io.pilot.plainweb",
+    "title": "Full usage demo",
+    "when_to_use": "When you need to read a public web page as clean Markdown (no HTML, no JS) in one call \u2014 for summarizing, extracting, or feeding article content to a model.",
+    "metered": false,
+    "quickstart": {
+      "goal": "Fetch a URL as Markdown",
+      "command": "pilotctl appstore call io.pilot.plainweb plainweb.fetch '{\"url\":\"https://example.com\"}'",
+      "expect": "{\"content_type\":\"text/markdown; charset=utf-8\",\"content\":\"# Example Domain\\n...\"}"
+    },
+    "examples": [
+      {
+        "title": "Scheme-less host (sanitized to https://)",
+        "command": "pilotctl appstore call io.pilot.plainweb plainweb.fetch '{\"url\":\"en.wikipedia.org/wiki/Markdown\"}'",
+        "expect": "{\"content\":\"# Markdown\\n\\nMarkdown is a lightweight markup language...\"}"
+      },
+      {
+        "title": "Read an article for summarization",
+        "command": "pilotctl appstore call io.pilot.plainweb plainweb.fetch '{\"url\":\"https://go.dev/doc/effective_go\"}'",
+        "expect": "clean Markdown of the page (GFM tables, fenced code) in the content field"
+      },
+      {
+        "title": "Front page of a news/link site",
+        "command": "pilotctl appstore call io.pilot.plainweb plainweb.fetch '{\"url\":\"https://news.ycombinator.com\"}'",
+        "expect": "{\"content_type\":\"text/markdown; charset=utf-8\",\"content\":\"...\"}"
+      }
+    ],
+    "gotchas": [
+      "The target URL goes verbatim into the request path (GET /<url>); pass it as the url param.",
+      "Scheme-less hosts (e.g. example.com) are sanitized to https://.",
+      "The Markdown body is in the content field of the reply, not the top level.",
+      "Free and open \u2014 no API key required."
+    ],
+    "next": [
+      "io.pilot.plainweb plainweb.help '{}'"
+    ]
+  },
+  "next_steps": {
+    "schema": 1,
+    "app": "io.pilot.plainweb",
+    "edges": [
+      {
+        "from": "plainweb.fetch",
+        "on": "err",
+        "match": "missing required path parameter",
+        "why": "fetch needs the page to read passed as url",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.plainweb plainweb.fetch '{\"url\":\"https://example.com\"}'",
+            "why": "url is the full page URL; the scheme is optional (example.com is sanitized to https://). Markdown comes back in the content field",
+            "kind": "recovery"
+          }
+        ]
+      }
+    ]
   }
 }

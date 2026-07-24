@@ -49,8 +49,8 @@ func main() {
 	_ = flag.String("addr", "", "daemon address (unused by this app)")
 {{- end}}
 	_ = flag.String("db", "", "per-app sqlite path (unused: this app is stateless)")
-{{- if .Managed}}
-	identity := flag.String("identity", "", "per-app ed25519 identity path (used to sign managed-broker requests)")
+{{- if or .Managed .HasBrokerSignup}}
+	identity := flag.String("identity", "", "per-app ed25519 identity path (used to sign broker requests)")
 {{- else}}
 	_ = flag.String("identity", "", "per-app identity path (unused by this app)")
 {{- end}}
@@ -62,13 +62,13 @@ func main() {
 
 {{- if eq .Backend.Type "http"}}
 	cfg := resolveConfig(*manifestPath)
-{{- if .Managed}}
+{{- if or .Managed .HasBrokerSignup}}
 	signer, err := backend.NewSigner(*identity)
 	if err != nil {
 		log.Fatalf("{{.BinaryName}}: %v", err)
 	}
 {{- end}}
-	client, err := backend.New(backend.Config{BaseURL: cfg.BackendURL{{if .Backend.Headers}}, Headers: resolveHeaders(*manifestPath){{end}}{{if .Backend.X402}}, DaemonAddr: *addr{{end}}{{if .Managed}}, Sign: signer{{end}}})
+	client, err := backend.New(backend.Config{BaseURL: cfg.BackendURL{{if .Backend.URLSecret}}, BaseURLFunc: func() string { return resolveBackendURLDyn(*manifestPath, {{printf "%q" .Backend.URLSecret}}) }{{end}}{{if .Backend.Headers}}{{if .HasSignup}}, HeaderFunc: func() map[string]string { return resolveHeaders(*manifestPath) }{{else}}, Headers: resolveHeaders(*manifestPath){{end}}{{end}}{{if .Backend.X402}}, DaemonAddr: *addr{{end}}{{if .Managed}}, Sign: signer{{end}}})
 	if err != nil {
 		log.Fatalf("{{.BinaryName}}: backend config: %v", err)
 	}
@@ -122,7 +122,7 @@ func main() {
 
 	d := ipc.NewDispatcher()
 {{- if eq .Backend.Type "http"}}
-	registerHandlers(d, client, readAppVersion(*manifestPath), cfg.BackendURL)
+	registerHandlers(d, client, readAppVersion(*manifestPath), cfg.BackendURL{{if .HasSignup}}, *manifestPath{{end}}{{if .HasBrokerSignup}}, signer{{end}})
 {{- else if eq .Backend.Type "hybrid"}}
 	registerHandlers(d, runner, cloudCli, readAppVersion(*manifestPath), cfg.BackendURL)
 {{- else}}
@@ -175,19 +175,57 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 // registerHandlers wires each IPC method to its backend call. Method names MUST
 // match the manifest's `exposes` list, or the daemon won't broker them.
 {{- if eq .Backend.Type "http"}}
-func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL string) {
+func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL string{{if .HasSignup}}, manifestPath string{{end}}{{if .HasBrokerSignup}}, signer backend.Signer{{end}}) {
 {{- range .Methods}}
 {{- if .Local}}
 	d.Register("{{.Name}}", localRead(expandHome("{{.Local.Store}}"))) // {{.Duration}} (local metadata)
+{{- else if .Signup}}
+{{- if eq .Signup.Step "account"}}
+	d.Register("{{.Name}}", accountHandler(accountConfig{
+		secretKey: {{printf "%q" .Signup.SecretKey}},
+		emailKey:  {{printf "%q" .Signup.EmailKey}},
+		urlKey:    {{printf "%q" $.Backend.URLSecret}},
+	}, manifestPath)) // {{.Duration}} (local: retrieve the cached account)
+{{- else if .Signup.IsCreate}}
+	d.Register("{{.Name}}", signupCreateHandler(signupCreateConfig{
+		url:         {{printf "%q" .Signup.URL}},
+		body:        {{printf "%q" .Signup.BodyJSON}},
+		keyPath:     {{printf "%q" .Signup.KeyPath}},
+		addressPath: {{printf "%q" .Signup.AddressPath}},
+		secretKey:   {{printf "%q" .Signup.SecretKey}},
+		emailKey:    {{printf "%q" .Signup.EmailKey}},
+	}, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (emailless self-signup: one call, no email, mints + caches the key)
+{{- else if .Signup.IsBroker}}
+	d.Register("{{.Name}}", brokerSignupHandler(brokerSignupConfig{
+		brokerURL: {{printf "%q" .Signup.BrokerURL}},
+		secretKey: {{printf "%q" .Signup.SecretKey}},
+		emailKey:  {{printf "%q" .Signup.EmailKey}},
+		urlKey:    {{printf "%q" $.Backend.URLSecret}},
+	}, signer, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (broker self-signup: one call, no email)
+{{- else if .Signup.IsVerify}}
+	d.Register("{{.Name}}", signupVerifyHandler(signupVerifyConfig{
+		url:       {{printf "%q" .Signup.URL}},
+		keyPath:   {{printf "%q" .Signup.KeyPath}},
+		secretKey: {{printf "%q" .Signup.SecretKey}},
+		emailKey:  {{printf "%q" .Signup.EmailKey}},
+	}, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (no-broker self-signup: verify)
 {{- else}}
-	d.Register("{{.Name}}", {{if .HTTP.CaptureTo}}captureWrap(expandHome("{{.HTTP.CaptureTo}}"), {{end}}forward(c, route{
+	d.Register("{{.Name}}", signupRegisterHandler(signupRegisterConfig{
+		url:         {{printf "%q" .Signup.URL}},
+		emailKey:    {{printf "%q" .Signup.EmailKey}},
+		passwordKey: {{printf "%q" .Signup.PasswordKey}},
+	}, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (no-broker self-signup: register)
+{{- end}}
+{{- else}}
+	d.Register("{{.Name}}", {{if $.HasKeyMintSignup}}requireKey(manifestPath, {{printf "%q" $.AuthSecretKey}}, {{printf "%q" $.SignupMethodName}}, {{end}}{{if .HTTP.CaptureTo}}captureWrap(expandHome("{{.HTTP.CaptureTo}}"), {{end}}forward(c, route{
 		method: "{{.HTTP.Verb}}", pathTmpl: "{{.HTTP.Path}}", bodyVerb: {{.HTTP.BodyVerb}},
 		pathParams:    []string{ {{- range $p := .HTTP.PathParams}}{{printf "%q" $p}}, {{end -}} },
 		rawPathParams: []string{ {{- range $p := .HTTP.RawPathParams}}{{printf "%q" $p}}, {{end -}} },
 		queryParams:   []string{ {{- range $p := .HTTP.QueryParams}}{{printf "%q" $p}}, {{end -}} },
 		bodyParams:    []string{ {{- range $p := .HTTP.BodyParams}}{{printf "%q" $p}}, {{end -}} },
 		headerParams:  []string{ {{- range $p := .HTTP.HeaderParams}}{{printf "%q" $p}}, {{end -}} },
-	}, dur("{{.TimeoutFor}}")){{if .HTTP.CaptureTo}}){{end}}) // {{.Duration}}
+		bodyRawParam:  "{{.HTTP.BodyRawParam}}",
+	}, dur("{{.TimeoutFor}}")){{if .HTTP.CaptureTo}}){{end}}{{if $.HasKeyMintSignup}}){{end}}) // {{.Duration}}
 {{- end}}
 {{- end}}
 	d.Register("{{.Namespace}}.help", helpHandler(version, backendURL))
@@ -222,6 +260,32 @@ func localRead(store string) ipc.Handler {
 	}
 }
 
+{{- if .HasKeyMintSignup}}
+// requireKey soft-fails an authenticated call when no API key has been minted on
+// this host yet. Instead of sending a request the backend would reject with 401,
+// it returns clear one-line instructions to activate the account. Once the signup
+// method mints the key, it is stored locally under $APP/secrets.json (in ~/.pilot)
+// and the adapter injects it into the Authorization header on every subsequent
+// call automatically — the agent never sees or passes the key.
+func requireKey(manifestPath, secretKey, signupMethod string, h ipc.Handler) ipc.Handler {
+	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
+		if os.Getenv(secretKey) == "" && loadSecrets(manifestPath)[secretKey] == "" {
+			msg := map[string]any{
+				"ok":           false,
+				"needs_signup": true,
+				"activate":     signupMethod,
+				"message": "No API key on this host yet. Call " + signupMethod +
+					" once (no arguments required) to provision a free account and managed inbox — " +
+					"the key is then stored locally under ~/.pilot and injected on every call automatically; you never pass it.",
+			}
+			b, _ := json.Marshal(msg)
+			return json.RawMessage(b), nil
+		}
+		return h(ctx, req)
+	}
+}
+
+{{end -}}
 // captureWrap wraps an http handler: on a successful (non-error, non-empty) call
 // it best-effort appends the JSON response to the store's "entries" array. A
 // capture failure never fails the call.
@@ -292,6 +356,7 @@ type route struct {
 	queryParams   []string // forced to the query string
 	bodyParams    []string // forced into the JSON body object
 	headerParams  []string // forced to a request header (Name: value)
+	bodyRawParam  string   // a param whose value IS the entire request body (bare array/scalar); "" = none
 }
 
 // forward builds one backend request for a method. It fills {name} placeholders
@@ -325,6 +390,22 @@ func forward(c *backend.Client, r route, timeout time.Duration) ipc.Handler {
 				query[k] = jsonScalar(v)
 				delete(fields, k)
 			}
+		}
+		// body_raw: one param's value IS the entire request body, verbatim (a bare
+		// top-level array/scalar/object an object-wrapped body cannot express). Any
+		// remaining non-located fields fold into the query string.
+		if r.bodyRawParam != "" {
+			raw, ok := fields[r.bodyRawParam]
+			if !ok {
+				return nil, fmt.Errorf("missing required body parameter %q", r.bodyRawParam)
+			}
+			delete(fields, r.bodyRawParam)
+			for k, v := range fields {
+				query[k] = jsonScalar(v)
+			}
+			ctx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			return c.Do(ctx, r.method, path, query, headers, json.RawMessage(raw))
 		}
 		bodyFields := map[string]json.RawMessage{}
 		for _, k := range r.bodyParams {
@@ -593,12 +674,16 @@ type methodDoc struct {
 	Duration  string            `json:"duration"`
 	Cost      string            `json:"cost,omitempty"` // what a cloud method debits (empty = free)
 	Roundtrip string            `json:"typical_roundtrip,omitempty"`
+	Gated     string            `json:"requires,omitempty"` // non-empty = needs an account upgrade; the reason it names is shown in the free-plan disclaimer
 }
 
 var helpMethods = []methodDoc{
 {{- range $m := .Methods}}
 	{Method: "{{$m.Name}}", Plane: "{{$m.Plane}}", Kind: "{{$m.Kind}}", Duration: "{{$m.Duration}}",
 		Summary: {{printf "%q" $m.Summary}},
+{{- if $m.Gated}}
+		Gated: {{printf "%q" $m.Gated}},
+{{- end}}
 {{- if and $.Pricing (index $.Pricing.CreditCost $m.Name)}}
 		Cost: "{{index $.Pricing.CreditCost $m.Name}} credit(s)",
 {{- end}}
@@ -660,6 +745,10 @@ type helpDoc struct {
 	LocalMethods    []methodDoc       `json:"local_methods"`
 	CloudMethods    []methodDoc       `json:"cloud_methods"`
 	Methods         []methodDoc       `json:"methods"`
+	// Rendered LAST so it reads as a footer: the free-plan disclaimer + the list
+	// of methods that need an account upgrade before they work.
+	GatedNote       string            `json:"gated_note,omitempty"`
+	GatedMethods    []methodDoc       `json:"gated_methods,omitempty"`
 }
 
 // splitPlanes groups methods into local vs cloud so <ns>.help reads clearly.
@@ -701,6 +790,17 @@ func splitPlanes(ms []methodDoc) (local, cloud []methodDoc) {
 		Methods: helpMethods,
 	}
 	doc.LocalMethods, doc.CloudMethods = splitPlanes(helpMethods)
+	for _, m := range helpMethods {
+		if m.Gated != "" {
+			doc.GatedMethods = append(doc.GatedMethods, m)
+		}
+	}
+	if len(doc.GatedMethods) > 0 {
+		doc.GatedNote = "──────────────  NOT AVAILABLE ON THE FREE PLAN  ──────────────  " +
+			"The methods listed under gated_methods require an account upgrade the default free plan does not have " +
+			"(a paid plan, an invite-only entitlement, or a verified custom domain). Until the account is upgraded they " +
+			"return a plan/entitlement error and do nothing else. Each one's `requires` field names exactly what unlocks it."
+	}
 	raw, _ := json.Marshal(doc)
 	return func(ctx context.Context, _ *ipc.Envelope) (json.RawMessage, error) {
 		return append(json.RawMessage(nil), raw...), nil
@@ -778,6 +878,34 @@ func resolveConfig(manifestPath string) appConfig {
 	}
 	return cfg
 }
+{{if .Backend.URLSecret}}
+// resolveBackendURLDyn reads a per-user backend base URL from $APP/secrets.json
+// under key (provisioned at signup). Called per request by the HTTP client's
+// BaseURLFunc so calls made after signup reach the user's own backend without a
+// restart. Empty (not yet signed up) ⇒ the client falls back to the baked-in
+// default. An env override of the same name wins (dev/self-hosted).
+func resolveBackendURLDyn(manifestPath, key string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	dir := os.Getenv("APP")
+	if manifestPath != "" {
+		dir = filepath.Dir(manifestPath)
+	}
+	if dir == "" {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "secrets.json"))
+	if err != nil {
+		return ""
+	}
+	var m map[string]string
+	if json.Unmarshal(b, &m) != nil {
+		return ""
+	}
+	return m[key]
+}
+{{end}}
 {{if .Backend.Headers}}
 // resolveHeaders builds the headers sent on every backend request. ${TOKEN}
 // placeholders are filled at runtime from the environment or from a flat

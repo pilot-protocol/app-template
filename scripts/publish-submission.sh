@@ -5,14 +5,49 @@
 # publish-on-merge.yml with GH_TOKEN = CATALOG_PUBLISH_TOKEN. Idempotent on tag.
 set -euo pipefail
 
-DIR="$1"
+DIR="${1%/}"
 META="$DIR/submission.json"
 test -f "$META" || { echo "no submission.json in $DIR"; exit 1; }
 
-ID="$(jq -r .id "$META")"
-VERSION="$(jq -r .version "$META")"
-NS="$(jq -r .namespace "$META")"
-DESC="$(jq -r .description "$META")"
+# jq -r prints the literal string "null" for a missing field, which used to
+# flow straight into paths/tags ("missing bundle submissions/<id>/null").
+# Extract with `// empty` and validate every required field loudly instead.
+ID="$(jq -r '.id // empty' "$META")"
+VERSION="$(jq -r '.version // empty' "$META")"
+DESC="$(jq -r '.description // empty' "$META")"
+[ -n "$ID" ] || { echo "ERROR: $META has no .id"; exit 1; }
+[ -n "$VERSION" ] || { echo "ERROR: $META ($ID) has no .version"; exit 1; }
+
+# Two submission shapes exist (docs/APP-PUBLISHING-SPEC.md):
+#   POINTER — carries a pre-built, publisher-signed .bundle (+ .bundle_sha256 +
+#             .namespace). That is what this script releases.
+#   RICH    — carries only the backend/methods spec; its bundles are built and
+#             signed with the PUBLISHER's own key (`pilot-app submit` /
+#             publish-api). CI holds no publisher key, so this pointer
+#             publisher cannot build or sign them — skip gracefully.
+PRIMARY_FILE="$(jq -r '.bundle // empty' "$META")"
+if [ -z "$PRIMARY_FILE" ]; then
+  if jq -e '(.backend | type == "object") and ((.methods // []) | length > 0)' "$META" >/dev/null; then
+    # RICH submission: its per-platform bundles are built+signed with the
+    # PUBLISHER's own key (pilot-app submit / publish-api) and uploaded to R2 —
+    # CI holds no publisher key, so this pointer publisher cannot build them.
+    # But it CAN finish the last mile the old code silently skipped: derive the
+    # catalogue entry from the bundles ALREADY live on R2, sign catalogue.json
+    # with CATALOG_SIGN_KEY, and open the catalogue PR. If nothing is on R2 yet,
+    # publish-rich-from-r2.sh fails LOUDLY (red check + ::error::) instead of
+    # exiting 0 — a merged rich app that never reached the catalogue must be
+    # visible, not a silent no-op.
+    echo "==> $ID v$VERSION is a RICH submission — publishing its catalogue entry from the bundles already on R2"
+    exec "$(dirname "$0")/publish-rich-from-r2.sh" "$DIR"
+  fi
+  echo "ERROR: $META ($ID v$VERSION) has neither a .bundle pointer nor a rich backend/methods spec — nothing to publish"
+  exit 1
+fi
+
+NS="$(jq -r '.namespace // empty' "$META")"
+SHA="$(jq -r '.bundle_sha256 // empty' "$META")"
+[ -n "$NS" ] || { echo "ERROR: $META ($ID v$VERSION) declares .bundle but no .namespace (needed for the release tag)"; exit 1; }
+[ -n "$SHA" ] || { echo "ERROR: $META ($ID v$VERSION) declares .bundle but no .bundle_sha256"; exit 1; }
 
 CATALOG_REPO="pilot-protocol/catalog"
 PLATFORM_REPO="pilot-protocol/pilotprotocol"
@@ -22,8 +57,6 @@ REL_BASE="https://github.com/${CATALOG_REPO}/releases/download/${TAG}"
 # The linux/amd64 primary backs the top-level bundle_url (what pre-v3 clients
 # fetch). Newer submissions also carry a .bundles map of every platform's
 # {file,sha256}; older ones have only .bundle/.bundle_sha256 (single platform).
-PRIMARY_FILE="$(jq -r .bundle "$META")"
-SHA="$(jq -r .bundle_sha256 "$META")"
 BUNDLE_URL="${REL_BASE}/${PRIMARY_FILE}"
 
 # Every asset to release: the .bundles map's files, or just .bundle when absent.
