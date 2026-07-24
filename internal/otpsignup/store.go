@@ -34,18 +34,33 @@ func openStore(dbPath, encKeyHex string) (*store, error) {
 	if dbPath == "" {
 		dbPath = ":memory:"
 	}
-	// A 32-byte key seals secrets at rest. Prod MUST set a stable key (else a
-	// restart can't decrypt prior rows); tests fall back to an ephemeral one.
+	// A 32-byte key seals secrets at rest. Prod MUST set a stable key: a missing
+	// key used to fall back SILENTLY to a fresh random one, which is worse than
+	// it looks — every restart would then seal under a NEW key, so store.get()
+	// fails to decrypt every row written under the old one. get() treats that as
+	// "not found" (see below), so Signup thinks the caller has no account and
+	// mints (and pays for) a fresh one, whose INSERT is then silently a no-op
+	// (INSERT OR IGNORE against the still-present old row) — every restart from
+	// then on re-mints again, forever, and no single key is ever reliably
+	// retrievable. That silently defeats the whole idempotency guarantee this
+	// store exists for. So: require an explicit key for any persistent store,
+	// and only auto-generate one for a genuinely ephemeral (:memory:, e.g. test)
+	// store where there is nothing on disk to survive a restart anyway.
 	var key []byte
-	if encKeyHex != "" {
+	switch {
+	case encKeyHex != "":
 		k, err := hex.DecodeString(encKeyHex)
 		if err != nil || len(k) != 32 {
 			return nil, fmt.Errorf("otpsignup: EncKeyHex must be 64 hex chars (32 bytes)")
 		}
 		key = k
-	} else {
+	case dbPath == ":memory:":
 		key = make([]byte, 32)
-		_, _ = rand.Read(key)
+		if _, err := rand.Read(key); err != nil {
+			return nil, fmt.Errorf("otpsignup: generating ephemeral enc key: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("otpsignup: OTPSIGNUP_ENC_KEY is required for a persistent ledger (%s) — an unset key silently rotates on every restart and corrupts existing accounts (see store.go)", dbPath)
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {

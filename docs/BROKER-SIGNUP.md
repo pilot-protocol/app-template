@@ -123,7 +123,36 @@ tiers. Cap exposure with the per-IP mint cap and the master account's own plan.
 - The mailbox holds a **live code for seconds** — treat it as a secret: tmpfs,
   `0600`, delete on read/teardown, never log the code or the body.
 - The broker seals the provider password + key **encrypted at rest** and hands
-  the key to the adapter, which owns it in `secrets.json`.
-- Receive-only, relay-denied SMTP — no open relay, no outbound mail.
+  the key to the adapter, which owns it in `secrets.json`. The at-rest key
+  (`OTPSIGNUP_ENC_KEY`) is **required** for any persistent ledger — an unset key
+  used to fall back silently to an ephemeral one, which corrupts every existing
+  account's decryptability on the next restart; the broker now fails to start
+  instead (a `:memory:`/test-only store is still allowed to auto-generate one,
+  since nothing there needs to survive a restart).
+- Receive-only, relay-denied SMTP — no open relay, no outbound mail. The `:25`
+  listener additionally caps total concurrent connections and per-remote-IP
+  concurrent connections (`OTPMAIL_MAX_CONNS[_PER_IP]`), so it can't be used to
+  exhaust the host's goroutines/file descriptors.
 - Mind the provider's own register rate limit (often per source IP): the broker's
   egress IP is the bucket, so throttle mints if volume is high.
+- The per-IP Sybil cap (`MaxIdentitiesPerIP`) keys off the caller's IP as
+  reported by `clientIP()`, which trusts **only** `X-Real-IP` (set by our own
+  nginx from `$remote_addr`, never client-controllable) or, failing that, the
+  raw socket address — it never reads a client-supplied `X-Forwarded-For`,
+  which would otherwise let anyone mint a fresh "IP" per request and bypass the
+  cap outright. Any nginx location proxying to this broker (including
+  operator-supplied `broker-extra-locations` blocks) **must** set
+  `proxy_set_header X-Real-IP $remote_addr;` itself — nginx does not inherit
+  `proxy_set_header` into a location that defines any of its own.
+- Concurrent signup requests for the same caller are serialized on a per-caller
+  lock in `Broker.Signup`, so a duplicate/racing request can't mint (and get
+  billed for) a second provider account — it gets the same cached one back.
+- **Deferred: the broker↔mail-server control plane is bearer-token auth over a
+  private interface, not mutual TLS.** Both `otpsignup.New` and `otpmail.New`
+  enforce a floor on token length/strength in the meantime (see `minTokenLen`
+  in each package) so a weak shared secret isn't the actual boundary, but a
+  compromised/leaked token (or an attacker who reaches the private interface
+  some other way) can still call the control API directly. Real mTLS between
+  the two services is a larger deployment/cert-management change and is
+  intentionally out of scope here; track it as follow-up work before running
+  this across a less-trusted network boundary than "both services on one VM."

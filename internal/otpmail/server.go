@@ -41,12 +41,14 @@ import (
 // Config configures a Server. All fields come from the deployment environment;
 // nothing provider- or host-specific is baked in.
 type Config struct {
-	Domain      string // the mail domain we are MX for, e.g. "sub.example.net"
-	Maildir     string // dir for per-recipient message files (point at tmpfs)
-	SMTPAddr    string // public SMTP listen address, default ":25"
-	ControlAddr string // private control-API listen address, default "127.0.0.1:8025"
-	Token       string // bearer token the control API requires (required)
-	MaxMsgBytes int    // per-message cap (default 256 KiB)
+	Domain        string // the mail domain we are MX for, e.g. "sub.example.net"
+	Maildir       string // dir for per-recipient message files (point at tmpfs)
+	SMTPAddr      string // public SMTP listen address, default ":25"
+	ControlAddr   string // private control-API listen address, default "127.0.0.1:8025"
+	Token         string // bearer token the control API requires (required)
+	MaxMsgBytes   int    // per-message cap (default 256 KiB)
+	MaxConns      int    // global concurrent :25 connection cap (default 256, DoS guard)
+	MaxConnsPerIP int    // per-remote-IP concurrent :25 connection cap (default 8, DoS guard)
 }
 
 // Server is a receive-only SMTP catch-all plus a control API.
@@ -55,6 +57,15 @@ type Server struct {
 	mu     sync.Mutex
 	active map[string]time.Time // provisioned localpart@domain -> provisioned-at
 	log    *log.Logger
+
+	// Connection admission control for the public :25 listener — an unauthenticated
+	// endpoint reachable by anyone, so it needs its own DoS guards independent of
+	// the per-message/recipient checks below: a global slot semaphore plus a
+	// per-remote-IP cap, so no single source can exhaust goroutines/fds and starve
+	// everyone else.
+	connSem  chan struct{}
+	connMu   sync.Mutex
+	connByIP map[string]int
 }
 
 // New validates cfg and returns a Server.
@@ -77,12 +88,35 @@ func New(cfg Config) (*Server, error) {
 	if cfg.MaxMsgBytes <= 0 {
 		cfg.MaxMsgBytes = 256 << 10
 	}
+	if cfg.MaxConns <= 0 {
+		cfg.MaxConns = 256
+	}
+	if cfg.MaxConnsPerIP <= 0 {
+		cfg.MaxConnsPerIP = 8
+	}
+	// The control-plane channel between the signup broker and this mail server is
+	// bearer-token auth over a private interface, not mTLS (a larger deferred
+	// design change — see docs/BROKER-SIGNUP.md#security-notes). Until then,
+	// enforce a floor on token strength so a weak/guessable shared secret isn't
+	// the actual security boundary.
+	if len(cfg.Token) < minTokenLen {
+		return nil, fmt.Errorf("otpmail: control Token must be at least %d characters (use a long random bearer token)", minTokenLen)
+	}
 	cfg.Domain = strings.ToLower(cfg.Domain)
 	if err := os.MkdirAll(cfg.Maildir, 0o700); err != nil {
 		return nil, fmt.Errorf("otpmail: maildir: %w", err)
 	}
-	return &Server{cfg: cfg, active: map[string]time.Time{}, log: log.New(os.Stderr, "otpmail ", log.LstdFlags|log.LUTC)}, nil
+	return &Server{
+		cfg:      cfg,
+		active:   map[string]time.Time{},
+		log:      log.New(os.Stderr, "otpmail ", log.LstdFlags|log.LUTC),
+		connSem:  make(chan struct{}, cfg.MaxConns),
+		connByIP: map[string]int{},
+	}, nil
 }
+
+// minTokenLen is the minimum length required of the control-API bearer token.
+const minTokenLen = 20
 
 // ListenAndServe starts the SMTP + control listeners and blocks until one fails.
 func (s *Server) ListenAndServe() error {
@@ -147,8 +181,67 @@ func (s *Server) serveSMTP() error {
 		if err != nil {
 			continue
 		}
-		go s.handleSMTP(c)
+		go s.acceptSMTP(c)
 	}
+}
+
+// acceptSMTP applies connection admission control (a global cap plus a
+// per-remote-IP cap) before handing the connection to handleSMTP, then
+// releases its slot(s) once handling finishes. :25 is unauthenticated and
+// internet-facing, so without this a single source (or a botnet) can open
+// unbounded connections and exhaust goroutines/file descriptors — a cheap DoS
+// against the one mailbox this VM exists to serve.
+func (s *Server) acceptSMTP(c net.Conn) {
+	ip := remoteIP(c)
+	if !s.acquireConn(ip) {
+		s.log.Printf("reject smtp connection from %s: connection cap reached", ip)
+		c.Close()
+		return
+	}
+	defer s.releaseConn(ip)
+	s.handleSMTP(c)
+}
+
+// acquireConn reserves one global slot and one per-IP slot, atomically enough
+// that a rejected per-IP attempt gives its global slot back immediately (it
+// must not leak a slot on the rejection path). Returns false if either cap is
+// currently exhausted.
+func (s *Server) acquireConn(ip string) bool {
+	select {
+	case s.connSem <- struct{}{}:
+	default:
+		return false // global concurrent-connection cap reached
+	}
+	s.connMu.Lock()
+	if s.connByIP[ip] >= s.cfg.MaxConnsPerIP {
+		s.connMu.Unlock()
+		<-s.connSem
+		return false // per-IP concurrent-connection cap reached
+	}
+	s.connByIP[ip]++
+	s.connMu.Unlock()
+	return true
+}
+
+func (s *Server) releaseConn(ip string) {
+	s.connMu.Lock()
+	if s.connByIP[ip] <= 1 {
+		delete(s.connByIP, ip)
+	} else {
+		s.connByIP[ip]--
+	}
+	s.connMu.Unlock()
+	<-s.connSem
+}
+
+// remoteIP strips the port from a connection's remote address (falling back to
+// the raw address if it isn't host:port, e.g. some test/pipe conns).
+func remoteIP(c net.Conn) string {
+	host, _, err := net.SplitHostPort(c.RemoteAddr().String())
+	if err != nil {
+		return c.RemoteAddr().String()
+	}
+	return host
 }
 
 func (s *Server) handleSMTP(c net.Conn) {

@@ -34,6 +34,12 @@ import (
 	"github.com/pilot-protocol/app-template/internal/broker"
 )
 
+// minTokenLen is the minimum length required of the mail-control bearer token
+// (see New) — a floor on shared-secret strength for the broker↔mail-server
+// control plane, pending real mTLS between the two (deferred; see
+// docs/BROKER-SIGNUP.md#security-notes).
+const minTokenLen = 20
+
 // Config is the broker's deployment configuration (all from env; no provider or
 // host specifics compiled in).
 type Config struct {
@@ -63,6 +69,12 @@ type Broker struct {
 	mu     sync.Mutex
 	ipSeen map[string]map[string]bool // ip -> set of caller ids
 	ipLast map[string]time.Time       // ip -> last mint time
+
+	// callerLocks serializes the check-then-act in Signup per caller id, so two
+	// concurrent signups for the SAME caller can't both pass the "no existing
+	// account" check and both mint (and pay for) a duplicate provider account.
+	// Keyed by caller so unrelated callers still proceed in parallel.
+	callerLocks sync.Map // caller (string) -> *sync.Mutex
 }
 
 // New validates cfg, opens the ledger, and returns a Broker.
@@ -83,6 +95,14 @@ func New(cfg Config) (*Broker, error) {
 		if strings.TrimSpace(v) == "" {
 			return nil, fmt.Errorf("otpsignup: %s is required", name)
 		}
+	}
+	// The broker↔mail-server control channel is bearer-token auth over a
+	// private interface, not mTLS (a larger deferred design change — see
+	// docs/BROKER-SIGNUP.md#security-notes). Until then, enforce a floor on
+	// token strength so a weak/guessable shared secret isn't the actual
+	// security boundary.
+	if len(cfg.MailToken) < minTokenLen {
+		return nil, fmt.Errorf("otpsignup: MailToken must be at least %d characters (use a long random bearer token)", minTokenLen)
 	}
 	st, err := openStore(cfg.DBPath, cfg.EncKeyHex)
 	if err != nil {
@@ -141,8 +161,23 @@ func (b *Broker) handleSignup(w http.ResponseWriter, r *http.Request) {
 
 var errRateLimited = errors.New("per-IP identity cap reached (anti-abuse)")
 
+// callerLock returns (creating if needed) the mutex serializing Signup calls
+// for one caller id.
+func (b *Broker) callerLock(caller string) *sync.Mutex {
+	v, _ := b.callerLocks.LoadOrStore(caller, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
 // Signup is the core flow, separated from HTTP so it is directly testable.
 func (b *Broker) Signup(ctx context.Context, caller, ip string) (*Account, error) {
+	// Serialize per caller: without this, two concurrent requests for the same
+	// caller can both observe "no existing account" below and both race through
+	// to mint (and register with the provider for) a duplicate account. Locking
+	// only on the caller id keeps unrelated callers running in parallel.
+	lock := b.callerLock(caller)
+	lock.Lock()
+	defer lock.Unlock()
+
 	// Idempotent: a caller that already has an account gets it back (retrievable),
 	// no second provider account minted.
 	if rec, ok, _ := b.store.get(caller); ok {
@@ -306,15 +341,23 @@ func (b *Broker) getJSON(ctx context.Context, url string) (int, []byte) {
 	return resp.StatusCode, body
 }
 
+// clientIP returns the caller's real address for the per-IP Sybil cap.
+//
+// SECURITY: this reads ONLY X-Real-IP (a header a client cannot set — nginx
+// overwrites it with $remote_addr on the way in) or, failing that, the raw
+// socket's RemoteAddr. It deliberately does NOT consult X-Forwarded-For:
+// unlike X-Real-IP, XFF is a comma-separated list a client is free to prepend
+// to, so trusting the client-supplied first element would let anyone forge a
+// fresh "IP" per request and mint unlimited identities past MaxIdentitiesPerIP.
+// See deploy/setup-broker-tls.sh for the nginx side of this trust boundary.
 func clientIP(r *http.Request) string {
-	if xf := r.Header.Get("X-Real-IP"); xf != "" {
-		return xf
+	if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
+		return ip
 	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
 	}
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return host
+	return r.RemoteAddr
 }
 
 func digString(raw []byte, path ...string) string {

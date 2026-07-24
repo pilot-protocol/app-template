@@ -15,18 +15,29 @@
 //	OTPSIGNUP_DB                 sqlite ledger path
 //	OTPSIGNUP_ENC_KEY            64-hex (32-byte) key sealing secrets at rest
 //	OTPSIGNUP_MAX_IDS_PER_IP     per-IP distinct-caller cap (0 = unlimited)
+//	OTPSIGNUP_MINT_COOLDOWN      min gap between mints from one IP, a Go duration
+//	                             e.g. "30s" (0/unset = no cooldown)
 package main
 
 import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/pilot-protocol/app-template/internal/otpsignup"
 )
 
 func main() {
 	maxIP, _ := strconv.Atoi(os.Getenv("OTPSIGNUP_MAX_IDS_PER_IP"))
+	var mintCooldown time.Duration
+	if raw := os.Getenv("OTPSIGNUP_MINT_COOLDOWN"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			log.Fatalf("otpsignup-broker: OTPSIGNUP_MINT_COOLDOWN=%q: %v", raw, err)
+		}
+		mintCooldown = d
+	}
 	b, err := otpsignup.New(otpsignup.Config{
 		Listen:             os.Getenv("OTPSIGNUP_LISTEN"),
 		MailControlURL:     os.Getenv("OTPSIGNUP_MAIL_CONTROL_URL"),
@@ -39,6 +50,7 @@ func main() {
 		DBPath:             os.Getenv("OTPSIGNUP_DB"),
 		EncKeyHex:          os.Getenv("OTPSIGNUP_ENC_KEY"),
 		MaxIdentitiesPerIP: maxIP,
+		MintCooldown:       mintCooldown,
 	})
 	if err != nil {
 		log.Fatalf("otpsignup-broker: %v", err)
