@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -41,10 +42,23 @@ type AppEntry struct {
 	// minting. nil ⇒ no budget (call-count Quota still applies).
 	Credit *CreditSpec `json:"credit,omitempty"`
 
-	master        string       // resolved from KeyEnv at load (managed: partner key; provisioned: cloud master, e.g. smk_)
-	injector      AuthInjector // built from AuthHeader/Scheme
-	allowSet      map[string]bool
-	allowPatterns [][]string // templated allow entries split on "/" ("{x}" matches any one segment)
+	// Tenancy, when set, makes the broker enforce per-caller resource isolation
+	// on a SHARED partner account: every resource is claimed by its creator and a
+	// caller may only reference/see resources it owns (see tenancy.go). Required
+	// for any app whose partner account cannot be split per user.
+	Tenancy *Tenancy `json:"tenancy,omitempty"`
+
+	// RequireAccessKey gates this app behind a shared pilot access key (see
+	// accesskey.go), on top of the signed identity. Set it for any app that hands
+	// out something of value (a credit grant, a phone number) to a caller who is
+	// otherwise just a self-minted keypair.
+	RequireAccessKey bool `json:"require_access_key"`
+
+	master        string          // resolved from KeyEnv at load (managed: partner key; provisioned: cloud master, e.g. smk_)
+	injector      AuthInjector    // built from AuthHeader/Scheme
+	allowSet      map[string]bool // key = costKey(method, path); method "" = any method
+	allowPatterns []allowPattern  // templated allow entries ("{x}" matches any one segment)
+	allowSegs     [][]string      // every templated allow path (method-independent), for tenancy param extraction
 	breaker       *Breaker
 
 	creditSeed         int            // Credit.SeedCredits (0 ⇒ no budget)
@@ -165,6 +179,17 @@ type CreditSpec struct {
 	BalancePath string `json:"balance_path"`
 }
 
+// Safe defaults for the credit/Sybil guards. These apply when a registry omits
+// the field, so a new app cannot ship with the guard silently off.
+const (
+	// defaultMaxIdentitiesPerIP caps distinct pilot identities that may claim a
+	// budget from one source IP. Low enough to make bulk identity creation
+	// costly, high enough for a shared NAT / office egress to onboard real users.
+	// It is a speed bump, not a boundary: a caller with many source addresses is
+	// not constrained by it, so it must never be the only control on a grant.
+	defaultMaxIdentitiesPerIP = 3
+)
+
 // costPattern is a templated cost key split into segments (like allowPatterns),
 // optionally scoped to one HTTP method ("" = any method).
 type costPattern struct {
@@ -174,7 +199,13 @@ type costPattern struct {
 }
 
 // creditEnabled reports whether this app meters a per-caller micro-dollar budget.
-func (a *AppEntry) creditEnabled() bool { return a.creditSeed > 0 }
+// creditEnabled reports whether the per-caller budget ledger is active.
+//
+// It keys off the PRESENCE of the credit block, never off the seed amount, so
+// that the ledger's existence and the size of a grant stay independent settings.
+// `seed_credits: 0` therefore means exactly what it reads like — a zero budget,
+// in which every priced path is refused with 402 — rather than "no metering".
+func (a *AppEntry) creditEnabled() bool { return a.Credit != nil }
 
 // costKey is the exact-map key for a (method, path) cost entry ("" method = any).
 func costKey(method, path string) string { return method + " " + path }
@@ -224,20 +255,34 @@ func (a *AppEntry) costForCall(method, path string) int {
 // "/v1/calls/{call_id}") match any single non-empty segment in that position, so
 // REST path params don't each need enumerating. An empty allow-list permits
 // nothing (safe default; prod must declare).
-func (a *AppEntry) allowed(path string) bool {
+// Entries are METHOD-SCOPED: "POST /v1/messages" allows only that verb, while a
+// bare "/v1/messages" allows any verb on that path (backwards compatible). Method
+// scoping is what lets a registry express "reads yes, writes no" — without it,
+// allowing GET /v1/numbers necessarily also allows DELETE /v1/numbers/{id}.
+func (a *AppEntry) allowed(method, path string) bool {
 	if len(a.allowSet) == 0 && len(a.allowPatterns) == 0 {
 		return false
 	}
-	if a.allowSet[path] {
+	method = strings.ToUpper(method)
+	if a.allowSet[costKey(method, path)] || a.allowSet[costKey("", path)] {
 		return true
 	}
 	segs := strings.Split(path, "/")
 	for _, pat := range a.allowPatterns {
-		if segmentsMatch(pat, segs) {
+		if pat.method != "" && pat.method != method {
+			continue
+		}
+		if segmentsMatch(pat.segs, segs) {
 			return true
 		}
 	}
 	return false
+}
+
+// allowPattern is a templated allow entry; method "" matches any verb.
+type allowPattern struct {
+	method string
+	segs   []string
 }
 
 // segmentsMatch reports whether request segments satisfy a templated pattern. A
@@ -307,13 +352,28 @@ func ParseRegistry(raw []byte, getenv func(string) string) (*Registry, error) {
 			return nil, fmt.Errorf("registry: app %s: env %s (master key) is empty", a.ID, a.KeyEnv)
 		}
 		a.injector = injectorFor(a.AuthStyle, a.AuthHeader, a.AuthScheme, a.AuthParam, a.AuthUser)
+		// A classic managed app that forwards with header-style auth but no header
+		// name builds an injector that sets an EMPTY header, which fails only when
+		// the first call is dialed (a 502). Catch it at load so a config typo is a
+		// boot failure, not a silent runtime outage on live traffic. Skipped for
+		// provisioned apps (they mint per-user keys, not a master-key header) and
+		// for empty-allow apps (which forward nothing).
+		if a.Provision == nil && len(a.Allow) > 0 &&
+			(a.AuthStyle == "" || a.AuthStyle == "header") && strings.TrimSpace(a.AuthHeader) == "" {
+			return nil, fmt.Errorf("registry: app %s: header auth needs a non-empty auth_header (set auth_style to query/basic if intended)", a.ID)
+		}
 		a.allowSet = map[string]bool{}
 		a.allowPatterns = nil
-		for _, p := range a.Allow {
+		a.allowSegs = nil
+		for _, entry := range a.Allow {
+			method, p := parseCostKey(entry) // "POST /v1/x" → ("POST","/v1/x"); "/v1/x" → ("","/v1/x")
+			method = strings.ToUpper(method)
 			if strings.Contains(p, "{") {
-				a.allowPatterns = append(a.allowPatterns, strings.Split(p, "/"))
+				segs := strings.Split(p, "/")
+				a.allowPatterns = append(a.allowPatterns, allowPattern{method: method, segs: segs})
+				a.allowSegs = append(a.allowSegs, segs)
 			} else {
-				a.allowSet[p] = true
+				a.allowSet[costKey(method, p)] = true
 			}
 		}
 		if a.CostField == "" {
@@ -330,6 +390,12 @@ func ParseRegistry(raw []byte, getenv func(string) string) (*Registry, error) {
 				return nil, err
 			}
 		}
+		if a.Tenancy != nil {
+			if err := validateTenancy(a); err != nil {
+				return nil, err
+			}
+			a.Tenancy.compile()
+		}
 		if a.Credit != nil {
 			if a.Provision != nil {
 				return nil, fmt.Errorf("registry: app %s: `credit` (HTTP budget) and `provision` (cloud) are mutually exclusive", a.ID)
@@ -342,10 +408,21 @@ func ParseRegistry(raw []byte, getenv func(string) string) (*Registry, error) {
 			if a.creditDefault < 0 {
 				a.creditDefault = 0
 			}
+			// Per-IP identity cap. Defaults CLOSED: omitted means the safe default,
+			// and only an explicit negative disables the guard, so switching it off is
+			// always a deliberate and visible choice rather than an oversight.
 			a.creditMaxPerIP = a.Credit.MaxIdentitiesPerIP
-			if a.creditMaxPerIP < 0 {
-				a.creditMaxPerIP = 0
+			switch {
+			case a.creditMaxPerIP == 0:
+				a.creditMaxPerIP = defaultMaxIdentitiesPerIP
+			case a.creditMaxPerIP < 0:
+				a.creditMaxPerIP = 0 // explicit opt-out: unlimited
 			}
+			// NOTE: mint_cooldown deliberately has NO default. Provision is touched on
+			// EVERY call (not just on re-seed), and its cooldown check rejects any
+			// touch inside the window — so a non-zero default would 429 every caller's
+			// second call. It stays opt-in for apps that really want re-mint churn
+			// control. The Sybil guard here is max_identities_per_ip, above.
 			a.creditMintCooldown = time.Duration(a.Credit.MintCooldownMs) * time.Millisecond
 			a.creditRespCost = a.Credit.CostSource == "response"
 			a.creditCostScale = a.Credit.CostScale
@@ -426,4 +503,18 @@ func resolveProvision(a *AppEntry, getenv func(string) string) error {
 		return fmt.Errorf("registry: app %s: unknown provision.provider %q", a.ID, p.Provider)
 	}
 	return nil
+}
+
+// AppsRequiringAccessKey lists apps whose registry entry demands an access key.
+// main uses it to refuse to boot when no keys are configured, so a config
+// mistake surfaces as a loud startup failure rather than a silent 401 wall.
+func (r *Registry) AppsRequiringAccessKey() []string {
+	var out []string
+	for id, a := range r.apps {
+		if a.RequireAccessKey {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

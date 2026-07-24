@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pilot-protocol/app-template/internal/demo"
+	"github.com/pilot-protocol/app-template/internal/nextsteps"
 	"gopkg.in/yaml.v3"
 )
 
@@ -45,6 +47,16 @@ type Config struct {
 	Grants    Grants    `yaml:"grants"`
 	Listing   Listing   `yaml:"listing"` // store-page metadata (catalogue v2)
 	Pricing   *Pricing  `yaml:"pricing"` // optional: shown in <ns>.help so an agent sees cost before a paid call
+
+	// ProductDemo is the example-driven, skill-file shaped usage guide. It is
+	// copied verbatim into metadata.json (BuildMetadata) and rendered at install
+	// time and on the website "Full usage demo".
+	ProductDemo *demo.Demo `yaml:"product_demo,omitempty"`
+
+	// NextSteps is the per-call dynamic context: the recommended next commands
+	// pilotctl prints after every `appstore call`, keyed by (method, outcome).
+	// Copied verbatim into metadata.json (BuildMetadata).
+	NextSteps *nextsteps.Graph `yaml:"next_steps,omitempty"`
 
 	// Assets is the native-binary delivery set for a cli backend: the
 	// platform-specific binaries the publisher uploaded to the Pilot R2 artifact
