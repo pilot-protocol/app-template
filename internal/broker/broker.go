@@ -13,8 +13,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pilot-protocol/app-template/internal/pilotpath"
 )
 
 // Broker is the managed-key service: verify caller → trust/quota → inject the
@@ -36,6 +39,12 @@ type Broker struct {
 	AccessKeys *AccessKeys
 
 	reg atomic.Pointer[Registry] // hot-swappable so the registry can reload without dropping traffic
+
+	// balanceMu/balanceBuckets back a light per-(app,caller) token-bucket rate
+	// limit on the free balance-read routes (serveCreditBalance, serveBalance).
+	// See allowBalanceRead.
+	balanceMu      sync.Mutex
+	balanceBuckets map[string]*balanceBucket
 }
 
 // New returns a Broker with sane defaults.
@@ -46,8 +55,9 @@ func New(reg *Registry, store Store) *Broker {
 		// The effective per-call deadline is the smaller of this and the app's
 		// timeout_ms (set per app in the registry); this only stops it being the
 		// surprise bottleneck.
-		Client:  &http.Client{Timeout: 300 * time.Second},
-		MaxBody: 8 << 20,
+		Client:         &http.Client{Timeout: 300 * time.Second},
+		MaxBody:        8 << 20,
+		balanceBuckets: map[string]*balanceBucket{},
 	}
 	b.reg.Store(reg)
 	return b
@@ -74,25 +84,106 @@ func microUSD(micros int) string {
 	return fmt.Sprintf("$%d.%02d", micros/1_000_000, (micros%1_000_000)/10_000)
 }
 
+// pilotBalancePath is the canonical per-user credit-balance route: every credit
+// app answers it from the broker's own ledger (never forwarded), and the
+// generated `<ns>.balance` adapter method dials it. Sourced from
+// pilotpath.Balance so this and scaffold.BalanceMetaPath can never drift apart.
+// Always available on a credit app, in addition to any creditBalancePath that
+// shadows a partner's own account-balance endpoint.
+const pilotBalancePath = pilotpath.Balance
+
+// balanceBucket is a light per-(app,caller) token bucket. See allowBalanceRead.
+type balanceBucket struct {
+	tokens float64
+	last   time.Time
+}
+
+// balanceBurst/balanceRefillPerSec size the token bucket allowBalanceRead
+// enforces on the free balance-read routes. They are deliberately generous —
+// this is NOT the credit-mint cooldown (a read must never be gated by that,
+// see allowBalanceRead's caller) and NOT the app's billable-call Quota (a free
+// meta call must never spend it); it exists only so an intentionally
+// un-quota'd, pre-Admit route is not literally unbounded. A caller can always
+// burst a handful of legitimate "check my balance" calls back-to-back; only a
+// tight hammering loop past the burst gets shed.
+const (
+	balanceBurst        = 20
+	balanceRefillPerSec = 5.0
+)
+
+// allowBalanceRead reports whether (app, caller) may have another balance read
+// right now, consuming a token if so. Independent of ProvisionStore entirely —
+// no cooldown, no Quota, no credit ledger touch — so it can never interact with
+// either of those.
+func (b *Broker) allowBalanceRead(app, caller string, now time.Time) bool {
+	k := app + "\x00" + caller
+	b.balanceMu.Lock()
+	defer b.balanceMu.Unlock()
+	if b.balanceBuckets == nil {
+		b.balanceBuckets = map[string]*balanceBucket{}
+	}
+	bk := b.balanceBuckets[k]
+	if bk == nil {
+		bk = &balanceBucket{tokens: balanceBurst, last: now}
+		b.balanceBuckets[k] = bk
+	} else if elapsed := now.Sub(bk.last).Seconds(); elapsed > 0 {
+		bk.tokens += elapsed * balanceRefillPerSec
+		if bk.tokens > balanceBurst {
+			bk.tokens = balanceBurst
+		}
+		bk.last = now
+	}
+	if bk.tokens < 1 {
+		return false
+	}
+	bk.tokens--
+	return true
+}
+
 // serveCreditBalance answers a credit app's balance path from the per-caller
 // ledger. It NEVER contacts the partner, so the shared master account's pooled
-// balance is not exposed — only this caller's own remaining budget. The caller is
-// seeded on first sight (so the per-IP cap applies), mirroring a first call.
+// balance is not exposed — only this caller's own remaining budget.
+//
+// This is a READ, not a mint: unlike the metered-call path (which touches
+// ProvisionStore.Provision on every call, deliberately, to keep the caller's
+// last-mint timestamp fresh), a repeat balance check must never be rejected by
+// the app's mint_cooldown_ms. So an ALREADY-seeded caller is answered straight
+// from ProvisionStore.Get (no cooldown check, no LastMint touch, no re-seed);
+// only a caller's genuine first-ever touch goes through the normal seed path
+// (still enforcing the per-IP grant cap) — and a first touch can never itself
+// hit the cooldown, since there is no prior mint to be too soon after. The
+// route has no Store.Admit/Quota gate (a free meta call must never spend the
+// app's billable-call quota), so allowBalanceRead applies a separate, light,
+// generous rate limit instead.
 func (b *Broker) serveCreditBalance(w http.ResponseWriter, r *http.Request, app *AppEntry, caller string) {
 	ps, ok := b.provStore()
 	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store does not support credit metering"})
 		return
 	}
-	ip := clientIP(r.Header.Get, r.RemoteAddr, b.IPTrust)
-	rec, err := b.seedCaller(ps, app.ID, caller, ip, app)
-	if err != nil {
-		if err == ErrCooldown {
-			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "re-provision cooldown — retry shortly"})
-		} else {
-			b.internalError(w, http.StatusInternalServerError, app.ID, "balance", err)
-		}
+	now := b.now()
+	if !b.allowBalanceRead(app.ID, caller, now) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "balance: rate limited — retry shortly"})
 		return
+	}
+	rec, exists, err := ps.Get(app.ID, caller)
+	if err != nil {
+		b.internalError(w, http.StatusInternalServerError, app.ID, "balance", err)
+		return
+	}
+	if !exists {
+		ip := clientIP(r.Header.Get, r.RemoteAddr, b.IPTrust)
+		rec, err = b.seedCaller(ps, app.ID, caller, ip, app)
+		if err != nil {
+			if err == ErrCooldown {
+				// Unreachable in practice: nothing to cool down from on a
+				// caller's first-ever touch. Handled defensively only.
+				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "re-provision cooldown — retry shortly"})
+			} else {
+				b.internalError(w, http.StatusInternalServerError, app.ID, "balance", err)
+			}
+			return
+		}
 	}
 	w.Header().Set("X-Pilot-Credits-Remaining", strconv.Itoa(rec.Credits))
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -185,7 +276,11 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//     OWN ledger — never forwarding to the partner — so the shared account's
 	//     pooled balance is never disclosed. Returns only THIS caller's remaining
 	//     micro-$ budget (seeding on first sight, so the per-IP cap applies here too).
-	if app.creditEnabled() && app.creditBalancePath != "" && mpath == app.creditBalancePath {
+	//     Two paths reach it: the canonical /_pilot/balance (what the generated
+	//     <ns>.balance method dials — always available on a credit app) and an
+	//     optional creditBalancePath that SHADOWS a partner's account-balance
+	//     endpoint so it can't leak the pooled account.
+	if app.creditEnabled() && (mpath == pilotBalancePath || (app.creditBalancePath != "" && mpath == app.creditBalancePath)) {
 		b.serveCreditBalance(w, r, app, string(caller))
 		return
 	}

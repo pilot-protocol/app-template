@@ -60,6 +60,17 @@ Two orthogonal choices. Get these right first; everything else follows.
 > go-live: register the app + master key with the broker and SIGHUP it (Step 7.5). Until
 > that is done the managed app installs but every call 5xx's at the broker.
 
+> **Budget + balance (managed apps).** To meter a **dollar budget per user** (not just a
+> rate quota), add a `credit` block to the broker registration — each user is seeded a fixed
+> amount and spend ops return `402` once it's gone; reads stay free (see
+> [`MANAGED-KEY.md`](MANAGED-KEY.md#per-user-spending-budget-credit--402)). You get balance
+> checking **for free**: every `managed` app auto-exposes a **`<ns>.balance`** method (a
+> `GET` to the broker's canonical `/_pilot/balance`) that returns
+> `{balance:"$X.XX", credits_remaining, credits_seed, unit:"micro_usd", scope:"per-pilot-user"}`
+> without a partner call or a charge — no submission field to add. In the app's
+> `app_description`, tell agents to call `<ns>.balance` (or read the
+> `X-Pilot-Credits-Remaining` header) before a spend op.
+
 ## Step 1 — Author `pilot.app.yaml`
 
 ```bash

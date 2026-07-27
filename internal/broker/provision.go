@@ -672,11 +672,20 @@ func (b *Broker) callerFromKey(app *AppEntry, token string) (CallerID, bool) {
 	return CallerID(callerStr), true
 }
 
-// serveBalance handles GET /<app>/_balance → the caller's credit balance.
+// serveBalance handles GET /<app>/_balance → the caller's credit balance. Like
+// serveCreditBalance, it never touches ProvisionStore.Provision (no cooldown,
+// no re-seed — a pure Credit read), and like serveCreditBalance it sits before
+// any Store.Admit/Quota gate, so it shares the same light, generous
+// allowBalanceRead rate limit rather than the mint cooldown or the app's
+// billable-call quota.
 func (b *Broker) serveBalance(w http.ResponseWriter, app *AppEntry, caller CallerID) {
 	ps, ok := b.provStore()
 	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store does not support provisioning"})
+		return
+	}
+	if !b.allowBalanceRead(app.ID, string(caller), b.now()) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "balance: rate limited — retry shortly"})
 		return
 	}
 	c, err := ps.Credit(app.ID, string(caller))
