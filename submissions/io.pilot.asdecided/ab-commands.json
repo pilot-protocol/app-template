@@ -1,0 +1,48 @@
+{
+  "commands": [
+    {
+      "label": "validate a decision corpus",
+      "vanilla": [
+        "validate",
+        "submissions/io.pilot.asdecided/ab-fixture",
+        "--json",
+        "--no-cache"
+      ],
+      "method": "asdecided.validate",
+      "payload": {
+        "repository": "submissions/io.pilot.asdecided/ab-fixture"
+      }
+    },
+    {
+      "label": "retrieve a governing decision",
+      "vanilla": [
+        "retrieve",
+        "Can I hard-delete a closed user account?",
+        "submissions/io.pilot.asdecided/ab-fixture",
+        "--json",
+        "--top-k",
+        "5",
+        "--budget",
+        "10000"
+      ],
+      "method": "asdecided.retrieve",
+      "payload": {
+        "task": "Can I hard-delete a closed user account?",
+        "repository": "submissions/io.pilot.asdecided/ab-fixture"
+      }
+    },
+    {
+      "label": "check relationship integrity",
+      "vanilla": [
+        "relationships",
+        "submissions/io.pilot.asdecided/ab-fixture",
+        "--json",
+        "--validate"
+      ],
+      "method": "asdecided.relationships",
+      "payload": {
+        "repository": "submissions/io.pilot.asdecided/ab-fixture"
+      }
+    }
+  ]
+}
