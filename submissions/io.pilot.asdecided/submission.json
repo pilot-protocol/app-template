@@ -1,98 +1,98 @@
 {
-  "bundle": "io.pilot.asdecided-0.26.1-linux-amd64.tar.gz",
-  "bundle_sha256": "18a1a29a91d36d33e1087d4c503ced0e2107d656f4d5c56c146fc4741540006f",
+  "bundle": "io.pilot.asdecided-0.26.2-linux-amd64.tar.gz",
+  "bundle_sha256": "6a22601435a0e15cadf869b32a1d2ffbb0e5f9e06ddb3df5eecadc1c39a3896c",
   "bundles": {
     "darwin/amd64": {
-      "file": "io.pilot.asdecided-0.26.1-darwin-amd64.tar.gz",
-      "sha256": "fd68be4bd4c8c9fba4348258b0767aab74b2f1e1ee8166c5ddf9b64fcccf9b99"
+      "file": "io.pilot.asdecided-0.26.2-darwin-amd64.tar.gz",
+      "sha256": "80a3b817dc0571c70335f14b340f4cb3175225d3cfd2cce668e97c84389867cc"
     },
     "darwin/arm64": {
-      "file": "io.pilot.asdecided-0.26.1-darwin-arm64.tar.gz",
-      "sha256": "73f4b0159fd9c02887af38fffb119bd97b9054c6580ed953542e280915111ef5"
+      "file": "io.pilot.asdecided-0.26.2-darwin-arm64.tar.gz",
+      "sha256": "76210e19678e39d05e4713a2f9c47edb9f6d4a17a14080ab3b38863cb4dce660"
     },
     "linux/amd64": {
-      "file": "io.pilot.asdecided-0.26.1-linux-amd64.tar.gz",
-      "sha256": "18a1a29a91d36d33e1087d4c503ced0e2107d656f4d5c56c146fc4741540006f"
+      "file": "io.pilot.asdecided-0.26.2-linux-amd64.tar.gz",
+      "sha256": "6a22601435a0e15cadf869b32a1d2ffbb0e5f9e06ddb3df5eecadc1c39a3896c"
     },
     "linux/arm64": {
-      "file": "io.pilot.asdecided-0.26.1-linux-arm64.tar.gz",
-      "sha256": "7f30497e1012a71f2e55a366f549145fd19ebf8226abea11b2e48e85d2700fa0"
+      "file": "io.pilot.asdecided-0.26.2-linux-arm64.tar.gz",
+      "sha256": "06affb0ef3e56897d3a2c17dc12c1dbe1942341d10714830703b7627896b1355"
     }
   },
   "description": "Read and validate engineering decisions from a repository on this machine.",
   "id": "io.pilot.asdecided",
   "namespace": "asdecided",
   "next_steps": {
-    "schema": 1,
     "app": "io.pilot.asdecided",
     "edges": [
       {
         "from": "asdecided.retrieve",
         "on": "ok",
-        "why": "the governing context is available; check that the underlying decision corpus is structurally valid",
         "then": [
           {
             "cmd": "pilotctl appstore call io.pilot.asdecided asdecided.validate '{\"repository\":\"/Users/me/project\"}'",
-            "why": "validate the same repository, replacing /Users/me/project with its absolute path under your home directory",
-            "kind": "flow"
+            "kind": "flow",
+            "why": "validate the same repository, replacing /Users/me/project with its absolute path under your home directory"
           }
-        ]
+        ],
+        "why": "the governing context is available; check that the underlying decision corpus is structurally valid"
       },
       {
         "from": "asdecided.validate",
         "on": "ok",
-        "why": "the corpus is valid; retrieve the decisions that govern the work before changing code",
         "then": [
           {
             "cmd": "pilotctl appstore call io.pilot.asdecided asdecided.retrieve '{\"task\":\"Can I hard-delete a closed user account?\",\"repository\":\"/Users/me/project\"}'",
-            "why": "replace /Users/me/project with the validated repository and replace the task with the work you are about to perform",
-            "kind": "flow"
+            "kind": "flow",
+            "why": "replace /Users/me/project with the validated repository and replace the task with the work you are about to perform"
           }
-        ]
+        ],
+        "why": "the corpus is valid; retrieve the decisions that govern the work before changing code"
       },
       {
         "from": "asdecided.relationships",
         "on": "ok",
-        "why": "the relationship graph has been checked; retrieve the decision context for the concrete task",
         "then": [
           {
             "cmd": "pilotctl appstore call io.pilot.asdecided asdecided.retrieve '{\"task\":\"Can I hard-delete a closed user account?\",\"repository\":\"/Users/me/project\"}'",
-            "why": "replace /Users/me/project with the checked repository and replace the task with the work you are about to perform",
-            "kind": "flow"
+            "kind": "flow",
+            "why": "replace /Users/me/project with the checked repository and replace the task with the work you are about to perform"
           }
-        ]
+        ],
+        "why": "the relationship graph has been checked; retrieve the decision context for the concrete task"
       }
-    ]
+    ],
+    "schema": 1
   },
   "product_demo": {
-    "skill": "io.pilot.asdecided",
-    "title": "Ground work in the decisions already on this machine",
-    "when_to_use": "When an agent needs to retrieve or check the engineering decisions governing work in a local repository.",
-    "metered": false,
-    "quickstart": {
-      "goal": "Retrieve the decisions governing a task",
-      "command": "pilotctl appstore call io.pilot.asdecided asdecided.retrieve '{\"task\":\"Can I hard-delete a closed user account?\",\"repository\":\"/Users/me/project\"}'",
-      "expect": "A deterministic JSON grounding bundle containing the governing decisions and source paths."
-    },
     "examples": [
       {
-        "title": "Validate the decision corpus",
         "command": "pilotctl appstore call io.pilot.asdecided asdecided.validate '{\"repository\":\"/Users/me/project\"}'",
-        "expect": "JSON validation results; valid and invalid artifact counts are explicit."
+        "expect": "JSON validation results; valid and invalid artifact counts are explicit.",
+        "title": "Validate the decision corpus"
       },
       {
-        "title": "Check relationship integrity",
         "command": "pilotctl appstore call io.pilot.asdecided asdecided.relationships '{\"repository\":\"/Users/me/project\"}'",
-        "expect": "JSON relationship validation results with any broken references identified."
+        "expect": "JSON relationship validation results with any broken references identified.",
+        "title": "Check relationship integrity"
       }
     ],
     "gotchas": [
       "Replace /Users/me/project with an absolute repository path under the Pilot user's home directory; the path is never uploaded.",
       "The Pilot app is read-only: mutation, migration, scaffolding, sharing, and arbitrary CLI execution are not exposed."
     ],
+    "metered": false,
     "next": [
       "io.pilot.asdecided asdecided.help '{}' — list every method, parameter, and latency class"
-    ]
+    ],
+    "quickstart": {
+      "command": "pilotctl appstore call io.pilot.asdecided asdecided.retrieve '{\"task\":\"Can I hard-delete a closed user account?\",\"repository\":\"/Users/me/project\"}'",
+      "expect": "A deterministic JSON grounding bundle containing the governing decisions and source paths.",
+      "goal": "Retrieve the decisions governing a task"
+    },
+    "skill": "io.pilot.asdecided",
+    "title": "Ground work in the decisions already on this machine",
+    "when_to_use": "When an agent needs to retrieve or check the engineering decisions governing work in a local repository."
   },
-  "version": "0.26.1"
+  "version": "0.26.2"
 }

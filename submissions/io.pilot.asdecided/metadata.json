@@ -25,7 +25,7 @@
     "local-first"
   ],
   "size": {
-    "bundle_bytes": 5349858,
+    "bundle_bytes": 5349853,
     "installed_bytes": 9615433
   },
   "compat": {
@@ -54,10 +54,10 @@
   ],
   "changelog": [
     {
-      "version": "0.26.1",
-      "date": "2026-07-31",
+      "version": "0.26.2",
+      "date": "2026-08-01",
       "notes": [
-        "Initial Pilot App Store candidate using the native As Decided v0.26.1 engine."
+        "Initial Pilot App Store candidate using the native As Decided v0.26.2 engine."
       ]
     }
   ],
