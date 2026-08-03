@@ -109,12 +109,40 @@
       {
         "from": "*",
         "on": "err",
+        "code": 429,
+        "why": "rate/concurrency limited \u2014 the shared account runs at maxConcurrency 2, and browser sessions hold a slot too. Usually a queue you can drain",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.queue_status '{}'",
+            "why": "shows activeJobsInQueue vs maxConcurrency so you know whether to wait or free a slot \u2014 free, and does not count against the limit",
+            "kind": "recovery"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.interact_list '{\"status\":\"active\"}'",
+            "why": "open browser sessions each hold a concurrency slot \u2014 pass any id to firecrawl.interact_delete to free one immediately",
+            "kind": "recovery"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.scrape '{\"url\":\"https://example.com\",\"maxAge\":172800000}'",
+            "why": "a cached scrape returns instantly and consumes no concurrency, so it succeeds even while you are at the limit",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "*",
+        "on": "err",
         "code": 402,
-        "why": "per-user budget exhausted",
+        "why": "your per-user budget is spent \u2014 reads and status polls still work, so nothing you already started is lost",
         "then": [
           {
             "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.balance '{}'",
-            "why": "see what is left and what the seed was",
+            "why": "shows credits_remaining against credits_seed so you know how far over you went",
+            "kind": "recovery"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.activity '{\"limit\":10}'",
+            "why": "collect results from jobs you already paid for before spending more",
             "kind": "recovery"
           }
         ]
@@ -123,11 +151,37 @@
         "from": "*",
         "on": "err",
         "code": 404,
-        "why": "unknown job id, or a job that belongs to another Pilot user",
+        "why": "unknown id, or it belongs to another Pilot user \u2014 jobs are isolated, so someone else's id always looks missing",
         "then": [
           {
             "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.activity '{\"limit\":10}'",
-            "why": "list your own recent jobs and their ids",
+            "why": "lists only YOUR recent jobs with their real ids",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "*",
+        "on": "err",
+        "match": "missing required param",
+        "why": "a required parameter was omitted",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.help '{}'",
+            "why": "every method's exact params, with required/default marked per field",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "*",
+        "on": "err",
+        "match": "(?i)timeout|deadline exceeded|context canceled",
+        "why": "the call outran its timeout \u2014 heavy pages and LLM steps are slow, and the request may still be running upstream",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.activity '{\"limit\":5}'",
+            "why": "check whether the job actually landed before paying to run it again",
             "kind": "recovery"
           }
         ]
@@ -135,16 +189,37 @@
       {
         "from": "firecrawl.crawl",
         "on": "ok",
-        "why": "crawl is async \u2014 it returned a job id, not pages",
+        "why": "crawl is async \u2014 you got a job id, not pages",
         "then": [
           {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.crawl_status '{\"id\":\"<id>\"}'",
-            "why": "poll until status is completed, then read data[]",
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.crawl_status '{\"id\":\"PASTE-id-FROM-THE-RESPONSE-ABOVE\"}'",
+            "why": "poll this until status is completed, then read data[] \u2014 the id is the `id` field of the response you just got",
             "kind": "flow"
-          },
+          }
+        ]
+      },
+      {
+        "from": "firecrawl.crawl_status",
+        "on": "ok",
+        "match": "\"status\"\\s*:\\s*\"(scraping|active|waiting)\"",
+        "why": "still running \u2014 this is normal, not a failure. A crawl takes minutes; completed[] grows as it goes",
+        "then": [
           {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.crawl_errors '{\"id\":\"<id>\"}'",
-            "why": "see which pages failed or were blocked by robots.txt",
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.crawl_status '{\"id\":\"PASTE-THE-SAME-id-AGAIN\"}'",
+            "why": "poll again in ~10s \u2014 polling is free and does not consume credits or concurrency",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "firecrawl.crawl_status",
+        "on": "ok",
+        "match": "\"status\"\\s*:\\s*\"completed\"",
+        "why": "the crawl finished \u2014 collect anything it could not reach",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.crawl_errors '{\"id\":\"PASTE-THE-SAME-id-AGAIN\"}'",
+            "why": "lists pages that failed or were blocked by robots.txt, so you know if data[] is complete",
             "kind": "flow"
           }
         ]
@@ -152,11 +227,11 @@
       {
         "from": "firecrawl.batch_scrape",
         "on": "ok",
-        "why": "batch scrape is async",
+        "why": "batch scrape is async \u2014 you got a job id, not pages",
         "then": [
           {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.batch_scrape_status '{\"id\":\"<id>\"}'",
-            "why": "poll for the scraped pages",
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.batch_scrape_status '{\"id\":\"PASTE-id-FROM-THE-RESPONSE-ABOVE\"}'",
+            "why": "poll for the scraped pages; the id is the `id` field of the response you just got",
             "kind": "flow"
           }
         ]
@@ -164,11 +239,11 @@
       {
         "from": "firecrawl.extract",
         "on": "ok",
-        "why": "extraction is async",
+        "why": "extraction is async and LLM-backed \u2014 it runs well after this call returns",
         "then": [
           {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.extract_status '{\"id\":\"<id>\"}'",
-            "why": "poll for the structured result",
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.extract_status '{\"id\":\"PASTE-id-FROM-THE-RESPONSE-ABOVE\"}'",
+            "why": "poll for the structured result; the id is the `id` field of the response you just got",
             "kind": "flow"
           }
         ]
@@ -176,16 +251,16 @@
       {
         "from": "firecrawl.agent",
         "on": "ok",
-        "why": "the agent task runs for minutes",
+        "why": "the agent task runs for minutes and spends as it goes",
         "then": [
           {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.agent_status '{\"jobId\":\"<id>\"}'",
-            "why": "poll for the result",
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.agent_status '{\"jobId\":\"PASTE-id-FROM-THE-RESPONSE-ABOVE\"}'",
+            "why": "poll for the result; the id is the `id` field of the response you just got",
             "kind": "flow"
           },
           {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.agent_cancel '{\"jobId\":\"<id>\"}'",
-            "why": "stop it early to stop it spending",
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.agent_cancel '{\"jobId\":\"PASTE-id-FROM-THE-RESPONSE-ABOVE\"}'",
+            "why": "stop it early \u2014 an agent task can spend your whole budget if left running",
             "kind": "recovery"
           }
         ]
@@ -193,16 +268,16 @@
       {
         "from": "firecrawl.map",
         "on": "ok",
-        "why": "you now know the shape of the site",
+        "why": "you now know the site's shape \u2014 pick the cheap path before paying for a crawl",
         "then": [
           {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.crawl '{\"url\":\"<url>\",\"limit\":10}'",
-            "why": "crawl it with an explicit page cap",
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.batch_scrape '{\"urls\":[\"https://docs.firecrawl.dev/api-reference/v2-introduction\"]}'",
+            "why": "if you only want a few of those URLs, batch_scrape them instead of crawling the whole site",
             "kind": "flow"
           },
           {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.batch_scrape '{\"urls\":[\"<url>\"]}'",
-            "why": "or scrape just the URLs you picked",
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.crawl '{\"url\":\"https://docs.firecrawl.dev\",\"limit\":10}'",
+            "why": "if you want the whole site, crawl it \u2014 but pass limit, it defaults to 10000 pages",
             "kind": "flow"
           }
         ]
@@ -210,11 +285,36 @@
       {
         "from": "firecrawl.search",
         "on": "ok",
-        "why": "you have result URLs but not their full content",
+        "why": "search gave you URLs and snippets, not full page content",
         "then": [
           {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.scrape '{\"url\":\"<url>\"}'",
-            "why": "read the most promising result in full",
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.scrape '{\"url\":\"https://example.com\"}'",
+            "why": "read the most promising result in full \u2014 substitute the url field from a result above",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "firecrawl.search",
+        "on": "ok",
+        "match": "\"web\"\\s*:\\s*\\[\\s*\\]",
+        "why": "the query returned nothing \u2014 scraping results is pointless until the query returns some",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.search '{\"query\":\"open source web crawlers\",\"limit\":5}'",
+            "why": "broaden it: drop includeDomains/tbs filters and use plainer terms",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "firecrawl.scrape",
+        "on": "ok",
+        "why": "you have the page as it loaded \u2014 if content is missing it is usually behind an interaction",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.scrape_interact '{\"jobId\":\"PASTE-metadata.scrapeId-FROM-THE-RESPONSE-ABOVE\",\"code\":\"await page.click('#load-more')\",\"language\":\"node\"}'",
+            "why": "drive the live browser for this scrape (id = data.metadata.scrapeId above). Holds 1 of your 2 concurrency slots until you stop it",
             "kind": "flow"
           }
         ]
@@ -222,29 +322,37 @@
       {
         "from": "firecrawl.scrape",
         "on": "ok",
-        "why": "the page may need clicks, forms, or login to reveal more",
+        "match": "\"statusCode\"\\s*:\\s*(401|403|429|5\\d\\d)",
+        "why": "Firecrawl reached the site but the SITE refused \u2014 the scrape succeeded, the page did not",
         "then": [
           {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.scrape_interact '{\"jobId\":\"<scrapeId>\",\"code\":\"await page.click(button)\"}'",
-            "why": "drive the live browser session bound to this scrape",
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.scrape '{\"url\":\"https://example.com\",\"proxy\":\"enhanced\",\"waitFor\":3000}'",
+            "why": "retry the same url with the enhanced proxy and a load delay \u2014 this is what defeats most anti-bot blocks",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "firecrawl.balance",
+        "on": "ok",
+        "why": "budget in hand \u2014 spend it on the cheap scoping calls before the expensive ones",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.map '{\"url\":\"https://docs.firecrawl.dev\",\"limit\":50}'",
+            "why": "map costs 1 credit and tells you whether a crawl is worth 20",
             "kind": "flow"
           }
         ]
       },
       {
-        "from": "*",
-        "on": "err",
-        "why": "a Firecrawl call failed and the reason is not obvious",
+        "from": "firecrawl.help",
+        "on": "ok",
+        "why": "you have the full method surface \u2014 start with the cheapest useful call",
         "then": [
           {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.ask '{\"question\":\"why did my job fail?\"}'",
-            "why": "the AI support agent diagnoses it from the job logs",
-            "kind": "recovery"
-          },
-          {
-            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.help '{}'",
-            "why": "re-read the exact parameter contract",
-            "kind": "recovery"
+            "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.scrape '{\"url\":\"https://example.com\"}'",
+            "why": "one credit, returns clean markdown, and proves the whole path works",
+            "kind": "flow"
           }
         ]
       }
