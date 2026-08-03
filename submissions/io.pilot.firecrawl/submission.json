@@ -115,11 +115,11 @@
         "from": "*",
         "on": "err",
         "code": 429,
-        "why": "rate/concurrency limited — the shared account runs at maxConcurrency 2, and browser sessions hold a slot too. Usually a queue you can drain",
+        "why": "you already have 2 calls in flight — that is your concurrency limit. Browser sessions hold a slot too, so this is usually a queue you can drain",
         "then": [
           {
             "cmd": "pilotctl appstore call io.pilot.firecrawl firecrawl.queue_status '{}'",
-            "why": "shows activeJobsInQueue vs maxConcurrency so you know whether to wait or free a slot — free, and does not count against the limit",
+            "why": "shows how many of your calls are active so you know whether to wait or free a slot — free, and does not count against the limit",
             "kind": "recovery"
           },
           {
