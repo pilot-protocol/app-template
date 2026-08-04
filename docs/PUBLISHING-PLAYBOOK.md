@@ -6,7 +6,8 @@ backend and auth mode. It ties together the focused docs
 [`NATIVE-APPS.md`](NATIVE-APPS.md), [`R2-ARTIFACT-REGISTRY.md`](R2-ARTIFACT-REGISTRY.md),
 [`MANAGED-KEY.md`](MANAGED-KEY.md), [`CI-AB-REPORT.md`](CI-AB-REPORT.md),
 [`PRODUCT-DEMOS.md`](PRODUCT-DEMOS.md),
-[`UPDATING.md`](UPDATING.md), [`APP-PUBLISHING-SPEC.md`](APP-PUBLISHING-SPEC.md)) into one
+[`UPDATING.md`](UPDATING.md), [`UPDATING-BUNDLES.md`](UPDATING-BUNDLES.md),
+[`APP-PUBLISHING-SPEC.md`](APP-PUBLISHING-SPEC.md)) into one
 checklist. If you only read one doc, read this one and follow the links when a step
 needs detail.
 
@@ -270,7 +271,11 @@ app is keyless and metered per caller; nothing about the key ever reaches the us
 Bump with `pilot-app update --bump patch|minor|major` (single source of truth:
 `app_version`), re-upload native assets if their URLs derive from the version, re-sign with
 the **same publisher key**, and open the same two PRs. The update gate rejects a downgrade or
-a different signing key. Full detail in [`UPDATING.md`](UPDATING.md).
+a different signing key. The rules are in [`UPDATING.md`](UPDATING.md); the mechanics of
+building, uploading and testing the new artifacts — including the ordering rule that the
+bundles must be on the registry **before** the submission PR merges, and the broker
+allow-list step when an update changes HTTP routes — are in
+[`UPDATING-BUNDLES.md`](UPDATING-BUNDLES.md).
 
 ## Pre-flight checklist
 

@@ -13,6 +13,13 @@ submission → catalogue → website-card steps, with edge cases and a pre-fligh
 Do not skip its runtime tests. Start there and follow the focused docs it links when a step
 needs detail.
 
+**Updating an app that is already in the catalogue** is a different job from publishing a
+new one. Read [`docs/UPDATING.md`](docs/UPDATING.md) for the rules (version, ownership) and
+[`docs/UPDATING-BUNDLES.md`](docs/UPDATING-BUNDLES.md) for the mechanics — building all four
+platforms with the app's existing key, uploading them to the registry **before** the
+submission PR merges, re-verifying the served bytes, the runtime e2e against the published
+artifact, and the broker allow-list step when an update changes HTTP routes.
+
 ## Non-negotiables (the playbook expands each)
 
 - **Never commit or bake a secret.** Publisher keys, API keys, catalogue-signing keys, and

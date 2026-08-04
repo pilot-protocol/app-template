@@ -5,6 +5,11 @@ This is the other half: shipping **v1.0.1** of an app that already lives in the
 catalogue. The rules are designed so the only thing you ever change by hand is the
 **version**, and so that **only you** — the original publisher — can update your app.
 
+This document is the *rules*. For the **mechanics of producing and publishing the
+new artifacts** — building all four platforms, uploading them before the merge,
+re-verifying the served bytes, the runtime e2e, and the broker step when routes
+change — see [`UPDATING-BUNDLES.md`](UPDATING-BUNDLES.md).
+
 ## The one rule: bump `app_version`
 
 `app_version` in `pilot.app.yaml` is the **single source of truth**. Every other
@@ -36,7 +41,10 @@ pilot-app update -c pilot.app.yaml --bump patch -o ./my-app
 #    new <app_version>/ prefix — write-once, so a new version is a new prefix.
 
 cd ./my-app
-make package        # rebuild EVERY platform, re-signed with your EXISTING key
+# 3. rebuild ALL FOUR platforms, re-signed with your EXISTING key.
+#    NOT `make package` — that builds only the host platform (and omits
+#    install.json). The release builder is internal/publish.BuildBundle; see
+#    docs/UPDATING-BUNDLES.md. Upload the results BEFORE the PR merges.
 pilot-app submit -C . --prepare /path/to/your/app-template-fork
 
 # 3. commit + PR exactly like the first publish:
