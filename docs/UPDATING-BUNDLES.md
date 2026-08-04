@@ -215,13 +215,6 @@ Things that are true, non-obvious, and have cost real time.
   longer exist. If your update changes what the app *is*, say so on the PR so the
   page is regenerated rather than refreshed.
 
-- **`managed` apps get a `<ns>.balance` method injected automatically.** It is
-  wired to the broker's credit-ledger route, which only answers for apps that
-  carry a credit block. A managed app **without** one ships a `balance` method
-  that always returns 403 — exposed in the manifest and listed in `<ns>.help`.
-  Nothing in the build or the review gate catches it. If your app has no per-user
-  budget, know that the method is there and that it does not work.
-
 - **Retired upstream routes fail quietly.** When a partner API retires an endpoint,
   the app in the catalogue keeps installing, keeps spawning and keeps passing every
   signature and sha check. Only the calls fail. Nothing in the publishing pipeline
