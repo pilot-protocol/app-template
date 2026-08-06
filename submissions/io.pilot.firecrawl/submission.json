@@ -5,7 +5,7 @@
   "description": "Web scraping, crawling, search, and agentic extraction — the full Firecrawl v2 API, on your own Firecrawl account.",
   "email": "alex@vulturelabs.io",
   "bundle": "io.pilot.firecrawl-0.2.0.tar.gz",
-  "bundle_sha256": "f02074dee2018b646280d3d5d4a53d9c62729e4ad2d25ad1c3f74d508fe66467",
+  "bundle_sha256": "90e408e00b58af607eb68a05808890d95f899eb25dc363e18728ee803b303538",
   "product_demo": {
     "skill": "io.pilot.firecrawl",
     "title": "Full usage demo",
@@ -54,13 +54,13 @@
     ],
     "cost": {
       "unit": "Firecrawl credits",
-      "free_budget": "10,000 credits on your own account, valid 3 months",
+      "free_budget": "10,000 credits on your own Firecrawl account, valid 3 months",
       "hard_cap_usd": 0,
       "operations": [
         {
           "op": "firecrawl.signup",
           "price": "free",
-          "note": "once per identity; grants the 10,000 credits"
+          "note": "once per identity; mints your key and grants the 10,000 credits"
         },
         {
           "op": "scrape / map / docs_search",
@@ -102,7 +102,7 @@
       "Your account is your own: your own credits, your own rate and concurrency limits, your own jobs.",
       "crawl bills per page and defaults to limit 10000; agent defaults to maxCredits 2500. Set both.",
       "Async methods return a job id — poll the matching *_status.",
-      "Partner credits expire 3 months after signup and are granted once per identity."
+      "Your starting credits expire 3 months after signup and are granted once per identity."
     ],
     "next": [
       "io.pilot.firecrawl firecrawl.help '{}'"
