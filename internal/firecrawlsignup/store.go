@@ -140,13 +140,3 @@ func (s *store) get(caller string) (record, bool, error) {
 	r.CreatedAt = time.Unix(creAt, 0).UTC()
 	return r, true, nil
 }
-
-// replace swaps a caller's stored key (used after a rotate).
-func (s *store) replace(caller, apiKey string) error {
-	sealed, err := s.seal(apiKey)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`UPDATE accounts SET api_key = ? WHERE caller = ?`, sealed, caller)
-	return err
-}
