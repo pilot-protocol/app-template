@@ -1,0 +1,45 @@
+{
+  "id": "io.pilot.rentahuman",
+  "upstream": "https://rentahuman.ai",
+  "key_env": "RENTAHUMAN_MASTER_KEY",
+  "auth_header": "X-API-Key",
+  "quota": 0,
+  "allow": [
+    "POST /api/partner/v1/requests",
+    "GET /api/partner/v1/requests",
+    "GET /api/partner/v1/requests/{requestId}",
+    "POST /api/partner/v1/requests/{requestId}/messages",
+    "GET /api/partner/v1/bounties"
+  ],
+  "credit": {
+    "seed_credits": 5000000,
+    "default_cost": 0,
+    "max_identities_per_ip": 20
+  },
+  "tenancy": {
+    "param_types": {
+      "requestId": "request"
+    },
+    "create": [
+      {
+        "method": "POST",
+        "path": "/api/partner/v1/requests",
+        "type": "request",
+        "id_field": "requestId"
+      }
+    ],
+    "list": [
+      {
+        "method": "GET",
+        "path": "/api/partner/v1/requests",
+        "array": "requests",
+        "owner_by": [
+          {
+            "field": "requestId",
+            "type": "request"
+          }
+        ]
+      }
+    ]
+  }
+}

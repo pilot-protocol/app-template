@@ -1,0 +1,82 @@
+{
+  "id": "io.pilot.kinetic",
+  "upstream": "https://api.kineticpricing.com",
+  "key_env": "KINETIC_MASTER_KEY",
+  "auth_header": "Authorization",
+  "auth_scheme": "Bearer",
+  "quota": 0,
+  "allow": [
+    "GET /v1/methods",
+    "POST /v1/methods/recommendation",
+    "GET /v1/studies",
+    "POST /v1/studies",
+    "POST /v1/studies/prefill",
+    "GET /v1/studies/{study_id}",
+    "PATCH /v1/studies/{study_id}",
+    "POST /v1/studies/{study_id}/duplicate",
+    "GET /v1/studies/{study_id}/results",
+    "POST /v1/studies/{study_id}/launch",
+    "GET /v1/billing/offers",
+    "POST /v1/billing/checkouts/study",
+    "POST /v1/teardowns",
+    "GET /v1/teardowns/{teardown_id}",
+    "GET /v1/research",
+    "GET /v1/tasks/{task_id}"
+  ],
+  "credit": {
+    "seed_credits": 5000000,
+    "default_cost": 0,
+    "max_identities_per_ip": 20
+  },
+  "tenancy": {
+    "param_types": {
+      "study_id": "study",
+      "teardown_id": "teardown"
+    },
+    "body_refs": {
+      "study_id": "study"
+    },
+    "create": [
+      {
+        "method": "POST",
+        "path": "/v1/studies",
+        "type": "study",
+        "id_field": "id"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/studies/prefill",
+        "type": "study",
+        "id_field": "id"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/studies/{study_id}/duplicate",
+        "type": "study",
+        "id_field": "id"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/teardowns",
+        "type": "teardown",
+        "id_field": "id"
+      }
+    ],
+    "list": [
+      {
+        "method": "GET",
+        "path": "/v1/studies",
+        "array": "items",
+        "owner_by": [
+          {
+            "field": "id",
+            "type": "study"
+          }
+        ],
+        "count_fields": [
+          "total"
+        ]
+      }
+    ]
+  }
+}

@@ -15,9 +15,9 @@
       {
         "title": "Draft a study and preview it",
         "goal": "Everything up to launch is free",
-        "command": "pilotctl appstore call io.pilot.kinetic kinetic.study_create '{\"study_type\":\"van_westendorp\",\"name\":\"Pro tier pricing\"}'",
-        "expect": "{\"id\":\"stu_...\",\"study_type\":\"van_westendorp\",\"state\":\"draft\"}",
-        "note": "Then survey_preview. Once live the questions are fixed.",
+        "command": "pilotctl appstore call io.pilot.kinetic kinetic.study_create '{\"Idempotency-Key\":\"<uuid>\",\"name\":\"Pro tier\",\"product_desc\":\"SaaS analytics for small teams\",\"segment_desc\":\"Founders at 5-50 person startups\",\"decision_type\":\"first_time\",\"currency\":\"USD\"}'",
+        "expect": "{\"id\":\"3572c965-...\",\"methodology\":\"van_westendorp\",\"status\":\"draft\",\"price_cents\":14900}",
+        "note": "decision_type picks the methodology for you. Every mutating call needs an Idempotency-Key.",
         "cost": "$0.00 (draft, free)"
       },
       {
@@ -55,6 +55,7 @@
     },
     "gotchas": [
       "Everything except launching is free. The $149-$199 fee is paid by a human on Stripe, not your budget.",
+      "Every mutating call needs an Idempotency-Key header; a retry with the same key is safe.",
       "study_checkout_create returns a link and does NOT pay. Hand the URL to your human and stop.",
       "Preview before launch — once live, questions are fixed.",
       "You supply the respondents; Kinetic has no panel.",
@@ -169,6 +170,13 @@
       "description": "Describe the pricing decision in plain language and get back the method that fits it, with reasoning. Free. Use this instead of guessing between Van Westendorp and Gabor-Granger: they answer different questions, and the wrong one produces a confident, useless number.",
       "params": [
         {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
           "name": "decision",
           "type": "string",
           "required": true,
@@ -184,20 +192,48 @@
         "verb": "POST",
         "path": "/v1/studies"
       },
-      "description": "Create a draft study of a given method. Free: a draft costs nothing and is not launched. Configure it with study_update, check it with survey_preview, and only then launch. Returns the study id everything else hangs off.",
+      "description": "START HERE once you know the decision. Creates a draft study. You do NOT pick the method: Kinetic derives the methodology from decision_type (first_time and new_tier map to Van Westendorp today) and returns it on the study along with price_cents. Free — a draft costs nothing and is not launched. Returns {id, methodology, status:\"draft\", price_cents}.",
       "params": [
         {
-          "name": "study_type",
+          "name": "Idempotency-Key",
           "type": "string",
           "required": true,
-          "description": "One of the study_type values from kinetic.method_list, e.g. van_westendorp, gabor_granger, maxdiff, conjoint.",
-          "in": "body"
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on every mutating call; a retry with the same key returns the original result instead of creating a second study.",
+          "in": "header"
         },
         {
           "name": "name",
           "type": "string",
-          "required": false,
+          "required": true,
           "description": "A name for the study.",
+          "in": "body"
+        },
+        {
+          "name": "product_desc",
+          "type": "string",
+          "required": true,
+          "description": "What you sell, in plain language, e.g. 'A SaaS analytics tool for small teams'.",
+          "in": "body"
+        },
+        {
+          "name": "segment_desc",
+          "type": "string",
+          "required": true,
+          "description": "Who you are pricing for, e.g. 'Founders at 5-50 person startups'.",
+          "in": "body"
+        },
+        {
+          "name": "decision_type",
+          "type": "string",
+          "required": true,
+          "description": "One of underpriced | new_tier | first_time | other. This is what selects the methodology, so it is the most consequential field on the call.",
+          "in": "body"
+        },
+        {
+          "name": "currency",
+          "type": "string",
+          "required": true,
+          "description": "ISO currency code, e.g. USD.",
           "in": "body"
         }
       ]
@@ -212,6 +248,13 @@
       "description": "Generate a draft study filled in from a description of your product and audience, so you edit a sensible starting point rather than an empty form. Free.",
       "params": [
         {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
           "name": "description",
           "type": "string",
           "required": false,
@@ -225,12 +268,12 @@
       "latency": "fast",
       "http": {
         "verb": "GET",
-        "path": "/v1/studies/{id}"
+        "path": "/v1/studies/{study_id}"
       },
       "description": "Read one study: its configuration, state, and position in the lifecycle. Free.",
       "params": [
         {
-          "name": "id",
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -253,12 +296,19 @@
       "latency": "med",
       "http": {
         "verb": "PATCH",
-        "path": "/v1/studies/{id}"
+        "path": "/v1/studies/{study_id}"
       },
       "description": "Edit a draft study: name, prices, features, audience and question configuration. Only the fields you send change. Free, and only valid before launch.",
       "params": [
         {
-          "name": "id",
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -271,12 +321,19 @@
       "latency": "med",
       "http": {
         "verb": "POST",
-        "path": "/v1/studies/{id}/duplicate"
+        "path": "/v1/studies/{study_id}/duplicate"
       },
       "description": "Copy an existing study into a new draft, to run the same design against a different audience or set of prices. Free.",
       "params": [
         {
-          "name": "id",
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study to copy.",
@@ -289,12 +346,19 @@
       "latency": "med",
       "http": {
         "verb": "POST",
-        "path": "/v1/studies/{id}/survey/regenerate"
+        "path": "/v1/studies/{study_id}/survey/regenerate"
       },
       "description": "Regenerate the respondent-facing survey from the study's current configuration after editing it. Free.",
       "params": [
         {
-          "name": "id",
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -307,12 +371,12 @@
       "latency": "fast",
       "http": {
         "verb": "GET",
-        "path": "/v1/studies/{id}/preview"
+        "path": "/v1/studies/{study_id}/preview"
       },
       "description": "Read the survey exactly as a respondent will see it, WITHOUT storing any respondent evidence. Free. Always preview before launching: once a study is live the questions are fixed, and a bad question wastes the whole sample.",
       "params": [
         {
-          "name": "id",
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -325,12 +389,19 @@
       "latency": "slow",
       "http": {
         "verb": "POST",
-        "path": "/v1/studies/{id}/launch"
+        "path": "/v1/studies/{study_id}/launch"
       },
       "description": "Take a draft live so it can collect responses. COSTS MONEY: the launch price comes from kinetic.method_list (currently $149-$199 by method) and must be paid first via kinetic.study_checkout_create. Confirm with your human before calling. Once live the questions are fixed.",
       "params": [
         {
-          "name": "id",
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -343,12 +414,12 @@
       "latency": "fast",
       "http": {
         "verb": "GET",
-        "path": "/v1/studies/{id}/respondent-link"
+        "path": "/v1/studies/{study_id}/respondent-link"
       },
       "description": "Get the link to send to your customers or prospects. THEY are the respondents: Kinetic supplies no panel, so the quality of the answer depends on who you send this to. Free.",
       "params": [
         {
-          "name": "id",
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -361,12 +432,12 @@
       "latency": "fast",
       "http": {
         "verb": "GET",
-        "path": "/v1/studies/{id}/progress"
+        "path": "/v1/studies/{study_id}/progress"
       },
       "description": "How many responses have arrived against the recommended sample size. Free. Poll after launch; results are only meaningful once you clear the method's recommended minimum.",
       "params": [
         {
-          "name": "id",
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -379,12 +450,12 @@
       "latency": "fast",
       "http": {
         "verb": "GET",
-        "path": "/v1/studies/{id}/quality"
+        "path": "/v1/studies/{study_id}/quality"
       },
       "description": "Response-quality signals: speeders, straight-liners, and other patterns meaning a response should not be trusted. Free. Check this before believing the results.",
       "params": [
         {
-          "name": "id",
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -397,12 +468,19 @@
       "latency": "med",
       "http": {
         "verb": "POST",
-        "path": "/v1/studies/{id}/close"
+        "path": "/v1/studies/{study_id}/close"
       },
       "description": "Stop collecting responses and finalize the study so results can be computed. Free.",
       "params": [
         {
-          "name": "id",
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -415,12 +493,12 @@
       "latency": "fast",
       "http": {
         "verb": "GET",
-        "path": "/v1/studies/{id}/results"
+        "path": "/v1/studies/{study_id}/results"
       },
       "description": "The deterministic results: numbers Kinetic's analysis engine computed from the responses, not a model's opinion of them. Free. This is the output you act on.",
       "params": [
         {
-          "name": "id",
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -433,12 +511,12 @@
       "latency": "fast",
       "http": {
         "verb": "GET",
-        "path": "/v1/studies/{id}/evidence"
+        "path": "/v1/studies/{study_id}/evidence"
       },
       "description": "The structured respondent evidence behind the results, so a number can be traced to the answers that produced it. Free.",
       "params": [
         {
-          "name": "id",
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -451,12 +529,19 @@
       "latency": "med",
       "http": {
         "verb": "POST",
-        "path": "/v1/studies/{id}/narrative"
+        "path": "/v1/studies/{study_id}/narrative"
       },
       "description": "Generate a written explanation of the results. The narrative is written FROM the deterministic results, so it explains the computed numbers rather than inventing them. Free.",
       "params": [
         {
-          "name": "id",
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -469,12 +554,12 @@
       "latency": "fast",
       "http": {
         "verb": "GET",
-        "path": "/v1/studies/{id}/narrative"
+        "path": "/v1/studies/{study_id}/narrative"
       },
       "description": "Read a previously generated narrative. Free.",
       "params": [
         {
-          "name": "id",
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -487,12 +572,19 @@
       "latency": "slow",
       "http": {
         "verb": "POST",
-        "path": "/v1/studies/{id}/exports/csv"
+        "path": "/v1/studies/{study_id}/exports/csv"
       },
       "description": "Export results and responses as CSV for analysis elsewhere. Free.",
       "params": [
         {
-          "name": "id",
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
           "type": "string",
           "required": true,
           "description": "The study id.",
@@ -520,6 +612,13 @@
       "description": "Start payment for a draft study. Returns {checkout_url, study_id, amount_cents} and does NOT complete the purchase. A human must open checkout_url and pay on Stripe's hosted page; hand them the link and stop. Once paid, kinetic.study_launch will work. Confirm the amount with your human first.",
       "params": [
         {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
           "name": "study_id",
           "type": "string",
           "required": true,
@@ -538,6 +637,13 @@
       "description": "Run a teardown of a public pricing page and get a structured read of how it is constructed. Free.",
       "params": [
         {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
           "name": "url",
           "type": "string",
           "required": false,
@@ -551,12 +657,12 @@
       "latency": "fast",
       "http": {
         "verb": "GET",
-        "path": "/v1/teardowns/{id}"
+        "path": "/v1/teardowns/{teardown_id}"
       },
       "description": "Read a completed teardown. Free.",
       "params": [
         {
-          "name": "id",
+          "name": "teardown_id",
           "type": "string",
           "required": true,
           "description": "The teardown id.",
@@ -597,12 +703,12 @@
       "latency": "fast",
       "http": {
         "verb": "GET",
-        "path": "/v1/tasks/{id}"
+        "path": "/v1/tasks/{task_id}"
       },
       "description": "Poll a long-running task (prefill, teardown, export) for completion. Free.",
       "params": [
         {
-          "name": "id",
+          "name": "task_id",
           "type": "string",
           "required": true,
           "description": "The task id returned by the operation that started it.",
