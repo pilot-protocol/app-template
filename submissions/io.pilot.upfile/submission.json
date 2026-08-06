@@ -1,0 +1,349 @@
+{
+  "product_demo": {
+    "skill": "io.pilot.upfile",
+    "title": "Full usage demo",
+    "metered": false,
+    "when_to_use": "When your agent has produced a file — a render, a report, a screenshot, a log — and needs a URL it can paste somewhere a human or another service will open.",
+    "quickstart": {
+      "goal": "Get an account and an API key with one call",
+      "command": "pilotctl appstore call io.pilot.upfile upfile.signup '{\"email\":\"you@example.com\"}'",
+      "expect": "Account created. API key: upf_... Tier: free (1GB). Key saved.",
+      "note": "The key is written to the CLI config on this host, so every later call just works. No dashboard, no browser."
+    },
+    "examples": [
+      {
+        "title": "Upload a file and get a permanent URL",
+        "goal": "The core loop, in one call",
+        "command": "pilotctl appstore call io.pilot.upfile upfile.upload '{\"path\":\"/tmp/report.pdf\"}'",
+        "expect": "{\"id\":\"tRbBqIyEiB\",\"url\":\"https://cdn.upfile.sh/tRbBqIyEiB.pdf\",\"visibility\":\"public\",\"size\":6941}",
+        "note": "The URL is live immediately and permanent. Always JSON, so read .url straight out of it."
+      },
+      {
+        "title": "Upload something that should not live forever",
+        "goal": "A link that expires on its own",
+        "command": "pilotctl appstore call io.pilot.upfile upfile.upload_expiring '{\"path\":\"/tmp/build.log\",\"expiry\":3600}'",
+        "expect": "{\"id\":\"...\",\"url\":\"https://cdn.upfile.sh/....log\",\"expires_at\":\"2026-08-06T17:00:00.000Z\"}",
+        "note": "expiry is seconds. Use it for anything you would not want indexed a year from now."
+      },
+      {
+        "title": "Check what you have stored",
+        "command": "pilotctl appstore call io.pilot.upfile upfile.status '{}'",
+        "expect": "Tier: free  Storage: 0.01GB / 1GB",
+        "note": "Free tier is 1GB. upfile.list shows individual files; upfile.remove deletes one by id."
+      }
+    ],
+    "gotchas": [
+      "Run upfile.signup once per host if there is no key. Everything else fails with No API key until you do.",
+      "Read .url from the JSON — the human-readable output is not stable.",
+      "A plain upload is a permanent, unauthenticated URL. Use upload_private or upload_expiring for anything sensitive.",
+      "expiry is in SECONDS, not minutes. 3600 is an hour.",
+      "Free tier is 1GB total, not per file. Use upfile.remove to reclaim space."
+    ],
+    "next": [
+      "io.pilot.upfile upfile.help '{}'"
+    ]
+  },
+  "next_steps": {
+    "schema": 1,
+    "app": "io.pilot.upfile",
+    "edges": [
+      {
+        "from": "*",
+        "on": "err",
+        "why": "the CLI has no API key on this host yet, so nothing will work until an account exists",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.upfile upfile.signup '{\"email\":\"you@example.com\"}'",
+            "why": "one call creates the account and saves the key locally; no browser and no dashboard",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "upfile.signup",
+        "on": "ok",
+        "why": "the key is saved on this host, so the next move is to put a file somewhere shareable",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.upfile upfile.upload '{\"path\":\"/tmp/report.pdf\"}'",
+            "why": "returns JSON with a permanent .url you can hand to a human or another service",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "upfile.upload",
+        "on": "ok",
+        "why": "the file is live at a permanent public URL, which is worth knowing before you share it",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.upfile upfile.status '{}'",
+            "why": "free tier is 1GB total; check headroom and use upfile.remove to reclaim space",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "upfile.upload",
+        "on": "err",
+        "why": "the upload was rejected, most often because there is no API key or the path does not exist",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.upfile upfile.status '{}'",
+            "why": "if this says No API key, run upfile.signup; otherwise check the path is readable on this host",
+            "kind": "recovery"
+          }
+        ]
+      }
+    ]
+  },
+  "id": "io.pilot.upfile",
+  "version": "0.2.3",
+  "namespace": "upfile",
+  "description": "Upload a file from the host and get a permanent URL back. One call to sign up, one to upload. Supports public, private and expiring links, and always returns JSON an agent can read.",
+  "email": "hello@upfile.sh",
+  "backend": {
+    "type": "cli",
+    "command": [
+      "upfile"
+    ],
+    "env_passthrough": [
+      "HOME",
+      "TMPDIR",
+      "XDG_CONFIG_HOME",
+      "UPFILE_API_KEY"
+    ]
+  },
+  "artifacts": [
+    {
+      "role": "binary",
+      "os": "darwin",
+      "arch": "arm64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.upfile/0.2.3/darwin-arm64/upfile-0.2.3-darwin-arm64.tar.gz",
+      "sha256": "69b04766b0aed7e813aed993a875f0e92e8c103c5dd27017a06f535073a7db95",
+      "unpack": "tar.gz",
+      "exec_path": "upfile-0.2.3-darwin-arm64/upfile",
+      "order": 1
+    },
+    {
+      "role": "binary",
+      "os": "darwin",
+      "arch": "amd64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.upfile/0.2.3/darwin-amd64/upfile-0.2.3-darwin-amd64.tar.gz",
+      "sha256": "b50cb2843a7ec218636a0d09bdcd558a6cb8940f76305f629db5f20f696c46fc",
+      "unpack": "tar.gz",
+      "exec_path": "upfile-0.2.3-darwin-amd64/upfile",
+      "order": 1
+    },
+    {
+      "role": "binary",
+      "os": "linux",
+      "arch": "amd64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.upfile/0.2.3/linux-amd64/upfile-0.2.3-linux-amd64.tar.gz",
+      "sha256": "c8eca696c1950e0e9418794789e2bd1989817a91796dd2016263cde405b879a6",
+      "unpack": "tar.gz",
+      "exec_path": "upfile-0.2.3-linux-amd64/upfile",
+      "order": 1
+    },
+    {
+      "role": "binary",
+      "os": "linux",
+      "arch": "arm64",
+      "url": "https://pub-f09f9a4ea848491198d48e329ba030e3.r2.dev/io.pilot.upfile/0.2.3/linux-arm64/upfile-0.2.3-linux-arm64.tar.gz",
+      "sha256": "06f24a4905b018459220ca7168faf977309b8837a97273899ede780979d9afa6",
+      "unpack": "tar.gz",
+      "exec_path": "upfile-0.2.3-linux-arm64/upfile",
+      "order": 1
+    }
+  ],
+  "methods": [
+    {
+      "name": "upfile.signup",
+      "latency": "med",
+      "cli": {
+        "args": [
+          "signup",
+          "--email",
+          "${email}"
+        ]
+      },
+      "description": "START HERE if this host has no API key. Creates an Upfile account and saves the key to the local CLI config, so every later call authenticates automatically. No browser, no dashboard, no verification step. The account starts on the free tier: 1GB of storage. Everything else fails with No API key until this has been run.",
+      "params": [
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "description": "Email address for the account. It is the account identifier; nothing is sent that you need to click."
+        }
+      ]
+    },
+    {
+      "name": "upfile.upload",
+      "latency": "med",
+      "cli": {
+        "args": [
+          "${path}",
+          "--json"
+        ]
+      },
+      "description": "Upload a file from this host and get back a permanent, immediately-live URL. Returns JSON: {id, url, visibility, size, type, originalName, expires_at, created_at, storage_used, storage_limit}. Read .url. Public by default, which means an unauthenticated permanent link, so use upfile.upload_private or upfile.upload_expiring for anything you would not want to stay reachable.",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "description": "Absolute path to the file on this host."
+        }
+      ]
+    },
+    {
+      "name": "upfile.upload_private",
+      "latency": "med",
+      "cli": {
+        "args": [
+          "${path}",
+          "--private",
+          "--json"
+        ]
+      },
+      "description": "Upload a file as private, so the returned URL requires authentication rather than being open to anyone holding the link. Same JSON shape as upfile.upload, with visibility private.",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "description": "Absolute path to the file on this host."
+        }
+      ]
+    },
+    {
+      "name": "upfile.upload_expiring",
+      "latency": "med",
+      "cli": {
+        "args": [
+          "${path}",
+          "--expiry",
+          "${expiry}",
+          "--json"
+        ]
+      },
+      "description": "Upload a file with a time-to-live, so the link stops working on its own. Use this for build logs, debug dumps, and anything you would rather not have permanently indexed. Same JSON shape as upfile.upload, with expires_at set.",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "description": "Absolute path to the file on this host."
+        },
+        {
+          "name": "expiry",
+          "type": "int",
+          "required": true,
+          "description": "Lifetime in SECONDS, not minutes. 3600 is one hour."
+        }
+      ]
+    },
+    {
+      "name": "upfile.status",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "status"
+        ]
+      },
+      "description": "Show the account tier and how much of the storage quota is used, e.g. Tier: free  Storage: 0.01GB / 1GB. Also the quickest way to tell whether this host has a key at all: without one it prints No API key, which means run upfile.signup first.",
+      "params": []
+    },
+    {
+      "name": "upfile.list",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "ls",
+          "--json"
+        ]
+      },
+      "description": "List the files stored on this account as JSON, newest first, with each file's id and URL. The ids are what upfile.remove takes.",
+      "params": []
+    },
+    {
+      "name": "upfile.remove",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "rm",
+          "${id}"
+        ]
+      },
+      "description": "Delete one stored file by its id, reclaiming its space against the quota. IRREVERSIBLE: the URL stops resolving immediately.",
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "The file id from upfile.upload or upfile.list."
+        }
+      ]
+    },
+    {
+      "name": "upfile.version",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "--version"
+        ]
+      },
+      "description": "Print the Upfile CLI version bundled with this app.",
+      "params": []
+    },
+    {
+      "name": "upfile.cli_help",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "--help"
+        ]
+      },
+      "description": "The Upfile CLI's own full help text, listing every subcommand and flag including any not curated as a named method here.",
+      "params": []
+    },
+    {
+      "name": "upfile.run",
+      "latency": "med",
+      "cli": {
+        "passthrough": true
+      },
+      "description": "Escape hatch: run the Upfile CLI with an arbitrary argv array, for anything the named methods do not cover such as config set/get, upgrade, or stdin uploads. Payload is {args:[...]}. Prefer the named methods when one fits, because they return JSON.",
+      "params": []
+    }
+  ],
+  "listing": {
+    "display_name": "Upfile",
+    "tagline": "Upload a file, get a permanent URL. One call to sign up, one to upload.",
+    "app_description": "Upfile turns a file on the host into a URL an agent can hand to a human or another service. There is no dashboard and no browser step anywhere in the loop: `upfile.signup` creates an account and saves the key locally, and from then on `upfile.upload` returns a live, permanent link.\n\n**Everything returns JSON.** The upload methods emit `{id, url, visibility, size, type, expires_at, storage_used, storage_limit}`, so an agent reads `.url` rather than scraping console output.\n\n**Three shapes of link.** A plain upload is public and permanent — an unauthenticated URL that keeps working. `upload_private` puts it behind authentication. `upload_expiring` gives it a TTL in seconds, which is the right choice for build logs, debug dumps, and anything you would rather not leave permanently reachable.\n\n**Housekeeping.** `status` shows tier and quota, `list` enumerates what is stored with each file's id, and `remove` deletes one by id and reclaims the space. The free tier is 1GB total across all files.\n\nThe CLI ships with the app as a per-platform binary verified by sha256 at install, so there is no Node install and no package manager involved on the host.",
+    "license": "MIT",
+    "homepage": "https://upfile.sh",
+    "source_url": "https://github.com/upfilesh/cli",
+    "categories": [
+      "developer-tools",
+      "storage"
+    ],
+    "keywords": [
+      "upload",
+      "file-sharing",
+      "cli",
+      "cdn",
+      "permanent url",
+      "expiring link",
+      "artifacts",
+      "agents"
+    ]
+  },
+  "vendor": {
+    "name": "Upfile",
+    "url": "https://upfile.sh",
+    "contact": "hello@upfile.sh",
+    "agent_usage": "On a host with no key the agent runs upfile.signup with an email, which creates the account and writes the key to the local CLI config; no browser or verification step is involved. After that upfile.upload takes an absolute path and returns JSON whose .url is a live permanent link the agent can paste into a PR comment, a message, or another API. upfile.upload_expiring adds a TTL in seconds for output that should not stay reachable, and upfile.upload_private puts the link behind authentication. upfile.status reports tier and quota and is also the fastest way to detect a missing key. upfile.list and upfile.remove manage what is stored against the 1GB free tier, and upfile.run is the passthrough for anything uncurated.",
+    "capabilities": "signup: create an account and save an API key on this host in one call, with no browser step.\nupload: turn a local file into a permanent public URL, returned as JSON.\nupload_private: same, but the link requires authentication.\nupload_expiring: same, but the link expires after a TTL in seconds.\nstatus: report account tier and storage used against the quota.\nlist: enumerate stored files with their ids and URLs.\nremove: delete a stored file by id and reclaim its space.\nversion and cli_help: report the bundled CLI version and its full help text.\nrun: passthrough for any subcommand not curated above."
+  }
+}
