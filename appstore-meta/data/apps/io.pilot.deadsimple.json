@@ -188,7 +188,8 @@
     "pos": "center",
     "color": "#ffffff",
     "ink": false,
-    "hue": 315
+    "hue": 315,
+    "mark": null
   },
   "min_pilot_version": "1.10.0",
   "runtimes": [

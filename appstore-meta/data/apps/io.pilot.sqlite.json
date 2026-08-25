@@ -115,7 +115,11 @@
     "pos": "",
     "color": "#003B57",
     "ink": false,
-    "hue": 125
+    "hue": 125,
+    "mark": {
+      "set": "simple-icons",
+      "name": "sqlite"
+    }
   },
   "min_pilot_version": "1.0.0",
   "runtimes": [

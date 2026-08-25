@@ -402,7 +402,8 @@
     "pos": "center",
     "color": "#26B65A",
     "ink": false,
-    "hue": 315
+    "hue": 315,
+    "mark": null
   },
   "min_pilot_version": "1.0.0",
   "runtimes": [

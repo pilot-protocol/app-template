@@ -133,7 +133,11 @@
     "pos": "",
     "color": "#2496ED",
     "ink": false,
-    "hue": 30
+    "hue": 30,
+    "mark": {
+      "set": "simple-icons",
+      "name": "docker"
+    }
   },
   "min_pilot_version": "1.0.0",
   "runtimes": [

@@ -26,7 +26,7 @@ const validApp = `{
   "primary_category": "data",
   "protection": "guarded",
   "featured": true,
-  "icon": {"mode":"mask","file":"/appicons/io.pilot.postgres.svg","color":"#4169E1","ink":false,"hue":125},
+  "icon": {"mode":"mask","file":"/appicons/io.pilot.postgres.svg","mark":{"set":"simple-icons","name":"postgresql"},"color":"#4169E1","ink":false,"hue":125},
   "methods": [{"name":"postgres.query","summary":"Run SQL."}]
 }`
 
@@ -131,6 +131,8 @@ func TestLoadRejectsInvalidDocuments(t *testing.T) {
 		{"unknown protection", validIndex, strings.Replace(validApp, `"guarded"`, `"open"`, 1), "protection"},
 		{"unknown icon mode", validIndex, strings.Replace(validApp, `"mode":"mask"`, `"mode":"sprite"`, 1), "icon.mode"},
 		{"mask icon without a file", validIndex, strings.Replace(validApp, `"file":"/appicons/io.pilot.postgres.svg",`, ``, 1), "icon.file"},
+		{"mask icon without a mark", validIndex, strings.Replace(validApp, `"mark":{"set":"simple-icons","name":"postgresql"},`, ``, 1), "icon.mark"},
+		{"mark from an unknown icon set", validIndex, strings.Replace(validApp, `"set":"simple-icons"`, `"set":"heroicons"`, 1), "icon.mark.set"},
 		{"hue out of range", validIndex, strings.Replace(validApp, `"hue":125}`, `"hue":900}`, 1), "hue"},
 		{"method without a name", validIndex, strings.Replace(validApp, `"name":"postgres.query"`, `"name":""`, 1), "method"},
 		{"featured order names an unknown app", strings.Replace(validIndex, `"io.pilot.postgres"`, `"io.pilot.ghost"`, 1), validApp, "featured_order"},

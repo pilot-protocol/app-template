@@ -137,7 +137,11 @@
     "pos": "",
     "color": "#FFF000",
     "ink": true,
-    "hue": 125
+    "hue": 125,
+    "mark": {
+      "set": "simple-icons",
+      "name": "duckdb"
+    }
   },
   "min_pilot_version": "1.0.0",
   "runtimes": [

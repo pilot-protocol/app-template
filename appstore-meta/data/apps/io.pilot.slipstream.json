@@ -109,7 +109,11 @@
     "pos": "",
     "color": "oklch(0.6 0.19 155)",
     "ink": false,
-    "hue": 155
+    "hue": 155,
+    "mark": {
+      "set": "lucide",
+      "name": "trending-up"
+    }
   },
   "min_pilot_version": "1.0.0",
   "runtimes": [

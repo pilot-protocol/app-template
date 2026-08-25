@@ -28,6 +28,7 @@ const (
 var (
 	knownProtections = map[string]bool{"guarded": true, "shareable": true}
 	knownIconModes   = map[string]bool{"mask": true, "image": true}
+	knownIconSets    = map[string]bool{"simple-icons": true, "lucide": true}
 )
 
 type indexDocument struct {
@@ -189,8 +190,19 @@ func validateApp(app *App, where, stem string, categories map[string]bool) error
 	if !knownIconModes[app.Icon.Mode] {
 		return fmt.Errorf("%s: icon.mode %q is not one of mask, image", where, app.Icon.Mode)
 	}
-	if app.Icon.Mode == "mask" && app.Icon.File == "" {
-		return fmt.Errorf("%s: icon.file is required when icon.mode is mask", where)
+	if app.Icon.Mode == "mask" {
+		if app.Icon.File == "" {
+			return fmt.Errorf("%s: icon.file is required when icon.mode is mask", where)
+		}
+		// A consumer that builds its own icon assets cannot do so without
+		// being told which glyph to cut, and would silently ship a blank
+		// plate.
+		if app.Icon.Mark == nil || app.Icon.Mark.Name == "" {
+			return fmt.Errorf("%s: icon.mark is required when icon.mode is mask", where)
+		}
+		if !knownIconSets[app.Icon.Mark.Set] {
+			return fmt.Errorf("%s: icon.mark.set %q is not one of simple-icons, lucide", where, app.Icon.Mark.Set)
+		}
 	}
 	if app.Icon.Mode == "image" && app.Icon.Img == "" {
 		return fmt.Errorf("%s: icon.img is required when icon.mode is image", where)

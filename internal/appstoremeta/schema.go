@@ -123,14 +123,25 @@ type Dependency struct {
 // tints File as a mask over the Color plate. Ink says the plate is light
 // enough to need dark ink.
 type Icon struct {
-	Mode  string `json:"mode"`
-	Img   string `json:"img"`
-	File  string `json:"file"`
-	Fit   string `json:"fit"`
-	Pos   string `json:"pos"`
-	Color string `json:"color"`
-	Ink   bool   `json:"ink"`
-	Hue   int    `json:"hue"`
+	Mode  string    `json:"mode"`
+	Img   string    `json:"img"`
+	File  string    `json:"file"`
+	Fit   string    `json:"fit"`
+	Pos   string    `json:"pos"`
+	Color string    `json:"color"`
+	Ink   bool      `json:"ink"`
+	Hue   int       `json:"hue"`
+	Mark  *IconMark `json:"mark"`
+}
+
+// IconMark names the upstream glyph a mask icon is cut from, so a consumer
+// that builds its own icon assets knows which one to take.
+//
+// Without it the website's build had to keep its own id-to-glyph table, which
+// is exactly the second hardcoded location this API exists to remove.
+type IconMark struct {
+	Set  string `json:"set"`  // "simple-icons" or "lucide"
+	Name string `json:"name"` // the file's base name in that set
 }
 
 // ProductDemo is the example-first usage guide shown at install and rendered

@@ -135,7 +135,11 @@
     "pos": "",
     "color": "#FF4438",
     "ink": false,
-    "hue": 125
+    "hue": 125,
+    "mark": {
+      "set": "simple-icons",
+      "name": "redis"
+    }
   },
   "min_pilot_version": "1.0.0",
   "runtimes": [
