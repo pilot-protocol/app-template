@@ -1,6 +1,6 @@
 # Developer entrypoints. `make ci` mirrors the GitHub `ci` workflow, so what
 # passes locally passes in CI.
-.PHONY: ci build test race e2e e2e-managed fmt fmt-check vet lint cover docker-broker clean
+.PHONY: ci build test race e2e e2e-managed fmt fmt-check vet lint cover docker-broker clean appstore-meta appstore-meta-check
 
 ci: fmt-check vet build race e2e ## everything CI runs
 
@@ -20,10 +20,10 @@ e2e-managed: ## full publish→build→register→sign→broker→partner→mete
 	./scripts/e2e-managed.sh
 
 fmt: ## format the code
-	gofmt -w cmd internal
+	gofmt -w cmd internal appstore-meta
 
 fmt-check: ## fail if anything needs formatting
-	@u="$$(gofmt -l cmd internal)"; if [ -n "$$u" ]; then echo "needs gofmt:"; echo "$$u"; exit 1; fi
+	@u="$$(gofmt -l cmd internal appstore-meta)"; if [ -n "$$u" ]; then echo "needs gofmt:"; echo "$$u"; exit 1; fi
 
 vet: ## go vet
 	go vet ./...
@@ -36,6 +36,12 @@ cover: race ## show per-package coverage
 
 docker-broker: ## build the broker image
 	docker build -f deploy/docker/broker.Dockerfile -t pilot-broker .
+
+appstore-meta: ## run the app-store metadata API against the working data dir
+	go run ./cmd/appstore-meta-api -data appstore-meta/data
+
+appstore-meta-check: ## validate appstore-meta/data without listening
+	go run ./cmd/appstore-meta-api -check
 
 clean:
 	rm -f cover.out

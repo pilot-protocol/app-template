@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "source": "pilot-protocol/app-template appstore-meta/data",
+  "categories": [
+    {
+      "id": "data",
+      "name": "Data & Storage",
+      "blurb": "Databases, caches, and stores an agent can stand up in one command.",
+      "hue": 125
+    },
+    {
+      "id": "ai",
+      "name": "AI & Search",
+      "blurb": "Grounded search, retrieval, and generation for agents.",
+      "hue": 265
+    },
+    {
+      "id": "web",
+      "name": "Web & Automation",
+      "blurb": "Turn the live web into clean text and drive real browsers.",
+      "hue": 200
+    },
+    {
+      "id": "infra",
+      "name": "Infrastructure",
+      "blurb": "Containers, microVMs, and deploys — the compute layer for agents.",
+      "hue": 30
+    },
+    {
+      "id": "security",
+      "name": "Security",
+      "blurb": "Guardrails and firewalls for agents and their inputs.",
+      "hue": 5
+    },
+    {
+      "id": "finance",
+      "name": "Finance & Payments",
+      "blurb": "Settle value on-overlay and read the markets.",
+      "hue": 155
+    },
+    {
+      "id": "work",
+      "name": "Work & Research",
+      "blurb": "Put real-world work in motion and get real answers back — human hands on a task, and pricing research with your own customers.",
+      "hue": 45
+    },
+    {
+      "id": "comms",
+      "name": "Communications",
+      "blurb": "Give an agent its own phone number or email inbox — voice, SMS/iMessage, email, and threaded conversations.",
+      "hue": 315
+    }
+  ],
+  "featured_order": [
+    "io.pilot.postgres",
+    "io.pilot.duckdb",
+    "io.pilot.docker"
+  ],
+  "app_order": [
+    "io.pilot.dial",
+    "io.pilot.deadsimple",
+    "io.pilot.kinetic",
+    "io.pilot.rentahuman",
+    "io.pilot.upfile",
+    "io.pilot.primitive",
+    "io.pilot.agentphone",
+    "io.pilot.postgres",
+    "io.pilot.duckdb",
+    "io.pilot.sqlite",
+    "io.pilot.mysql",
+    "io.pilot.redis",
+    "io.pilot.sixtyfour",
+    "io.pilot.cosift",
+    "io.telepat.ideon-free",
+    "io.pilot.plainweb",
+    "io.pilot.otto",
+    "io.pilot.smol",
+    "io.pilot.miren",
+    "io.pilot.docker",
+    "io.pilot.aegis",
+    "io.pilot.slipstream",
+    "io.pilot.wallet",
+    "io.pilot.bowmark",
+    "io.pilot.orthogonal",
+    "io.pilot.didit",
+    "io.pilot.tldr"
+  ]
+}

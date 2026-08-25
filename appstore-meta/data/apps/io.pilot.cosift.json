@@ -1,0 +1,132 @@
+{
+  "id": "io.pilot.cosift",
+  "name": "Cosift",
+  "tagline": "Grounded web search, retrieval, and research for agents",
+  "description": "Cosift is the Pilot app-store front door for the cosift search/answer/research API. It gives an agent keyword + semantic search, document retrieval, and LLM-grounded answers and multi-step research over a crawled web corpus — returned as clean structured JSON.\n\nEvery method is discoverable at runtime via cosift.help, which reports each method's parameters and a latency class (fast / med / slow) so a caller can pick the cheapest method that fits.",
+  "categories": [
+    "ai"
+  ],
+  "primary_category": "ai",
+  "keywords": [
+    "search",
+    "rag",
+    "answer",
+    "research",
+    "web",
+    "retrieval"
+  ],
+  "version": "0.1.2",
+  "vendor": "Pilot Protocol",
+  "vendor_url": "https://pilotprotocol.network",
+  "license": "MIT",
+  "source_url": "https://github.com/pilot-protocol/cosift",
+  "homepage": "https://pilotprotocol.network",
+  "methods": [
+    {
+      "name": "cosift.search",
+      "summary": "Keyword + semantic search over the crawled corpus",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "cosift.find_similar",
+      "summary": "Find documents similar to a given result",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "cosift.contents",
+      "summary": "Fetch the full contents of a document",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "cosift.answer",
+      "summary": "Single-shot grounded answer with citations",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "cosift.research",
+      "summary": "Multi-step research report over the corpus",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "cosift.stats",
+      "summary": "Corpus and index statistics",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "cosift.health",
+      "summary": "Service health check",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "cosift.help",
+      "summary": "Discovery: methods, params, and latency classes",
+      "example": "",
+      "gated": ""
+    }
+  ],
+  "changelog": [
+    {
+      "version": "0.1.2",
+      "date": "2026-06-09",
+      "notes": [
+        "cosift search/answer/research adapter with cosift.help discovery",
+        "Installable via the Pilot app store catalogue"
+      ]
+    }
+  ],
+  "grants": [
+    "fs.read:$APP/config.json",
+    "audit.log:*",
+    "net.dial:cosift.pilotprotocol.network",
+    "net.dial:127.0.0.1"
+  ],
+  "limits": [],
+  "bundles": [
+    {
+      "platform": "darwin-arm64",
+      "bytes": 4440635
+    },
+    {
+      "platform": "darwin-amd64",
+      "bytes": 4631630
+    },
+    {
+      "platform": "linux-arm64",
+      "bytes": 4297388
+    },
+    {
+      "platform": "linux-amd64",
+      "bytes": 4679378
+    }
+  ],
+  "installed_bytes": 8641298,
+  "depends": [],
+  "protection": "shareable",
+  "featured": false,
+  "in_catalogue": true,
+  "icon": {
+    "mode": "image",
+    "img": "/appicons/io.pilot.cosift.png",
+    "file": "",
+    "fit": "contain",
+    "pos": "center",
+    "color": "#ffffff",
+    "ink": false,
+    "hue": 265,
+    "mark": null
+  },
+  "min_pilot_version": "1.0.0",
+  "runtimes": [
+    "go"
+  ],
+  "published_at": "2026-06-09",
+  "updated_at": "2026-06-09",
+  "product_demo": null
+}

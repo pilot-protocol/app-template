@@ -1,0 +1,243 @@
+{
+  "id": "io.pilot.sixtyfour",
+  "name": "Sixtyfour",
+  "tagline": "People- and company-intelligence: contact discovery, enrichment, and agentic research",
+  "description": "Sixtyfour is the app-store front door for the Sixtyfour people-intelligence and company-intelligence API. It gives an agent contact discovery (find email / find phone), reverse lookups from an email or phone, full person and company enrichment, and an agentic QA researcher that answers free-form questions about a person or company. All returned as clean structured JSON, every field source-backed.",
+  "categories": [
+    "data"
+  ],
+  "primary_category": "data",
+  "keywords": [
+    "enrichment",
+    "people",
+    "company",
+    "email",
+    "phone",
+    "lead",
+    "research",
+    "search"
+  ],
+  "version": "0.1.0",
+  "vendor": "Sixtyfour",
+  "vendor_url": "",
+  "license": "Proprietary",
+  "source_url": "https://docs.sixtyfour.ai",
+  "homepage": "https://sixtyfour.ai",
+  "methods": [
+    {
+      "name": "sixtyfour.people_intelligence",
+      "summary": "People Intelligence: full, source-backed enrichment of a person from seed details.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "sixtyfour.company_intelligence",
+      "summary": "Company Intelligence: full, source-backed company profile, optionally with people.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "sixtyfour.find_email",
+      "summary": "Contact discovery: find a verified email for a person from partial details.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "sixtyfour.find_phone",
+      "summary": "Contact discovery: find a phone number for a person from partial details.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "sixtyfour.reverse_email",
+      "summary": "Reverse lookup: identify the person and company behind an email address.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "sixtyfour.reverse_phone",
+      "summary": "Reverse lookup: identify the person and company behind a phone number.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "sixtyfour.enrich_linkedin",
+      "summary": "Enrich a person directly from their LinkedIn profile URL.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "sixtyfour.qa",
+      "summary": "Agentic QA researcher: answer free-form qualification questions about a person or company, with sources.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "sixtyfour.research_agent",
+      "summary": "Research agent: autonomous multi-step research over an entity, returning structured findings with sources.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "sixtyfour.filter_search",
+      "summary": "Filter Search: structured field-based search across the corpus; returns matching entities.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "sixtyfour.deep_search",
+      "summary": "Deep Search (agentic): start a natural-language search. Returns a task_id; results are retrieved asynchronously (see caveats).",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "sixtyfour.help",
+      "summary": "Discovery: every method with params, kind, and latency class.",
+      "example": "",
+      "gated": ""
+    }
+  ],
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "",
+      "notes": [
+        "Sixtyfour is the app-store front door for the Sixtyfour people-intelligence and company-intelligence API. It gives an agent contact discovery (find email / find phone), reverse lookups from an email or phone, full person and company enrichment, and an agentic QA researcher that answers free-form questions about a person or company. All returned as clean structured JSON, every field source-backed."
+      ]
+    }
+  ],
+  "grants": [
+    "fs.read:$APP/config.json",
+    "key.sign:self",
+    "net.dial:broker.pilotprotocol.network",
+    "audit.log:*"
+  ],
+  "limits": [],
+  "bundles": [
+    {
+      "platform": "darwin-arm64",
+      "bytes": 4898153
+    },
+    {
+      "platform": "darwin-amd64",
+      "bytes": 5290005
+    },
+    {
+      "platform": "linux-arm64",
+      "bytes": 4555282
+    },
+    {
+      "platform": "linux-amd64",
+      "bytes": 4555282
+    }
+  ],
+  "installed_bytes": 8679650,
+  "depends": [],
+  "protection": "shareable",
+  "featured": false,
+  "in_catalogue": true,
+  "icon": {
+    "mode": "image",
+    "img": "/appicons/io.pilot.sixtyfour.png",
+    "file": "",
+    "fit": "cover",
+    "pos": "center",
+    "color": "#0b0b0a",
+    "ink": false,
+    "hue": 125,
+    "mark": null
+  },
+  "min_pilot_version": "1.10.0",
+  "runtimes": [
+    "go"
+  ],
+  "published_at": "2026-06-21",
+  "updated_at": "2026-06-21",
+  "product_demo": {
+    "skill": "io.pilot.sixtyfour",
+    "title": "Full usage demo",
+    "when_to_use": "When you need to find or verify a person's email/phone, enrich a person or company into structured JSON, or answer free-form qualification questions about them with sources.",
+    "metered": true,
+    "quickstart": {
+      "title": "",
+      "goal": "Find a verified work email from partial details",
+      "command": "pilotctl appstore call io.pilot.sixtyfour sixtyfour.find_email '{\"name\":\"Ada Lovelace\",\"company\":\"acme.com\"}'",
+      "expect": "{\"email\":\"ada@acme.com\",\"confidence\":0.9,\"sources\":[...]}",
+      "cost": "",
+      "note": ""
+    },
+    "examples": [
+      {
+        "title": "Full person enrichment",
+        "goal": "Source-backed profile from a seed email",
+        "command": "pilotctl appstore call io.pilot.sixtyfour sixtyfour.people_intelligence '{\"email\":\"ada@acme.com\"}'",
+        "expect": "{\"name\":\"Ada Lovelace\",\"title\":\"CTO\",\"linkedin\":\"...\",\"sources\":[...]}",
+        "cost": "",
+        "note": ""
+      },
+      {
+        "title": "Company profile",
+        "goal": "",
+        "command": "pilotctl appstore call io.pilot.sixtyfour sixtyfour.company_intelligence '{\"domain\":\"acme.com\"}'",
+        "expect": "{\"name\":\"Acme\",\"industry\":\"...\",\"headcount\":120,\"sources\":[...]}",
+        "cost": "",
+        "note": ""
+      },
+      {
+        "title": "Reverse lookup from an email",
+        "goal": "",
+        "command": "pilotctl appstore call io.pilot.sixtyfour sixtyfour.reverse_email '{\"email\":\"ada@acme.com\"}'",
+        "expect": "{\"person\":{...},\"company\":{...}}",
+        "cost": "",
+        "note": ""
+      },
+      {
+        "title": "Agentic QA on an entity",
+        "goal": "Answer free-form qualification questions with sources",
+        "command": "pilotctl appstore call io.pilot.sixtyfour sixtyfour.qa '{\"company\":\"acme.com\",\"question\":\"Do they sell to enterprises?\"}'",
+        "expect": "{\"answer\":\"...\",\"sources\":[...]}",
+        "cost": "",
+        "note": ""
+      }
+    ],
+    "cost": {
+      "unit": "requests (50 free per Pilot user)",
+      "free_budget": "50 requests per Pilot user",
+      "hard_cap_usd": 0,
+      "operations": [
+        {
+          "op": "sixtyfour.find_email / find_phone",
+          "price": "1 request",
+          "note": "each contact-discovery call spends 1 of your 50 requests"
+        },
+        {
+          "op": "sixtyfour.people_intelligence / company_intelligence",
+          "price": "1 request",
+          "note": "each enrichment call spends 1 request"
+        },
+        {
+          "op": "sixtyfour.reverse_email / reverse_phone / enrich_linkedin",
+          "price": "1 request",
+          "note": "each lookup spends 1 request"
+        },
+        {
+          "op": "sixtyfour.qa / research_agent / filter_search / deep_search",
+          "price": "1 request",
+          "note": "each agentic call spends 1 request"
+        }
+      ],
+      "worked_total": "Metered in requests, not dollars: this demo spends 5 of your 50 free requests. At 0 remaining, calls return 402.",
+      "check_balance": ""
+    },
+    "gotchas": [
+      "Quota is 50 REQUESTS per Pilot user, not a dollar budget — every enrichment/discovery call spends 1.",
+      "402 Payment Required means your 50 free requests are used up.",
+      "Every returned field is source-backed — inspect the sources[] before trusting a value.",
+      "deep_search is async: it returns a task_id and results are retrieved separately.",
+      "Provide as many seed details as you have (name + company, email, domain) for higher-confidence hits."
+    ],
+    "next": [
+      "io.pilot.sixtyfour sixtyfour.help '{}'"
+    ]
+  }
+}

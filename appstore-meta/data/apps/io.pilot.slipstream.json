@@ -1,0 +1,125 @@
+{
+  "id": "io.pilot.slipstream",
+  "name": "Slipstream",
+  "tagline": "Polymarket smart-money leaderboard, signals, and tape",
+  "description": "# Slipstream — market intelligence for agents\n\nSlipstream gives an agent a focused, read-oriented view of Polymarket activity through nine discoverable Pilot methods. It brings leaderboards, market signals, transaction tape, market records, wallet context, skilled participants, opportunities, service statistics, and method help into the same request-and-response interface used by other Pilot apps.\n\n## What an agent can inspect\n\n- `slipstream.leaderboard` surfaces ranked market participants.\n- `slipstream.signals` and `slipstream.opportunities` expose the service's derived market-intelligence views.\n- `slipstream.tape` provides the activity stream, while `slipstream.markets` provides market context.\n- `slipstream.wallet` and `slipstream.skilled` support participant-level research.\n- `slipstream.stats` describes service-level statistics, and `slipstream.help` is the runtime discovery entry point.\n\nThe API responses are Ed25519-signed so a caller can verify their origin before using the result downstream. As published in the current catalog, Slipstream exposes research and monitoring methods; it does **not** list an order-placement or trade-execution method. That boundary matters for operators: an agent can use the app as one input to an analysis workflow, but execution policy, spending authority, human approval, and independent verification remain outside this app.\n\nFor production use, inspect `slipstream.help` at runtime before relying on a field or parameter, retain the signed response with the surrounding decision record, and treat market signals as time-sensitive evidence rather than guaranteed outcomes.",
+  "categories": [
+    "finance"
+  ],
+  "primary_category": "finance",
+  "keywords": [
+    "polymarket",
+    "signals",
+    "markets",
+    "leaderboard"
+  ],
+  "version": "1.0.0",
+  "vendor": "Pilot Protocol",
+  "vendor_url": "https://pilotprotocol.network",
+  "license": "MIT",
+  "source_url": "https://github.com/pilot-protocol/catalog",
+  "homepage": "",
+  "methods": [
+    {
+      "name": "slipstream.leaderboard",
+      "summary": "Read Slipstream's ranked view of Polymarket participants for market research.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "slipstream.signals",
+      "summary": "Read the current derived market signals published by Slipstream.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "slipstream.tape",
+      "summary": "Read the recent market-activity tape used for monitoring and analysis.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "slipstream.markets",
+      "summary": "Retrieve the market records and context available through Slipstream.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "slipstream.wallet",
+      "summary": "Inspect the wallet-level market context exposed by the service.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "slipstream.skilled",
+      "summary": "Inspect Slipstream's view of skilled market participants.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "slipstream.opportunities",
+      "summary": "Read the service's current opportunity view for further research.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "slipstream.stats",
+      "summary": "Read service and dataset statistics exposed by Slipstream.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "slipstream.help",
+      "summary": "Discover the current Slipstream methods and their runtime parameters.",
+      "example": "",
+      "gated": ""
+    }
+  ],
+  "changelog": [],
+  "grants": [],
+  "limits": [],
+  "bundles": [
+    {
+      "platform": "darwin-arm64",
+      "bytes": 5002158
+    },
+    {
+      "platform": "darwin-amd64",
+      "bytes": 4628165
+    },
+    {
+      "platform": "linux-arm64",
+      "bytes": 4300921
+    },
+    {
+      "platform": "linux-amd64",
+      "bytes": 5048907
+    }
+  ],
+  "installed_bytes": 0,
+  "depends": [],
+  "protection": "shareable",
+  "featured": false,
+  "in_catalogue": true,
+  "icon": {
+    "mode": "mask",
+    "img": "",
+    "file": "/appicons/io.pilot.slipstream.svg",
+    "fit": "",
+    "pos": "",
+    "color": "oklch(0.6 0.19 155)",
+    "ink": false,
+    "hue": 155,
+    "mark": {
+      "set": "lucide",
+      "name": "trending-up"
+    }
+  },
+  "min_pilot_version": "1.0.0",
+  "runtimes": [
+    "go"
+  ],
+  "published_at": "",
+  "updated_at": "",
+  "product_demo": null
+}

@@ -1,0 +1,457 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilotprotocol.network/schema/appstore-meta/app.schema.json",
+  "title": "Pilot app-store app presentation record",
+  "description": "How one app is described in the app store. This is presentation only: the publisher-signed catalogue decides what exists and what may be installed, and nothing in this record grants a capability or gates an install.",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "tagline",
+    "description",
+    "categories",
+    "primary_category",
+    "icon"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(\\.[a-z0-9][a-z0-9-]*)+$",
+      "description": "Reverse-DNS app id. Must equal the file's base name."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Display name."
+    },
+    "tagline": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One line, no trailing period."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Authored Markdown. The only long-copy field edited by hand; `summary` is derived from it."
+    },
+    "summary": {
+      "type": "string",
+      "readOnly": true,
+      "description": "Server-derived plain text (Markdown flattened, capped at 420 runes). Rejected if present in a source file."
+    },
+    "categories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      },
+      "description": "Category ids, each of which must exist in index.json."
+    },
+    "primary_category": {
+      "type": "string",
+      "description": "The one shelf this app files under; must also appear in categories."
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Search terms; not shown."
+    },
+    "version": {
+      "type": "string",
+      "description": "Latest published version."
+    },
+    "vendor": {
+      "type": "string"
+    },
+    "vendor_url": {
+      "type": "string"
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX id where one applies."
+    },
+    "source_url": {
+      "type": "string"
+    },
+    "homepage": {
+      "type": "string"
+    },
+    "methods": {
+      "type": "array",
+      "description": "The typed IPC methods the app exposes.",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string"
+          },
+          "example": {
+            "type": "string",
+            "description": "A runnable call."
+          },
+          "gated": {
+            "type": "string",
+            "description": "Credential or state a call needs; empty means ungated."
+          }
+        }
+      }
+    },
+    "changelog": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "description": "YYYY-MM-DD."
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "grants": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Capabilities the published bundle declares. Descriptive only — the node reads the signed manifest and is the sole authority on what an install actually asks for."
+    },
+    "limits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "label",
+          "value"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "bundles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "platform"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "platform": {
+            "type": "string",
+            "examples": [
+              "darwin-arm64",
+              "linux-amd64"
+            ]
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "installed_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "On-disk size after install."
+    },
+    "depends": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "optional": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "protection": {
+      "enum": [
+        "guarded",
+        "shareable",
+        ""
+      ],
+      "description": "Whether the supervisor guards calls to this app."
+    },
+    "featured": {
+      "type": "boolean",
+      "description": "In the hero carousel. Must agree with index.json featured_order."
+    },
+    "in_catalogue": {
+      "type": "boolean",
+      "description": "Published in the signed catalogue. False means described but not installable."
+    },
+    "icon": {
+      "type": "object",
+      "required": [
+        "mode",
+        "color",
+        "hue"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "mask",
+            "image"
+          ],
+          "description": "mask tints `file` over `color`; image renders `img`."
+        },
+        "img": {
+          "type": "string",
+          "description": "Required when mode is image."
+        },
+        "file": {
+          "type": "string",
+          "description": "Required when mode is mask."
+        },
+        "fit": {
+          "type": "string",
+          "enum": [
+            "cover",
+            "contain",
+            ""
+          ]
+        },
+        "pos": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string",
+          "description": "Plate colour behind the mark."
+        },
+        "ink": {
+          "type": "boolean",
+          "description": "Plate is light enough to need dark ink."
+        },
+        "hue": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 360
+        },
+        "mark": {
+          "description": "The upstream glyph a mask icon is cut from, so a consumer building its own icon assets knows which one to take. Required when mode is mask, null otherwise.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "set",
+                "name"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "set": {
+                  "enum": [
+                    "simple-icons",
+                    "lucide"
+                  ]
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The file's base name in that icon set."
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "min_pilot_version": {
+      "type": "string"
+    },
+    "runtimes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "published_at": {
+      "type": "string",
+      "description": "YYYY-MM-DD."
+    },
+    "updated_at": {
+      "type": "string",
+      "description": "YYYY-MM-DD."
+    },
+    "product_demo": {
+      "description": "The example-first usage guide shown at install and rendered on both surfaces. Same shape as a submission's product_demo block.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "skill",
+            "title",
+            "quickstart"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "skill": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "when_to_use": {
+              "type": "string"
+            },
+            "metered": {
+              "type": "boolean"
+            },
+            "quickstart": {
+              "$ref": "#/$defs/step"
+            },
+            "examples": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/step"
+              }
+            },
+            "cost": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "free_budget": {
+                      "type": "string"
+                    },
+                    "hard_cap_usd": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "operations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "op"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "op": {
+                            "type": "string"
+                          },
+                          "price": {
+                            "type": "string"
+                          },
+                          "note": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "worked_total": {
+                      "type": "string"
+                    },
+                    "check_balance": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            },
+            "gotchas": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "next": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "expect": {
+          "type": "string"
+        },
+        "cost": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
