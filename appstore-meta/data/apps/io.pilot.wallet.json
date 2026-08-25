@@ -1,0 +1,182 @@
+{
+  "id": "io.pilot.wallet",
+  "name": "Wallet",
+  "tagline": "On-overlay USDC payments across Base, Ethereum, and Polygon",
+  "description": "The Pilot reference wallet brings x402 + EIP-3009 USDC payments to the overlay, with spend caps the supervisor enforces. One secp256k1 address works across all three USDC mainnets (Base, Ethereum, Polygon); per-chain RPC is configurable via PILOT_EVM_RPC_<chainID>.\n\nInstalling this app lets other apps and agents settle payments without leaving the network. Spend caps declared in the manifest are reviewed at install time and enforced on every signing operation — see `pilotctl appstore caps io.pilot.wallet`.",
+  "categories": [
+    "finance"
+  ],
+  "primary_category": "finance",
+  "keywords": [
+    "usdc",
+    "x402",
+    "eip-3009",
+    "evm",
+    "base",
+    "ethereum",
+    "polygon",
+    "payments"
+  ],
+  "version": "0.3.3",
+  "vendor": "Pilot Protocol",
+  "vendor_url": "https://pilotprotocol.network",
+  "license": "AGPL-3.0-or-later",
+  "source_url": "https://github.com/pilot-protocol/wallet",
+  "homepage": "https://pilotprotocol.network",
+  "methods": [
+    {
+      "name": "wallet.balance",
+      "summary": "USDC balance for the wallet.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.balances",
+      "summary": "Balances across all configured chains.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.address",
+      "summary": "The wallet receive address.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.request",
+      "summary": "Create an x402 payment request.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.pay",
+      "summary": "Pay an x402 / EIP-3009 USDC request.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.verify",
+      "summary": "Verify a payment authorization.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.settle",
+      "summary": "Settle a verified payment on-chain.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.topup",
+      "summary": "Top up the wallet balance.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.history",
+      "summary": "Recent payment history.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.spend_caps",
+      "summary": "Show the supervisor-enforced spend caps.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.evm.address",
+      "summary": "EVM receive address.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.evm.balance",
+      "summary": "EVM USDC balance (optional chain_id).",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.evm.satisfy",
+      "summary": "Satisfy an EVM x402 payment requirement.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.evm.verify",
+      "summary": "Verify an EVM payment authorization.",
+      "example": "",
+      "gated": ""
+    },
+    {
+      "name": "wallet.evm.chains",
+      "summary": "List configured EVM chains (Base, Ethereum, Polygon).",
+      "example": "",
+      "gated": ""
+    }
+  ],
+  "changelog": [
+    {
+      "version": "0.3.3",
+      "date": "2026-06-08",
+      "notes": [
+        "Default --evm-chains expands to 8453,1,137 so supervised wallets get all three USDC mainnets out of the box",
+        "PILOT_EVM_CHAINS env overrides the default chain set"
+      ]
+    },
+    {
+      "version": "0.3.2",
+      "date": "2026-06-08",
+      "notes": [
+        "Multichain EVM: same secp256k1 address across Base, Ethereum, Polygon",
+        "New wallet.evm.chains method; all evm.* methods accept an optional chain_id",
+        "Per-chain RPC via PILOT_EVM_RPC_<chainID>"
+      ]
+    },
+    {
+      "version": "0.3.1",
+      "date": "2026-06-08",
+      "notes": [
+        "Wired the wallet.evm.* methods into the binary (declared in v0.3.0 but unregistered)",
+        "Added --evm-identity, --evm-chain, --evm-rpc, --no-evm flags"
+      ]
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-06-08",
+      "notes": [
+        "Signed wallet app bundle: ed25519-signed manifest, sha256-pinned binary"
+      ]
+    }
+  ],
+  "grants": [],
+  "limits": [],
+  "bundles": [
+    {
+      "platform": "darwin-arm64",
+      "bytes": 9110758
+    }
+  ],
+  "installed_bytes": 0,
+  "depends": [],
+  "protection": "guarded",
+  "featured": false,
+  "in_catalogue": true,
+  "icon": {
+    "mode": "image",
+    "img": "/appicons/io.pilot.wallet.png",
+    "file": "",
+    "fit": "contain",
+    "pos": "center",
+    "color": "#ffffff",
+    "ink": false,
+    "hue": 155
+  },
+  "min_pilot_version": "1.0.0",
+  "runtimes": [
+    "go"
+  ],
+  "published_at": "2026-06-08",
+  "updated_at": "2026-06-08",
+  "product_demo": null
+}
