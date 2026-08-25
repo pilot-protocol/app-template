@@ -60,7 +60,7 @@ func TestPublishedSchemaMatchesTheServedType(t *testing.T) {
 		fields []string
 	}{
 		{"app", "../../appstore-meta/schema/app.schema.json", jsonFieldNames(App{})},
-		{"index", "../../appstore-meta/schema/index.schema.json", []string{"schema_version", "source", "categories", "featured_order"}},
+		{"index", "../../appstore-meta/schema/index.schema.json", []string{"schema_version", "source", "categories", "featured_order", "app_order"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			want := append([]string(nil), testCase.fields...)

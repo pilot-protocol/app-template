@@ -24,6 +24,7 @@ type Document struct {
 	Source        string     `json:"source"`
 	Categories    []Category `json:"categories"`
 	FeaturedOrder []string   `json:"featured_order"`
+	AppOrder      []string   `json:"app_order"`
 	Apps          []App      `json:"apps"`
 }
 

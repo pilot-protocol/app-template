@@ -193,3 +193,43 @@ func TestDocumentLookupByID(t *testing.T) {
 		t.Error("App() found an absent app")
 	}
 }
+
+func TestLoadHonoursTheCuratedOrder(t *testing.T) {
+	// The store renders apps in array order, so this is what keeps a shelf
+	// looking the same on both surfaces.
+	second := strings.Replace(validApp, `"io.pilot.postgres"`, `"io.pilot.aaa"`, 1)
+	index := strings.Replace(validIndex, `"featured_order": ["io.pilot.postgres"]`,
+		`"featured_order": ["io.pilot.postgres"], "app_order": ["io.pilot.postgres", "io.pilot.aaa"]`, 1)
+
+	document := loadOK(t, index, map[string]string{"io.pilot.postgres": validApp, "io.pilot.aaa": second})
+
+	if document.Apps[0].ID != "io.pilot.postgres" || document.Apps[1].ID != "io.pilot.aaa" {
+		t.Errorf("curated order ignored: %s, %s", document.Apps[0].ID, document.Apps[1].ID)
+	}
+}
+
+func TestLoadPlacesUnlistedAppsAfterTheCuratedOnes(t *testing.T) {
+	// An app must never become invisible because someone forgot to list it.
+	second := strings.Replace(validApp, `"io.pilot.postgres"`, `"io.pilot.aaa"`, 1)
+	index := strings.Replace(validIndex, `"featured_order": ["io.pilot.postgres"]`,
+		`"featured_order": ["io.pilot.postgres"], "app_order": ["io.pilot.postgres"]`, 1)
+
+	document := loadOK(t, index, map[string]string{"io.pilot.postgres": validApp, "io.pilot.aaa": second})
+
+	if len(document.Apps) != 2 {
+		t.Fatalf("an unlisted app was dropped: %d apps", len(document.Apps))
+	}
+	if document.Apps[0].ID != "io.pilot.postgres" || document.Apps[1].ID != "io.pilot.aaa" {
+		t.Errorf("unlisted app was not placed last: %s, %s", document.Apps[0].ID, document.Apps[1].ID)
+	}
+}
+
+func TestLoadRejectsAnAppOrderNamingAnAbsentApp(t *testing.T) {
+	index := strings.Replace(validIndex, `"featured_order": ["io.pilot.postgres"]`,
+		`"featured_order": ["io.pilot.postgres"], "app_order": ["io.pilot.ghost"]`, 1)
+
+	_, err := Load(fsWith(index, map[string]string{"io.pilot.postgres": validApp}))
+	if err == nil || !strings.Contains(err.Error(), "app_order") {
+		t.Errorf("want an app_order error, got %v", err)
+	}
+}

@@ -36,6 +36,7 @@ type indexDocument struct {
 	Source        string     `json:"source"`
 	Categories    []Category `json:"categories"`
 	FeaturedOrder []string   `json:"featured_order"`
+	AppOrder      []string   `json:"app_order"`
 }
 
 // App returns one app by id.
@@ -90,13 +91,38 @@ func Load(files fs.FS) (*Document, error) {
 		return nil, fmt.Errorf("%s/: no app files found", appsDir)
 	}
 
-	// Sorted so the served bytes — and therefore the ETag — depend only on the
-	// content, never on directory order.
-	sort.Slice(apps, func(i, j int) bool { return apps[i].ID < apps[j].ID })
+	// Ordered so the served bytes — and therefore the ETag — depend only on
+	// the content, never on directory order.
+	//
+	// app_order is the curated sequence the store renders in, so both surfaces
+	// show a shelf in the same order. Anything it does not name follows, by
+	// id, rather than being dropped: an app must never become invisible
+	// because someone forgot to list it.
+	rank := make(map[string]int, len(index.AppOrder))
+	for position, id := range index.AppOrder {
+		rank[id] = position
+	}
+	sort.Slice(apps, func(i, j int) bool {
+		left, leftListed := rank[apps[i].ID]
+		right, rightListed := rank[apps[j].ID]
+		switch {
+		case leftListed && rightListed:
+			return left < right
+		case leftListed != rightListed:
+			return leftListed
+		default:
+			return apps[i].ID < apps[j].ID
+		}
+	})
 
 	for _, id := range index.FeaturedOrder {
 		if _, ok := seen[id]; !ok {
 			return nil, fmt.Errorf("%s: featured_order names %q, which has no app file", indexFile, id)
+		}
+	}
+	for _, id := range index.AppOrder {
+		if _, ok := seen[id]; !ok {
+			return nil, fmt.Errorf("%s: app_order names %q, which has no app file", indexFile, id)
 		}
 	}
 
@@ -105,6 +131,7 @@ func Load(files fs.FS) (*Document, error) {
 		Source:        index.Source,
 		Categories:    index.Categories,
 		FeaturedOrder: nonNilStrings(index.FeaturedOrder),
+		AppOrder:      nonNilStrings(index.AppOrder),
 		Apps:          apps,
 	}, nil
 }
