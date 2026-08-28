@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pilot-protocol/app-store/pkg/manifest"
@@ -57,6 +58,7 @@ type bundleOpts struct {
 	mutate       func(*manifest.Manifest) // applied before signing
 	tamperBinary bool                     // write a different binary than the pinned sha
 	omitHelp     bool                     // drop the *.help method from exposes
+	machO        bool                     // ship a macOS Mach-O binary instead of an ELF one
 }
 
 // buildBundle constructs a real signed .tar.gz and returns its bytes plus the
@@ -68,6 +70,9 @@ func buildBundle(t *testing.T, opts bundleOpts) ([]byte, *manifest.Manifest) {
 		t.Fatalf("genkey: %v", err)
 	}
 	bin := []byte("\x7fELF fake-binary-bytes-for-example-app")
+	if opts.machO {
+		bin = []byte("\xcf\xfa\xed\xfe fake-mach-o-bytes-for-example-app")
+	}
 	sum := sha256.Sum256(bin)
 
 	m := validManifest()
@@ -128,13 +133,27 @@ func writeBundle(t *testing.T, raw []byte) string {
 func entryFor(t *testing.T, raw []byte, m *manifest.Manifest) Entry {
 	t.Helper()
 	sum := sha256.Sum256(raw)
+	url := writeBundle(t, raw)
+	sha := hex.EncodeToString(sum[:])
 	return Entry{
 		ID:           m.ID,
 		Version:      m.AppVersion,
 		Description:  "example app",
-		BundleURL:    writeBundle(t, raw),
-		BundleSHA256: hex.EncodeToString(sum[:]),
+		BundleURL:    url,
+		BundleSHA256: sha,
 	}
+}
+
+// entryForPlatforms is entryFor plus a per-platform bundles map, which is what a
+// published catalogue entry is expected to carry.
+func entryForPlatforms(t *testing.T, raw []byte, m *manifest.Manifest, plats ...string) Entry {
+	t.Helper()
+	e := entryFor(t, raw, m)
+	e.Bundles = map[string]BundleVariant{}
+	for _, p := range plats {
+		e.Bundles[p] = BundleVariant{BundleURL: e.BundleURL, BundleSHA256: e.BundleSHA256}
+	}
+	return e
 }
 
 func findCheck(t *testing.T, r Result, name string) Check {
@@ -367,7 +386,7 @@ func writeCatalogue(t *testing.T, entries ...Entry) string {
 
 func TestVerifyCatalogue_AllValid(t *testing.T) {
 	raw, m := buildBundle(t, bundleOpts{})
-	e := entryFor(t, raw, m)
+	e := entryForPlatforms(t, raw, m, "linux/amd64")
 	path := writeCatalogue(t, e)
 
 	results, err := VerifyCatalogue(path, "")
@@ -454,5 +473,87 @@ func TestExtractBundleRejectsTooManyEntries(t *testing.T) {
 
 	if _, _, err := extractBundle(raw); err == nil {
 		t.Error("expected rejection of a bundle exceeding the entry-count cap")
+	}
+}
+
+// --- per-platform bundle gate ---------------------------------------------
+
+// A darwin binary published under a linux platform key installs fine, matches
+// its sha on every host, and then never spawns. That is the failure this gate
+// exists to catch, so it must be a hard fail.
+func TestVerifyCatalogue_RejectsMachOUnderLinuxPlatform(t *testing.T) {
+	raw, m := buildBundle(t, bundleOpts{machO: true})
+	e := entryForPlatforms(t, raw, m, "linux/arm64")
+	results, err := VerifyCatalogue(writeCatalogue(t, e), "")
+	if err != nil {
+		t.Fatalf("VerifyCatalogue: %v", err)
+	}
+	c := findCheck(t, results[0], "binary matches linux/arm64")
+	if c.OK {
+		t.Errorf("a Mach-O binary under linux/arm64 must fail the gate")
+	}
+	if !strings.Contains(c.Msg, "macho") {
+		t.Errorf("message should name the format found, got %q", c.Msg)
+	}
+}
+
+// The same bytes under the platform they actually target must pass.
+func TestVerifyCatalogue_AcceptsMachOUnderDarwinPlatform(t *testing.T) {
+	raw, m := buildBundle(t, bundleOpts{machO: true})
+	e := entryForPlatforms(t, raw, m, "darwin/arm64")
+	results, err := VerifyCatalogue(writeCatalogue(t, e), "")
+	if err != nil {
+		t.Fatalf("VerifyCatalogue: %v", err)
+	}
+	if c := findCheck(t, results[0], "binary matches darwin/arm64"); !c.OK {
+		t.Errorf("Mach-O under darwin/arm64 should pass, got %q", c.Msg)
+	}
+}
+
+// A published entry with no bundles map serves one binary to every platform.
+func TestVerifyCatalogue_RequiresPlatformBundles(t *testing.T) {
+	raw, m := buildBundle(t, bundleOpts{})
+	results, err := VerifyCatalogue(writeCatalogue(t, entryFor(t, raw, m)), "")
+	if err != nil {
+		t.Fatalf("VerifyCatalogue: %v", err)
+	}
+	if c := findCheck(t, results[0], "declares per-platform bundles"); c.OK {
+		t.Errorf("a catalogue entry without a bundles map must fail the gate")
+	}
+}
+
+// But a local bundle handed to `pilot-app verify <bundle.tar.gz>` has no
+// platform context, so it must not be held to that rule.
+func TestVerifyEntry_LocalBundleNeedsNoPlatformBundles(t *testing.T) {
+	raw, m := buildBundle(t, bundleOpts{})
+	r := VerifyEntry(entryFor(t, raw, m), nil)
+	for _, c := range r.Checks {
+		if c.Name == "declares per-platform bundles" {
+			t.Errorf("local bundle verify should not require a bundles map")
+		}
+	}
+	if !r.OK() {
+		for _, c := range r.Checks {
+			if !c.OK {
+				t.Errorf("unexpected failing check %q: %s", c.Name, c.Msg)
+			}
+		}
+	}
+}
+
+// A tombstone is an id kept alive for pin continuity, not an installable app,
+// so the bundle checks must not fire on it.
+func TestVerifyCatalogue_SkipsTombstone(t *testing.T) {
+	e := Entry{ID: "io.pilot.old", RenamedTo: "io.pilot.new", Hidden: true}
+	results, err := VerifyCatalogue(writeCatalogue(t, e), "")
+	if err != nil {
+		t.Fatalf("VerifyCatalogue: %v", err)
+	}
+	if !results[0].OK() {
+		for _, c := range results[0].Checks {
+			if !c.OK {
+				t.Errorf("tombstone should pass, but %q failed: %s", c.Name, c.Msg)
+			}
+		}
 	}
 }
