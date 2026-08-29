@@ -557,3 +557,47 @@ func TestVerifyCatalogue_SkipsTombstone(t *testing.T) {
 		}
 	}
 }
+
+// The per-platform bundle is the one pilotctl installs, so it must get the same
+// manifest scrutiny as the legacy single bundle — not just a digest check.
+func TestVerifyCatalogue_VariantBinaryPinIsChecked(t *testing.T) {
+	raw, m := buildBundle(t, bundleOpts{tamperBinary: true})
+	e := entryForPlatforms(t, raw, m, "linux/amd64")
+	results, err := VerifyCatalogue(writeCatalogue(t, e), "")
+	if err != nil {
+		t.Fatalf("VerifyCatalogue: %v", err)
+	}
+	if c := findCheck(t, results[0], "binary.sha256 pin for linux/amd64"); c.OK {
+		t.Errorf("a variant whose binary does not match its manifest pin must fail")
+	}
+}
+
+func TestVerifyCatalogue_VariantSignatureIsChecked(t *testing.T) {
+	_, m := buildBundle(t, bundleOpts{})
+	m.Store.Signature = base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
+	mfRaw, _ := json.Marshal(m)
+	bin := []byte("\x7fELF fake-binary-bytes-for-example-app")
+	raw := tarGz(t, map[string][]byte{"manifest.json": mfRaw, "bin/example-app": bin})
+	e := entryForPlatforms(t, raw, m, "linux/amd64")
+	results, err := VerifyCatalogue(writeCatalogue(t, e), "")
+	if err != nil {
+		t.Fatalf("VerifyCatalogue: %v", err)
+	}
+	if c := findCheck(t, results[0], "signature verifies for linux/amd64"); c.OK {
+		t.Errorf("a variant with a forged manifest signature must fail")
+	}
+}
+
+// A variant carrying a manifest for a different app or version is a swap.
+func TestVerifyCatalogue_VariantIDVersionMustMatch(t *testing.T) {
+	raw, m := buildBundle(t, bundleOpts{})
+	e := entryForPlatforms(t, raw, m, "linux/amd64")
+	e.Version = "9.9.9" // catalogue claims a version the bundle's manifest does not
+	results, err := VerifyCatalogue(writeCatalogue(t, e), "")
+	if err != nil {
+		t.Fatalf("VerifyCatalogue: %v", err)
+	}
+	if c := findCheck(t, results[0], "id/version match for linux/amd64"); c.OK {
+		t.Errorf("a variant whose manifest id/version disagree with the entry must fail")
+	}
+}

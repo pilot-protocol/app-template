@@ -136,22 +136,22 @@
   "bundles": [
     {
       "platform": "darwin-amd64",
-      "bytes": 0
+      "bytes": 5270813
     },
     {
       "platform": "darwin-arm64",
-      "bytes": 0
+      "bytes": 4937810
     },
     {
       "platform": "linux-amd64",
-      "bytes": 0
+      "bytes": 5113957
     },
     {
       "platform": "linux-arm64",
-      "bytes": 0
+      "bytes": 4683112
     }
   ],
-  "installed_bytes": 0,
+  "installed_bytes": 9251815,
   "in_catalogue": true,
   "featured": false,
   "icon": {

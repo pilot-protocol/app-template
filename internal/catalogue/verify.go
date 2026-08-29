@@ -213,10 +213,28 @@ func verifyVariants(r *Result, e Entry) {
 			got, fmt.Sprintf("got %s, catalogue says %s", got, v.BundleSHA256)) {
 			continue
 		}
-		_, binBytes, err := extractBundle(raw)
+		mfRaw, binBytes, err := extractBundle(raw)
 		if !r.check("bundle for "+plat+" contains manifest.json + bin/<binary>", err == nil, "", fmt.Sprintf("%v", err)) {
 			continue
 		}
+
+		// The per-platform bundle is the one pilotctl actually installs, so it
+		// gets the same manifest scrutiny as the legacy single bundle — not
+		// just a digest and a format sniff.
+		m, err := manifest.Parse(mfRaw)
+		if !r.check("manifest parses for "+plat, err == nil, "", fmt.Sprintf("%v", err)) {
+			continue
+		}
+		binSum := sha256.Sum256(binBytes)
+		binSHA := hex.EncodeToString(binSum[:])
+		r.check("binary.sha256 pin for "+plat, strings.EqualFold(binSHA, m.Binary.SHA256),
+			binSHA, fmt.Sprintf("manifest pins %s, binary is %s", m.Binary.SHA256, binSHA))
+		r.check("signature verifies for "+plat, m.VerifySignature() == nil,
+			"signed by "+short(m.Store.Publisher), errString(m.VerifySignature()))
+		r.check("id/version match for "+plat, e.ID == m.ID && e.Version == m.AppVersion,
+			e.ID+" "+e.Version,
+			fmt.Sprintf("catalogue %s %s != manifest %s %s", e.ID, e.Version, m.ID, m.AppVersion))
+
 		r.checkPlatformBinary(plat, binBytes)
 	}
 }
@@ -428,6 +446,8 @@ func execFormat(b []byte) string {
 		// Mach-O, 32/64-bit, both byte orders, plus the fat/universal wrappers.
 		case (b[0] == 0xcf || b[0] == 0xce) && b[1] == 0xfa && b[2] == 0xed && b[3] == 0xfe,
 			b[0] == 0xfe && b[1] == 0xed && b[2] == 0xfa && (b[3] == 0xce || b[3] == 0xcf),
+			// 0xcafebabe is also the Java class magic; harmless here because the
+			// verdict is only used to compare against a declared native platform.
 			b[0] == 0xca && b[1] == 0xfe && b[2] == 0xba && b[3] == 0xbe,
 			b[0] == 0xbe && b[1] == 0xba && b[2] == 0xfe && b[3] == 0xca:
 			return "macho"
