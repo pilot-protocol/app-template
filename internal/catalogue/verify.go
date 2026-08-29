@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -43,6 +44,29 @@ type Entry struct {
 	Description  string `json:"description"`
 	BundleURL    string `json:"bundle_url"`
 	BundleSHA256 string `json:"bundle_sha256"`
+
+	// RenamedTo and Hidden mark a tombstone: an id kept only so already-installed
+	// copies keep their publisher pin and so the old id still redirects. A
+	// tombstone ships no bundle, so the bundle checks do not apply to it.
+	RenamedTo string `json:"renamed_to,omitempty"`
+	Hidden    bool   `json:"hidden,omitempty"`
+
+	// Bundles is the optional v2 per-platform map, keyed "os/arch". pilotctl
+	// installs from this when present, so the review gate has to verify every
+	// variant — not just the legacy single BundleURL above.
+	Bundles map[string]BundleVariant `json:"bundles,omitempty"`
+}
+
+// BundleVariant is one platform's tarball and its pinned digest.
+type BundleVariant struct {
+	BundleURL    string `json:"bundle_url"`
+	BundleSHA256 string `json:"bundle_sha256"`
+}
+
+// isTombstone reports whether the entry is a retired id kept only for pin
+// continuity and redirection, rather than an installable app.
+func (e Entry) isTombstone() bool {
+	return e.RenamedTo != "" || (e.Hidden && e.BundleURL == "")
 }
 
 // Result accumulates the per-entry verdict.
@@ -84,7 +108,21 @@ func (r *Result) check(name string, ok bool, okMsg, failMsg string) bool {
 // VerifySignature, help-in-exposes, id/version consistency. prev is the entry
 // being replaced (for the downgrade check), or nil.
 func VerifyEntry(e Entry, prev *Entry) Result {
+	return verifyEntry(e, prev, false)
+}
+
+// verifyEntry runs the gate. inCatalogue is true only for entries read out of a
+// catalogue.json: a published entry is expected to declare its platforms, while
+// a local bundle passed to `pilot-app verify <bundle.tar.gz>` legitimately has
+// no platform context to check against.
+func verifyEntry(e Entry, prev *Entry, inCatalogue bool) Result {
 	r := Result{ID: e.ID}
+
+	// A tombstone carries no bundle by design; verifying one only produces noise.
+	if e.isTombstone() {
+		r.pass("tombstone entry", "renamed to "+e.RenamedTo+"; no bundle to verify")
+		return r
+	}
 
 	raw, err := fetch(e.BundleURL)
 	if !r.check("bundle_url resolves", err == nil, e.BundleURL, fmt.Sprintf("fetch %s: %v", e.BundleURL, err)) {
@@ -127,6 +165,16 @@ func VerifyEntry(e Entry, prev *Entry) Result {
 	r.check("exposes a <ns>.help method", hasHelp(m.Exposes),
 		"discovery contract satisfied", "no *.help method in exposes (SPEC §5.4)")
 
+	// The legacy single bundle carries no platform declaration, so we can only
+	// report what it is; the per-platform variants below are the checkable part.
+	if len(e.Bundles) > 0 {
+		verifyVariants(&r, e)
+	} else if inCatalogue {
+		r.check("declares per-platform bundles", false, "",
+			"no bundles map: every host installs the single bundle_url, which holds a "+execFormat(binBytes)+
+				" binary — hosts on any other OS install something they cannot execute, and the app silently never spawns")
+	}
+
 	r.check("catalogue.id == manifest.id", e.ID == m.ID, e.ID, fmt.Sprintf("catalogue %q != manifest %q", e.ID, m.ID))
 	r.check("catalogue.version == manifest.app_version", e.Version == m.AppVersion,
 		e.Version, fmt.Sprintf("catalogue %q != manifest %q", e.Version, m.AppVersion))
@@ -137,6 +185,58 @@ func VerifyEntry(e Entry, prev *Entry) Result {
 			fmt.Sprintf("downgrade: %s < existing %s", e.Version, prev.Version))
 	}
 	return r
+}
+
+// verifyVariants fetches every declared platform bundle and checks its digest
+// and its binary format. Without this the review gate only ever saw the legacy
+// bundle_url, while pilotctl installs from the per-platform map.
+func verifyVariants(r *Result, e Entry) {
+	plats := make([]string, 0, len(e.Bundles))
+	for p := range e.Bundles {
+		plats = append(plats, p)
+	}
+	sort.Strings(plats)
+
+	for _, plat := range plats {
+		v := e.Bundles[plat]
+		if v.BundleURL == "" {
+			r.fail("bundle for "+plat, "empty bundle_url")
+			continue
+		}
+		raw, err := fetch(v.BundleURL)
+		if !r.check("bundle for "+plat+" resolves", err == nil, v.BundleURL, fmt.Sprintf("fetch %s: %v", v.BundleURL, err)) {
+			continue
+		}
+		sum := sha256.Sum256(raw)
+		got := hex.EncodeToString(sum[:])
+		if !r.check("bundle_sha256 for "+plat, strings.EqualFold(got, v.BundleSHA256),
+			got, fmt.Sprintf("got %s, catalogue says %s", got, v.BundleSHA256)) {
+			continue
+		}
+		mfRaw, binBytes, err := extractBundle(raw)
+		if !r.check("bundle for "+plat+" contains manifest.json + bin/<binary>", err == nil, "", fmt.Sprintf("%v", err)) {
+			continue
+		}
+
+		// The per-platform bundle is the one pilotctl actually installs, so it
+		// gets the same manifest scrutiny as the legacy single bundle — not
+		// just a digest and a format sniff.
+		m, err := manifest.Parse(mfRaw)
+		if !r.check("manifest parses for "+plat, err == nil, "", fmt.Sprintf("%v", err)) {
+			continue
+		}
+		binSum := sha256.Sum256(binBytes)
+		binSHA := hex.EncodeToString(binSum[:])
+		r.check("binary.sha256 pin for "+plat, strings.EqualFold(binSHA, m.Binary.SHA256),
+			binSHA, fmt.Sprintf("manifest pins %s, binary is %s", m.Binary.SHA256, binSHA))
+		r.check("signature verifies for "+plat, m.VerifySignature() == nil,
+			"signed by "+short(m.Store.Publisher), errString(m.VerifySignature()))
+		r.check("id/version match for "+plat, e.ID == m.ID && e.Version == m.AppVersion,
+			e.ID+" "+e.Version,
+			fmt.Sprintf("catalogue %s %s != manifest %s %s", e.ID, e.Version, m.ID, m.AppVersion))
+
+		r.checkPlatformBinary(plat, binBytes)
+	}
 }
 
 // EntryForBundle builds a catalogue Entry for a local bundle tarball: id and
@@ -241,7 +341,7 @@ func VerifyCatalogue(newPath, oldPath string) ([]Result, error) {
 				p = &pe
 			}
 		}
-		out = append(out, VerifyEntry(e, p))
+		out = append(out, verifyEntry(e, p, true))
 	}
 	return out, nil
 }
@@ -333,6 +433,69 @@ func extractBundle(targz []byte) (mfRaw, binBytes []byte, err error) {
 		return nil, nil, fmt.Errorf("binary %q named in manifest not found in bundle", m.Binary.Path)
 	}
 	return mfRaw, binBytes, nil
+}
+
+// execFormat names the executable container a binary is in, from its magic
+// bytes. Enough to tell a Linux build from a macOS one, which is the mistake
+// this gate exists to catch.
+func execFormat(b []byte) string {
+	if len(b) >= 4 {
+		switch {
+		case b[0] == 0x7f && b[1] == 'E' && b[2] == 'L' && b[3] == 'F':
+			return "elf"
+		// Mach-O, 32/64-bit, both byte orders, plus the fat/universal wrappers.
+		case (b[0] == 0xcf || b[0] == 0xce) && b[1] == 0xfa && b[2] == 0xed && b[3] == 0xfe,
+			b[0] == 0xfe && b[1] == 0xed && b[2] == 0xfa && (b[3] == 0xce || b[3] == 0xcf),
+			// 0xcafebabe is also the Java class magic; harmless here because the
+			// verdict is only used to compare against a declared native platform.
+			b[0] == 0xca && b[1] == 0xfe && b[2] == 0xba && b[3] == 0xbe,
+			b[0] == 0xbe && b[1] == 0xba && b[2] == 0xfe && b[3] == 0xca:
+			return "macho"
+		case b[0] == 'M' && b[1] == 'Z':
+			return "pe"
+		case b[0] == '#' && b[1] == '!':
+			return "script"
+		}
+	}
+	return "unknown"
+}
+
+// formatForOS is the executable container a given GOOS must ship.
+func formatForOS(goos string) string {
+	switch goos {
+	case "linux":
+		return "elf"
+	case "darwin":
+		return "macho"
+	case "windows":
+		return "pe"
+	}
+	return ""
+}
+
+// checkPlatformBinary asserts that the binary inside a platform's bundle is
+// actually executable on that platform. A publisher building on a Mac ships a
+// Mach-O binary; without this check the sha matches on every host, install
+// succeeds, and the app simply never spawns on Linux with no error anywhere.
+func (r *Result) checkPlatformBinary(plat string, binBytes []byte) {
+	goos, _, ok := strings.Cut(plat, "/")
+	if !ok {
+		return
+	}
+	want := formatForOS(goos)
+	if want == "" {
+		return
+	}
+	got := execFormat(binBytes)
+	if got == "script" {
+		// A shebang script is portable by itself but depends on an interpreter
+		// the bundle does not carry; flag it rather than silently passing.
+		r.fail("binary matches "+plat, "bundle ships a #! script, not a native "+want+" binary; the interpreter is not part of the bundle")
+		return
+	}
+	r.check("binary matches "+plat, got == want,
+		got+" as expected for "+goos,
+		fmt.Sprintf("bundle for %s contains a %s binary, want %s — it will install and then never spawn", plat, got, want))
 }
 
 func hasHelp(exposes []string) bool {

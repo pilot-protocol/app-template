@@ -83,6 +83,7 @@
     "io.pilot.bowmark",
     "io.pilot.orthogonal",
     "io.pilot.didit",
-    "io.pilot.tldr"
+    "io.pilot.tldr",
+    "io.pilot.insforge"
   ]
 }
