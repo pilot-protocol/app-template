@@ -11,6 +11,7 @@ package scaffold
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"sort"
@@ -278,6 +279,11 @@ type Backend struct {
 	//                  publisher uploads the master key to Pilot once; users bring nothing.
 	Auth string `yaml:"auth"`
 
+	// MCP, when set, adds a JSON-RPC tool-server backend alongside base_url for
+	// methods that declare an `mcp:` route. Credentials are never shared between
+	// the two.
+	MCP *MCPBackend `yaml:"mcp"`
+
 	// X402 enables transparent, capped payment for paid (x402) APIs: on a
 	// backend HTTP 402 the adapter asks the Pilot wallet to satisfy the charge
 	// and retries with X-PAYMENT. Presence enables it; it adds an ipc.call
@@ -479,6 +485,89 @@ const DefaultProvisionPath = "/_provision"
 // broker's pilotBalancePath can never drift apart.
 const BalanceMetaPath = pilotpath.Balance
 
+// Blob staging defaults for multipart uploads.
+const (
+	// DefaultFileField is the form field a file is sent under when the route
+	// does not name one.
+	DefaultFileField = "file"
+	// DefaultBlobParam is the payload key carrying the staged blob id.
+	DefaultBlobParam = "blob_id"
+	// DefaultMaxBlobBytes bounds one staged upload. Sized above the largest
+	// partner limit we ship against (20 MiB) with room for a manifest bump.
+	DefaultMaxBlobBytes int64 = 24 << 20
+	// BlobDir is where staged uploads live, under the app's own directory so the
+	// manifest can grant exactly it and nothing wider.
+	BlobDir = "$APP/blobs"
+)
+
+// HasMCP reports whether any method is a tool-server call.
+func (c *Config) HasMCP() bool {
+	for i := range c.Methods {
+		if c.Methods[i].MCP != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// MCPHost is the tool server's hostname, for the net.dial grant.
+func (c *Config) MCPHost() string {
+	if c.Backend.MCP == nil {
+		return ""
+	}
+	if u, err := url.Parse(c.Backend.MCP.URL); err == nil {
+		return u.Hostname()
+	}
+	return ""
+}
+
+// HasBillable reports whether any method costs the user real money.
+//
+// This is deliberately NOT `gated`. Gated means "your plan does not include
+// this" — the call is unavailable until the account is upgraded. Billable means
+// the call works fine and charges you for it. Conflating them tells an agent
+// something false in both directions: that a working method is locked, or that
+// a free-to-attempt method is free to use.
+//
+// It matters most for a byo app fronting a partner who bills out-of-band, where
+// Pilot has no price to meter and the only honest thing to do is say which
+// calls spend money and let the agent decide.
+func (c *Config) HasBillable() bool {
+	for i := range c.Methods {
+		if strings.TrimSpace(c.Methods[i].Billable) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasMultipart reports whether any method sends multipart/form-data. It drives
+// the blob-staging runtime, the injected upload methods, and the $APP/blobs
+// grants — all three or none, since a staged upload with no way to stage is
+// just a method that always fails.
+func (c *Config) HasMultipart() bool {
+	for i := range c.Methods {
+		if c.Methods[i].HTTP != nil && c.Methods[i].HTTP.Multipart != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// MaxBlobBytes is the largest staged upload any multipart method allows.
+func (c *Config) MaxBlobBytes() int64 {
+	max := int64(0)
+	for i := range c.Methods {
+		if h := c.Methods[i].HTTP; h != nil && h.Multipart != nil && h.Multipart.MaxBytes > max {
+			max = h.Multipart.MaxBytes
+		}
+	}
+	if max == 0 {
+		return DefaultMaxBlobBytes
+	}
+	return max
+}
+
 // ProvisionPath is the reserved provision route the generated adapter recognizes.
 func (c *Config) ProvisionPath() string { return DefaultProvisionPath }
 
@@ -574,9 +663,12 @@ type Method struct {
 	CLI       *CLIRoute         `yaml:"cli"`       // cli backend route
 	Local     *LocalRoute       `yaml:"local"`     // local metadata route (no backend call)
 	Signup    *SignupRoute      `yaml:"signup"`    // no-broker self-signup route (mints + saves a per-user key)
+	Upload    *UploadRoute      `yaml:"-"`         // injected blob-staging step for a multipart app (never authored)
+	MCP       *MCPRoute         `yaml:"mcp"`       // tool-server route: a JSON-RPC tool call on backend.mcp, sent with NO credentials
 	Params    map[string]string `yaml:"params"`    // name -> human description, for help
 	Roundtrip string            `yaml:"roundtrip"` // measured warm roundtrip, for help
 	Gated     string            `yaml:"gated"`     // non-empty = usable only after an account upgrade; the string is the reason, surfaced in a disclaimer at the bottom of <ns>.help
+	Billable  string            `yaml:"billable"`  // non-empty = this call costs the user real money; the string says what it costs, surfaced in <ns>.help
 }
 
 // SignupRoute makes a method self-provision a per-user API key WITHOUT a Pilot
@@ -668,6 +760,69 @@ type LocalRoute struct {
 //
 // Omitting a param's location keeps the historical default, so existing specs
 // build identically.
+// MCPRoute maps a method onto a tool exposed by a JSON-RPC tool server
+// (backend.mcp), rather than onto a REST endpoint on backend.base_url.
+//
+// Tool servers are their own host with their own auth story — usually none —
+// so these methods deliberately do NOT go through the REST client and never
+// carry its credentials. See MCPBackend.
+type MCPRoute struct {
+	// Tool is the tool name as the server advertises it in tools/list.
+	Tool string `yaml:"tool"`
+	// Wrap, when set, nests the method payload under this single argument name
+	// (some servers take one object argument, e.g. {"intake": {...}}).
+	Wrap string `yaml:"wrap"`
+	// Keep lists payload keys that stay at the TOP level when Wrap is set.
+	// Some tools take a mix — an id beside a nested update object, e.g.
+	// {"formation_id": "...", "update": {...}} — and wrapping the id along with
+	// everything else silently produces a call the server cannot satisfy.
+	Keep []string `yaml:"keep"`
+}
+
+// MCPBackend points at a JSON-RPC tool server reachable over Streamable HTTP.
+//
+// It is a SECOND backend, alongside base_url, and the separation is the point:
+// an app can front a credentialed REST API and an open tool server at once
+// without the REST key ever reaching the tool server's host. The generated
+// client for these routes is built with no auth headers at all, so there is no
+// path by which the user's key leaks to a different origin.
+type MCPBackend struct {
+	// URL is the tool server endpoint (the one that answers initialize).
+	URL string `yaml:"url"`
+	// Auth is reserved; only "" (no credentials) is supported today. It exists
+	// so adding a credentialed tool server later is a config change and not a
+	// silent behaviour change for every app already shipping.
+	Auth string `yaml:"auth"`
+}
+
+// UploadRoute marks one of the three blob-staging methods injected into any app
+// with a multipart route. They are never authored in pilot.app.yaml — an author
+// declares the upload itself and gets the staging steps that make it reachable.
+//
+// Step is "begin", "chunk", or "abort".
+type UploadRoute struct {
+	Step string `yaml:"step"`
+}
+
+// MultipartRoute makes a method send multipart/form-data instead of a JSON body.
+//
+// The file does not arrive in the IPC payload — it cannot, since ipc.MaxFrameSize
+// caps one envelope at 1 MiB and partner upload limits are far larger. The agent
+// stages it first through <ns>.upload_begin / upload_chunk, and this method takes
+// the resulting blob id. Every other param becomes a form field.
+type MultipartRoute struct {
+	// FileField is the form field the file is sent under (default "file").
+	// It must match what the partner's endpoint expects.
+	FileField string `yaml:"file_field"`
+	// BlobParam is the payload key carrying the staged blob id (default
+	// "blob_id"). It is consumed by the adapter and never sent as a form field.
+	BlobParam string `yaml:"blob_param"`
+	// MaxBytes caps a staged upload (default DefaultMaxBlobBytes). Set it to the
+	// partner's own documented limit so an oversize file is refused locally
+	// rather than after the bytes have crossed the network.
+	MaxBytes int64 `yaml:"max_bytes"`
+}
+
 type HTTPRoute struct {
 	Verb string `yaml:"verb"` // GET (default) | POST | PATCH | PUT | DELETE
 	Path string `yaml:"path"` // e.g. /current or /v1/calls/{call_id}
@@ -679,6 +834,10 @@ type HTTPRoute struct {
 	// with ~ (expanded to $HOME at runtime). e.g. agentphone.buy_number captures
 	// the provisioned number to ~/.pilot/.agentphone.
 	CaptureTo string `yaml:"capture_to"`
+
+	// Multipart, when set, sends this method as multipart/form-data built from a
+	// staged blob rather than as a JSON body. See MultipartRoute.
+	Multipart *MultipartRoute `yaml:"multipart"`
 
 	// ParamIn carries each param's explicit location (one of the five values
 	// above); a param absent from the map takes the verb/path default. Set from
@@ -874,6 +1033,54 @@ func (c *Config) Resolve() {
 	// method that always 403s. A provisioned app that wants a balance method
 	// must author one itself, pointed at its actual balance path (see
 	// io.pilot.smol's hand-authored `smol.balance` -> "/_balance").
+	// Multipart defaults, then the staging methods that make an upload reachable.
+	// Injected before the normalization loop below so they pick up the same
+	// Kind/Duration/Timeout defaults as an authored method and flow through
+	// registration, the manifest `exposes` list, and <ns>.help like any other.
+	for i := range c.Methods {
+		h := c.Methods[i].HTTP
+		if h == nil || h.Multipart == nil {
+			continue
+		}
+		if h.Multipart.FileField == "" {
+			h.Multipart.FileField = DefaultFileField
+		}
+		if h.Multipart.BlobParam == "" {
+			h.Multipart.BlobParam = DefaultBlobParam
+		}
+		if h.Multipart.MaxBytes == 0 {
+			h.Multipart.MaxBytes = DefaultMaxBlobBytes
+		}
+	}
+	if c.HasMultipart() {
+		for _, step := range []struct{ name, step, kind, dur, summary string }{
+			{"upload_begin", "begin", "utility", "fast",
+				"Start a staged upload and get a blob_id. The file does NOT travel in one IPC message — an envelope is capped at 1 MiB — so declare it here ({\"file_name\",\"content_type\",\"total_bytes\",\"sha256\"}), push the bytes with " + c.Namespace + ".upload_chunk, then pass the blob_id to the upload method."},
+			{"upload_chunk", "chunk", "utility", "fast",
+				"Append the next chunk of a staged upload: {\"blob_id\",\"seq\" (0-based, strictly sequential),\"data_base64\"}. Send at most 512 KiB of raw bytes per call. Returns {\"received\",\"total_bytes\",\"complete\"}; when complete, the sha256 you declared has been verified and the blob is ready to send."},
+			{"upload_abort", "abort", "utility", "fast",
+				"Discard a staged upload and its bytes: {\"blob_id\"}. Staged uploads are also reclaimed automatically once they go stale."},
+		} {
+			name := c.Namespace + "." + step.name
+			exists := false
+			for i := range c.Methods {
+				if c.Methods[i].Name == name {
+					exists = true
+					break
+				}
+			}
+			if exists {
+				continue
+			}
+			c.Methods = append(c.Methods, Method{
+				Name:     name,
+				Summary:  step.summary,
+				Kind:     step.kind,
+				Duration: step.dur,
+				Upload:   &UploadRoute{Step: step.step},
+			})
+		}
+	}
 	if c.Managed() && !c.Provisioned() {
 		balName := c.Namespace + ".balance"
 		has := false
@@ -1084,6 +1291,11 @@ func (c *Config) Validate() []error {
 				errs = append(errs, fmt.Errorf("methods[%d] (%s): a method cannot declare both a local and an http route", i, m.Name))
 			case m.Signup != nil && (m.HTTP != nil || m.Local != nil || m.CLI != nil):
 				errs = append(errs, fmt.Errorf("methods[%d] (%s): a signup method must not also declare an http/cli/local route", i, m.Name))
+			case m.Upload != nil:
+				// Blob-staging steps are generated, never authored: they run
+				// entirely in the adapter and have no backend route to validate.
+			case m.MCP != nil:
+				errs = append(errs, c.validateMCPMethod(i, m)...)
 			case m.Signup != nil:
 				errs = append(errs, c.validateSignupMethod(i, m)...)
 			case m.Local != nil:
@@ -1108,6 +1320,71 @@ func (c *Config) Validate() []error {
 				errs = append(errs, fmt.Errorf("methods[%d] (%s): a hybrid method needs an http: (cloud) or cli: (local) route", i, m.Name))
 			}
 		}
+	}
+	return errs
+}
+
+// validateMCPMethod checks one tool-server route.
+func (c *Config) validateMCPMethod(i int, m Method) []error {
+	var errs []error
+	if c.Backend.MCP == nil || strings.TrimSpace(c.Backend.MCP.URL) == "" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): declares an mcp route but backend.mcp.url is not set", i, m.Name))
+	} else if u, err := url.Parse(c.Backend.MCP.URL); err != nil || u.Hostname() == "" || (u.Scheme != "https" && !isLoopbackHost(u.Hostname())) {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): backend.mcp.url %q must be an https URL", i, m.Name, c.Backend.MCP.URL))
+	}
+	if len(m.MCP.Keep) > 0 && strings.TrimSpace(m.MCP.Wrap) == "" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): mcp.keep only means something with mcp.wrap set", i, m.Name))
+	}
+	if strings.TrimSpace(m.MCP.Tool) == "" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): mcp.tool is required (the tool name the server advertises)", i, m.Name))
+	}
+	if m.HTTP != nil || m.CLI != nil || m.Local != nil || m.Signup != nil {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): an mcp method must not also declare an http/cli/local/signup route", i, m.Name))
+	}
+	// Only the no-credential mode is implemented. Failing loudly here beats an
+	// app shipping with an `auth:` its client silently ignores.
+	if c.Backend.MCP != nil && strings.TrimSpace(c.Backend.MCP.Auth) != "" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): backend.mcp.auth %q is not supported — tool-server routes send no credentials", i, m.Name, c.Backend.MCP.Auth))
+	}
+	return errs
+}
+
+// validateMultipartMethod checks one method's multipart route.
+//
+// Every rule here turns a spec that would generate a broken adapter into a
+// build-time error, because the failure it prevents is otherwise only visible
+// as a partner-side 422 long after publish.
+func (c *Config) validateMultipartMethod(i int, m Method) []error {
+	mp := m.HTTP.Multipart
+	var errs []error
+	if c.Backend.Type != "http" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): multipart is an http-backend route; backend.type is %q", i, m.Name, c.Backend.Type))
+	}
+	if !m.HTTP.BodyVerb() {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): multipart needs a body verb (POST/PUT/PATCH), got %s — there is nowhere to put the form", i, m.Name, m.HTTP.Verb))
+	}
+	if strings.TrimSpace(mp.FileField) == "" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): multipart.file_field must not be empty", i, m.Name))
+	}
+	if strings.TrimSpace(mp.BlobParam) == "" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): multipart.blob_param must not be empty", i, m.Name))
+	}
+	// The blob id is consumed by the adapter to find the staged bytes. If it were
+	// also the file field, the field would be written twice with different
+	// meanings — once as the id, once as the file.
+	if mp.BlobParam != "" && mp.BlobParam == mp.FileField {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): multipart.blob_param and file_field are both %q; the blob id names the staged file, it is not the file", i, m.Name, mp.FileField))
+	}
+	// A path/query/header-located param never reaches the form, so pointing the
+	// blob id at one silently loses it and the upload sends an empty file.
+	if loc := m.HTTP.ParamIn[mp.BlobParam]; loc != "" && loc != "body" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): multipart.blob_param %q is located in %q; it must stay in the body, where the adapter consumes it", i, m.Name, mp.BlobParam, loc))
+	}
+	if mp.MaxBytes <= 0 {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): multipart.max_bytes must be positive", i, m.Name))
+	}
+	if m.HTTP.BodyRawParam != "" {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): multipart cannot be combined with a raw body param — the body is the form", i, m.Name))
 	}
 	return errs
 }
@@ -1183,6 +1460,9 @@ func (c *Config) validateSignupMethod(i int, m Method) []error {
 // per-param locations). Shared by http and hybrid apps.
 func (c *Config) validateHTTPMethod(i int, m Method) []error {
 	var errs []error
+	if m.HTTP != nil && m.HTTP.Multipart != nil {
+		errs = append(errs, c.validateMultipartMethod(i, m)...)
+	}
 	if m.HTTP == nil {
 		return append(errs, fmt.Errorf("methods[%d] (%s): http backend requires an http: route", i, m.Name))
 	}
@@ -1433,4 +1713,16 @@ func (m Method) SortedParamKeys() []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// isLoopbackHost reports whether a host never leaves this machine, which is the
+// only case where plaintext http is acceptable for a backend URL. It exists so
+// a test (or a local development server) can be pointed at without loosening
+// the https requirement that protects every real deployment.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

@@ -300,10 +300,10 @@ func TestTenancy_TypeConfusion(t *testing.T) {
 func TestTenancy_FailsClosedWithoutLedger(t *testing.T) {
 	tn := &Tenancy{ParamTypes: map[string]string{"agent_id": "agent"}}
 	tn.compile()
-	if _, ok := tn.EnforceRequest(nil, "app", nil, "GET", "/v1/agents/a1", "", nil, "alice"); ok {
+	if _, ok := tn.EnforceRequest(nil, "app", nil, "GET", "/v1/agents/a1", "", "", nil, "alice"); ok {
 		t.Error("nil ledger must deny")
 	}
-	if _, ok := tn.EnforceRequest(NewMemStore(), "app", nil, "GET", "/v1/agents/a1", "", nil, ""); ok {
+	if _, ok := tn.EnforceRequest(NewMemStore(), "app", nil, "GET", "/v1/agents/a1", "", "", nil, ""); ok {
 		t.Error("empty caller must deny")
 	}
 }

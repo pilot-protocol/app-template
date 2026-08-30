@@ -100,7 +100,13 @@ func TestMeter_PartialChargeKeepsRunning(t *testing.T) {
 
 func TestRunMeter_OneTick(t *testing.T) {
 	st := NewMemStore()
-	st.Provision("io.pilot.smol", "alice", "ip", 100, 0, 0, time.Unix(1, 0))
+	// One micro-dollar of credit against a 4 cpu / 8 GB machine (302_400
+	// micro-$/hour) is exhausted by the very first tick, whatever the tick
+	// interval. Seeding enough credit to survive ~1.2s of metering instead made
+	// this a race between that arithmetic and the 2s deadline below, with under
+	// a second of headroom — so any unrelated work added to the package could
+	// flake it, which is not something a test should be sensitive to.
+	st.Provision("io.pilot.smol", "alice", "ip", 1, 0, 0, time.Unix(1, 0))
 	fp := &fakeProvider{stopped: map[string]bool{},
 		machines: []MachineInfo{{ID: "m1", Owner: "alice", State: "started", Cpus: 4, MemoryMb: 8192}}}
 	app := meterApp(fp)

@@ -1,10 +1,13 @@
 package broker
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/url"
 	"strconv"
 	"strings"
@@ -307,7 +310,7 @@ type refusal struct {
 // and the JSON body, and requires the caller to own each one.
 //
 // It FAILS CLOSED: an unparseable body, an unknown id, or a store error all deny.
-func (t *Tenancy) EnforceRequest(s OwnerStore, app string, allowPatterns [][]string, method, path, rawQuery string, body []byte, caller string) (*refusal, bool) {
+func (t *Tenancy) EnforceRequest(s OwnerStore, app string, allowPatterns [][]string, method, path, rawQuery, contentType string, body []byte, caller string) (*refusal, bool) {
 	if t == nil {
 		return nil, true
 	}
@@ -352,6 +355,13 @@ func (t *Tenancy) EnforceRequest(s OwnerStore, app string, allowPatterns [][]str
 	//    acts through in the body must be checked here, or path-level isolation
 	//    is decorative.
 	if len(body) > 0 && len(t.BodyRefs) > 0 {
+		// A multipart body carries its refs as FORM FIELDS, not JSON keys. Without
+		// this branch such a body is unparseable to the JSON decoder below and the
+		// request is refused — correct, but it makes uploads impossible. Parse the
+		// form instead and check the same refs against the field values.
+		if mt, params, err := mime.ParseMediaType(contentType); err == nil && mt == "multipart/form-data" {
+			return t.checkMultipartRefs(s, app, body, params["boundary"], caller)
+		}
 		// PARSER DIFFERENTIAL. The broker validates the body with Go's decoder but
 		// forwards the RAW bytes, so the partner re-parses them with a different
 		// parser. Go keeps the LAST duplicate key; a parser that keeps the FIRST
@@ -632,6 +642,16 @@ func validateTenancy(a *AppEntry) error {
 			}
 		}
 	}
+	// A multipart upload names the resource it acts on in a FORM FIELD, never in
+	// the path — POST /api/v1/documents carries deal_id in the body and nowhere
+	// else. So an app that forwards multipart while declaring no body_refs has
+	// no way to check the one reference that matters, and every caller could
+	// upload into every other caller's resource. param_types alone satisfies the
+	// check above, which is exactly how this would slip through unnoticed.
+	if len(t.BodyRefs) == 0 && a.forwardsMultipart() {
+		return fmt.Errorf("registry: app %s: forwards multipart/form-data but declares no tenancy.body_refs — an upload names its resource in a form field, so nothing would be ownership-checked", a.ID)
+	}
+
 	// Every claimable type should be reachable: a type referenced by params/body
 	// but never created can never be owned, which would deny the app entirely.
 	created := map[string]bool{}
@@ -728,4 +748,97 @@ func hasDuplicateKeys(body []byte) bool {
 			valueConsumed()
 		}
 	}
+}
+
+// Multipart parsing bounds. A body that needs more than this to describe itself
+// is not a legitimate upload; refusing is cheaper than reasoning about it.
+const (
+	maxMultipartParts = 64
+	maxRefFieldBytes  = 4 << 10 // a resource id is never larger
+)
+
+// checkMultipartRefs ownership-checks the BodyRefs fields of a multipart body.
+//
+// It is the multipart twin of the JSON body check and keeps the same three
+// properties, because a shared master key sits behind it:
+//
+//   - FAIL-CLOSED. A body that cannot be parsed, a boundary that is missing, a
+//     part budget that is exceeded — all deny. We never forward a body whose
+//     refs we could not read.
+//   - NO PARSER DIFFERENTIAL on a checked field. A REF field that appears twice
+//     is refused: Go hands us every part in order, other stacks keep the first
+//     or the last, so a body naming deal_id twice could be validated as one
+//     value and acted on as another. Repeats of fields we do not check are
+//     allowed through — they are legal multipart (a multi-file upload posts the
+//     same name repeatedly) and no security decision rests on them, so banning
+//     them would break real apps to no end.
+//   - A REF IS A FIELD, NEVER A FILE. A part that carries a filename is treated
+//     as file content and its bytes are not inspected. So a caller who smuggles
+//     "deal_id" in as a file part would slip an unchecked ref past us if we
+//     simply skipped it — that shape is denied explicitly.
+func (t *Tenancy) checkMultipartRefs(s OwnerStore, app string, body []byte, boundary, caller string) (*refusal, bool) {
+	if boundary == "" {
+		return &refusal{}, false // no boundary → undecodable → deny
+	}
+	mr := multipart.NewReader(bytes.NewReader(body), boundary)
+	type ref struct {
+		rtype string
+		value string
+	}
+	found := map[string]ref{}
+	parts := 0
+	for {
+		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return &refusal{}, false // malformed → cannot verify → deny
+		}
+		// Count only parts we actually received. Checking the budget before
+		// NextPart rejects a body sitting exactly on the limit, because the call
+		// that would have reported EOF never happens.
+		parts++
+		if parts > maxMultipartParts {
+			part.Close()
+			return &refusal{}, false // more parts than any real upload needs
+		}
+		name := part.FormName()
+		rtype, isRef := t.BodyRefs[name]
+		if !isRef {
+			// Not a field we check. Close advances past the part's remaining
+			// bytes; NextPart would do it anyway, so there is nothing to drain
+			// by hand.
+			part.Close()
+			continue
+		}
+		if part.FileName() != "" {
+			// A ref wearing a filename: file parts are not inspected, so this is
+			// the shape that routes a ref past the check.
+			part.Close()
+			return &refusal{}, false
+		}
+		if _, dup := found[name]; dup {
+			part.Close()
+			return &refusal{}, false // repeated REF → parser differential → deny
+		}
+		val, err := io.ReadAll(io.LimitReader(part, maxRefFieldBytes+1))
+		part.Close()
+		if err != nil || len(val) > maxRefFieldBytes {
+			return &refusal{}, false
+		}
+		found[name] = ref{rtype: rtype, value: strings.TrimSpace(string(val))}
+	}
+	for _, r := range found {
+		// An empty ref names no resource — the field is present but unset, which
+		// the partner treats as absent. Matches the JSON path, where asID rejects
+		// the empty string and the ref is skipped rather than checked.
+		if r.value == "" {
+			continue
+		}
+		if !Owns(s, app, r.rtype, r.value, caller) {
+			return &refusal{Type: r.rtype, ID: r.value}, false
+		}
+	}
+	return nil, true
 }

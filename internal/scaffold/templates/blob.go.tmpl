@@ -1,0 +1,422 @@
+// Package multipartkit lets a Pilot app forward multipart/form-data uploads to
+// its partner API despite the JSON-only IPC contract.
+//
+// # Why this exists
+//
+// Pilot IPC is JSON in, JSON out, over a framed unix socket, and
+// ipc.MaxFrameSize caps a single envelope at 1 MiB. The obvious encoding for a
+// file — base64 inside the JSON payload — therefore tops out around 740 KiB of
+// real bytes before the frame is refused and the connection dropped. Partner
+// upload limits are much larger than that (General Legal accepts 20 MiB), so
+// "just base64 it" is not an implementation detail that can be tuned; it is a
+// design that does not fit.
+//
+// So the file does not travel in one envelope. The agent stages it in chunks
+// that each fit comfortably inside a frame, the adapter reassembles it on disk
+// under $APP, and only then builds one multipart body and sends it. The IPC
+// layer never carries more than a chunk, and no platform limit has to move.
+//
+//	<ns>.upload_begin  {file_name, content_type, total_bytes, sha256} -> {blob_id}
+//	<ns>.upload_chunk  {blob_id, seq, data_base64}                    -> {received}
+//	<ns>.document_upload {blob_id, deal_id, ...}                      -> partner JSON
+//
+// # What this package guarantees
+//
+// Chunked reassembly is a place to get integrity wrong, so the store is strict
+// rather than forgiving: ids are minted here and never taken from the caller,
+// chunks must arrive in order, the declared size is a hard cap as bytes land,
+// and finalize refuses to hand back a blob whose sha256 does not match what the
+// caller promised at begin. A partially-written upload is never usable.
+//
+// # Restarts
+//
+// The daemon supervises adapters and respawns them, so a store must not keep
+// the only record of a finished upload in memory. A sealed blob is fully
+// described on disk by its .blob and .meta pair and is recovered on the next
+// NewStore. An in-flight .part cannot be recovered — the rolling hash and the
+// chunk cursor die with the process — so it is discarded at startup rather than
+// left to be silently completed with a gap in the middle.
+package backend
+
+import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"hash"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+// MaxChunkBytes is the largest raw chunk an agent should send in one
+// upload_chunk call. base64 inflates by 4/3, so 512 KiB of file becomes ~683
+// KiB of payload and still leaves room for the envelope inside the 1 MiB
+// ipc.MaxFrameSize. Chunks larger than this are refused here rather than
+// failing later as a dropped connection, which is much harder to diagnose.
+const MaxChunkBytes = 512 << 10
+
+// DefaultMaxBlobBytes bounds a single staged upload. Partner limits are lower
+// (General Legal: 20 MiB); this is the backstop that keeps a caller from
+// filling the disk under $APP.
+const DefaultMaxBlobBytes int64 = 24 << 20
+
+// DefaultTTL is how long a staged upload survives before GC reclaims it.
+const DefaultTTL = 30 * time.Minute
+
+var (
+	ErrNotFound     = errors.New("multipartkit: unknown blob_id")
+	ErrSealed       = errors.New("multipartkit: blob already finalized")
+	ErrOutOfOrder   = errors.New("multipartkit: chunk out of order")
+	ErrTooLarge     = errors.New("multipartkit: upload exceeds declared size")
+	ErrChecksum     = errors.New("multipartkit: sha256 mismatch")
+	ErrIncomplete   = errors.New("multipartkit: fewer bytes than declared")
+	ErrChunkTooBig  = errors.New("multipartkit: chunk exceeds MaxChunkBytes")
+	ErrBadBlobID    = errors.New("multipartkit: malformed blob_id")
+	ErrBadDeclared  = errors.New("multipartkit: invalid total_bytes")
+	ErrBadChecksum  = errors.New("multipartkit: sha256 must be 64 hex chars")
+	ErrNameRequired = errors.New("multipartkit: file_name is required")
+)
+
+// Meta describes a staged upload. It is persisted beside a sealed blob so the
+// upload survives an adapter respawn.
+type Meta struct {
+	ID          string    `json:"id"`
+	FileName    string    `json:"file_name"`
+	ContentType string    `json:"content_type"`
+	TotalBytes  int64     `json:"total_bytes"`
+	SHA256      string    `json:"sha256"`
+	Created     time.Time `json:"created"`
+}
+
+// staged is an upload in progress. A sealed blob is not held here: it lives on
+// disk, which is what lets it outlive the process.
+type staged struct {
+	meta    Meta
+	f       *os.File
+	h       hash.Hash
+	written int64
+	nextSeq int
+}
+
+// Store stages chunked uploads under a root directory (in practice $APP/blobs).
+//
+// All state transitions happen under mu. The lock is held across the file write
+// in Append deliberately: releasing it to do I/O would let Abort close the file
+// underneath an in-flight chunk, and uploads are not hot enough for that
+// contention to matter.
+type Store struct {
+	root     string
+	maxBytes int64
+	ttl      time.Duration
+
+	mu   sync.Mutex
+	open map[string]*staged
+}
+
+// NewStore prepares a staging area under root and recovers what is recoverable
+// from a previous process: sealed blobs stay, unfinishable .part files go.
+func NewStore(root string) (*Store, error) {
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, fmt.Errorf("multipartkit: create %s: %w", root, err)
+	}
+	s := &Store{root: root, maxBytes: DefaultMaxBlobBytes, ttl: DefaultTTL, open: map[string]*staged{}}
+	s.sweepOrphanParts()
+	return s, nil
+}
+
+// sweepOrphanParts removes .part files left by a previous process. Their hash
+// state and chunk cursor are gone, so they can never be finalized; keeping them
+// would only grow $APP without bound.
+func (s *Store) sweepOrphanParts() {
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".part") {
+			_ = os.Remove(filepath.Join(s.root, e.Name()))
+		}
+	}
+}
+
+// SetLimits overrides the size cap and TTL (0 keeps the current value).
+func (s *Store) SetLimits(maxBytes int64, ttl time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if maxBytes > 0 {
+		s.maxBytes = maxBytes
+	}
+	if ttl > 0 {
+		s.ttl = ttl
+	}
+}
+
+// Begin reserves a blob id and opens its staging file.
+//
+// The id is minted here from crypto/rand and is never taken from the caller: a
+// caller-chosen id is a path to overwriting somebody else's in-flight upload,
+// and on a shared host that is a file-substitution bug rather than a naming
+// inconvenience.
+func (s *Store) Begin(fileName, contentType string, totalBytes int64, sha256hex string) (Meta, error) {
+	if strings.TrimSpace(fileName) == "" {
+		return Meta{}, ErrNameRequired
+	}
+	s.mu.Lock()
+	max := s.maxBytes
+	s.mu.Unlock()
+	if totalBytes <= 0 || totalBytes > max {
+		return Meta{}, fmt.Errorf("%w: %d (max %d)", ErrBadDeclared, totalBytes, max)
+	}
+	sha256hex = strings.ToLower(strings.TrimSpace(sha256hex))
+	if len(sha256hex) != 64 {
+		return Meta{}, ErrBadChecksum
+	}
+	if _, err := hex.DecodeString(sha256hex); err != nil {
+		return Meta{}, ErrBadChecksum
+	}
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return Meta{}, fmt.Errorf("multipartkit: mint id: %w", err)
+	}
+	id := hex.EncodeToString(raw[:])
+
+	// Only the base name of the caller's file name is ever kept, and it is never
+	// used to build a path — the on-disk name is the minted id. The original is
+	// metadata that rides along into the multipart body.
+	m := Meta{
+		ID:          id,
+		FileName:    filepath.Base(filepath.Clean("/" + strings.TrimSpace(fileName))),
+		ContentType: strings.TrimSpace(contentType),
+		TotalBytes:  totalBytes,
+		SHA256:      sha256hex,
+		Created:     time.Now().UTC(),
+	}
+	if m.ContentType == "" {
+		m.ContentType = "application/octet-stream"
+	}
+	f, err := os.OpenFile(s.partPath(id), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return Meta{}, fmt.Errorf("multipartkit: open staging file: %w", err)
+	}
+	s.mu.Lock()
+	s.open[id] = &staged{meta: m, f: f, h: sha256.New()}
+	s.mu.Unlock()
+	return m, nil
+}
+
+// Append writes the next chunk. seq must be exactly the next index (0-based):
+// an upload that silently tolerates a gap or a replay reassembles to something
+// the caller never sent, and the sha256 check at the end would then be the only
+// thing standing between that and the partner.
+func (s *Store) Append(id string, seq int, data []byte) (int64, error) {
+	if !validID(id) {
+		return 0, ErrBadBlobID
+	}
+	if len(data) > MaxChunkBytes {
+		return 0, ErrChunkTooBig
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.open[id]
+	if !ok {
+		if s.sealedOnDisk(id) {
+			return 0, ErrSealed
+		}
+		return 0, ErrNotFound
+	}
+	if seq != st.nextSeq {
+		return st.written, fmt.Errorf("%w: want %d, got %d", ErrOutOfOrder, st.nextSeq, seq)
+	}
+	if st.written+int64(len(data)) > st.meta.TotalBytes {
+		return st.written, ErrTooLarge
+	}
+	if _, err := st.f.Write(data); err != nil {
+		return st.written, fmt.Errorf("multipartkit: write chunk: %w", err)
+	}
+	_, _ = st.h.Write(data)
+	st.written += int64(len(data))
+	st.nextSeq++
+	return st.written, nil
+}
+
+// Finalize verifies the reassembled bytes and seals the blob for sending.
+// It is idempotent: finalizing an already-sealed blob returns its metadata.
+func (s *Store) Finalize(id string) (Meta, error) {
+	if !validID(id) {
+		return Meta{}, ErrBadBlobID
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.open[id]
+	if !ok {
+		if m, err := s.readMeta(id); err == nil {
+			return m, nil // already sealed by us or by a previous process
+		}
+		return Meta{}, ErrNotFound
+	}
+	if st.written != st.meta.TotalBytes {
+		return Meta{}, fmt.Errorf("%w: got %d of %d", ErrIncomplete, st.written, st.meta.TotalBytes)
+	}
+	if got := hex.EncodeToString(st.h.Sum(nil)); got != st.meta.SHA256 {
+		return Meta{}, fmt.Errorf("%w: declared %s, reassembled %s", ErrChecksum, st.meta.SHA256, got)
+	}
+	if err := st.f.Close(); err != nil {
+		return Meta{}, fmt.Errorf("multipartkit: close staging file: %w", err)
+	}
+	// Write the metadata BEFORE the rename. The .blob appearing is what makes a
+	// blob look complete to a later process, so it must never be observable
+	// without the metadata that describes it.
+	b, err := json.Marshal(st.meta)
+	if err != nil {
+		return Meta{}, fmt.Errorf("multipartkit: encode meta: %w", err)
+	}
+	if err := os.WriteFile(s.metaPath(id), b, 0o600); err != nil {
+		return Meta{}, fmt.Errorf("multipartkit: write meta: %w", err)
+	}
+	if err := os.Rename(s.partPath(id), s.blobPath(id)); err != nil {
+		_ = os.Remove(s.metaPath(id))
+		return Meta{}, fmt.Errorf("multipartkit: seal: %w", err)
+	}
+	delete(s.open, id) // sealed state lives on disk from here on
+	return st.meta, nil
+}
+
+// Open returns the sealed blob's bytes for sending. A blob sealed before the
+// adapter was respawned opens just the same, because sealed state is on disk.
+func (s *Store) Open(id string) (*os.File, Meta, error) {
+	if !validID(id) {
+		return nil, Meta{}, ErrBadBlobID
+	}
+	s.mu.Lock()
+	_, inFlight := s.open[id]
+	s.mu.Unlock()
+	if inFlight {
+		return nil, Meta{}, ErrIncomplete // staged but not finalized
+	}
+	meta, err := s.readMeta(id)
+	if err != nil {
+		return nil, Meta{}, ErrNotFound
+	}
+	f, err := os.Open(s.blobPath(id))
+	if err != nil {
+		return nil, Meta{}, ErrNotFound
+	}
+	return f, meta, nil
+}
+
+// Abort discards an upload and its bytes, in flight or sealed.
+func (s *Store) Abort(id string) error {
+	if !validID(id) {
+		return ErrBadBlobID
+	}
+	s.mu.Lock()
+	st, wasOpen := s.open[id]
+	if wasOpen {
+		_ = st.f.Close()
+		delete(s.open, id)
+	}
+	s.mu.Unlock()
+
+	_ = os.Remove(s.partPath(id))
+	sealed := s.sealedOnDisk(id)
+	_ = os.Remove(s.blobPath(id))
+	_ = os.Remove(s.metaPath(id))
+	if !wasOpen && !sealed {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GC reclaims uploads past the TTL, in flight and sealed alike. An agent that
+// stages a document and never sends it must not leave bytes under $APP forever.
+// It walks the directory rather than the map so blobs sealed by a previous
+// process are reclaimed too.
+func (s *Store) GC() int {
+	s.mu.Lock()
+	cutoff := time.Now().UTC().Add(-s.ttl)
+	var stale []string
+	for id, st := range s.open {
+		if st.meta.Created.Before(cutoff) {
+			stale = append(stale, id)
+		}
+	}
+	s.mu.Unlock()
+
+	seen := map[string]bool{}
+	for _, id := range stale {
+		seen[id] = true
+	}
+	if entries, err := os.ReadDir(s.root); err == nil {
+		for _, e := range entries {
+			name := e.Name()
+			if !strings.HasSuffix(name, ".blob") {
+				continue
+			}
+			id := strings.TrimSuffix(name, ".blob")
+			if seen[id] || !validID(id) {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil || !info.ModTime().UTC().Before(cutoff) {
+				continue
+			}
+			seen[id] = true
+			stale = append(stale, id)
+		}
+	}
+	for _, id := range stale {
+		_ = s.Abort(id)
+	}
+	return len(stale)
+}
+
+// readMeta loads a sealed blob's metadata, and only reports success when the
+// bytes it describes are actually there.
+func (s *Store) readMeta(id string) (Meta, error) {
+	b, err := os.ReadFile(s.metaPath(id))
+	if err != nil {
+		return Meta{}, err
+	}
+	var m Meta
+	if err := json.Unmarshal(b, &m); err != nil {
+		return Meta{}, err
+	}
+	info, err := os.Stat(s.blobPath(id))
+	if err != nil {
+		return Meta{}, err
+	}
+	if info.Size() != m.TotalBytes {
+		return Meta{}, fmt.Errorf("%w: on-disk blob is %d bytes, meta says %d", ErrIncomplete, info.Size(), m.TotalBytes)
+	}
+	return m, nil
+}
+
+func (s *Store) sealedOnDisk(id string) bool {
+	_, err := os.Stat(s.blobPath(id))
+	return err == nil
+}
+
+func (s *Store) partPath(id string) string { return filepath.Join(s.root, id+".part") }
+func (s *Store) blobPath(id string) string { return filepath.Join(s.root, id+".blob") }
+func (s *Store) metaPath(id string) string { return filepath.Join(s.root, id+".meta") }
+
+// validID accepts only what Begin mints: 32 lowercase hex characters. This is
+// the whole path-traversal defence — an id is concatenated into a filename, so
+// nothing that could contain a separator or a dot segment is ever admitted.
+func validID(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}

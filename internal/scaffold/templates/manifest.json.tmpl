@@ -21,11 +21,19 @@
 {{- if or .Provisioned .HasSignup}}
     {"cap": "fs.write", "target": "$APP/secrets.json"},
 {{- end}}
+{{- if .HasMultipart}}
+    {"cap": "fs.read", "target": "$APP/blobs"},
+    {"cap": "fs.write", "target": "$APP/blobs"},
+{{- end}}
 {{- if or .Managed .HasBrokerSignup}}
     {"cap": "key.sign", "target": "self"},
 {{- end}}
 {{- if .HasHTTPMethods}}
     {"cap": "net.dial", "target": "{{.AdapterBackendHost}}",
+     "if": {"kind": "rate", "params": {"per": "min", "limit": {{.Grants.RatePerMin}}}}},
+{{- end}}
+{{- if .HasMCP}}
+    {"cap": "net.dial", "target": "{{.MCPHost}}",
      "if": {"kind": "rate", "params": {"per": "min", "limit": {{.Grants.RatePerMin}}}}},
 {{- end}}
 {{- range .SignupHosts}}

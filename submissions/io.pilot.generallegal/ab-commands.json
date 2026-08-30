@@ -1,0 +1,4 @@
+{
+  "note": "http-backend app: there is no vanilla CLI to diff against, so the A/B job has nothing to compare. The runtime proof is internal/scaffold/zz_multipart_e2e_test.go and zz_mcp_e2e_test.go, which build and run this adapter for real.",
+  "commands": []
+}

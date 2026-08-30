@@ -13,6 +13,9 @@
 package main
 
 import (
+{{- if .HasMCP}}
+	"bytes"
+{{- end}}
 	"context"
 	"encoding/json"
 	"flag"
@@ -122,7 +125,7 @@ func main() {
 
 	d := ipc.NewDispatcher()
 {{- if eq .Backend.Type "http"}}
-	registerHandlers(d, client, readAppVersion(*manifestPath), cfg.BackendURL{{if .HasSignup}}, *manifestPath{{end}}{{if .HasBrokerSignup}}, signer{{end}})
+	registerHandlers(d, client, readAppVersion(*manifestPath), cfg.BackendURL{{if or .HasSignup .HasMultipart}}, *manifestPath{{end}}{{if .HasBrokerSignup}}, signer{{end}}{{if .HasMCP}}, backend.NewToolClient({{printf "%q" .Backend.MCP.URL}}){{end}})
 {{- else if eq .Backend.Type "hybrid"}}
 	registerHandlers(d, runner, cloudCli, readAppVersion(*manifestPath), cfg.BackendURL)
 {{- else}}
@@ -175,10 +178,28 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 // registerHandlers wires each IPC method to its backend call. Method names MUST
 // match the manifest's `exposes` list, or the daemon won't broker them.
 {{- if eq .Backend.Type "http"}}
-func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL string{{if .HasSignup}}, manifestPath string{{end}}{{if .HasBrokerSignup}}, signer backend.Signer{{end}}) {
+func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL string{{if or .HasSignup .HasMultipart}}, manifestPath string{{end}}{{if .HasBrokerSignup}}, signer backend.Signer{{end}}{{if .HasMCP}}, tools *backend.ToolClient{{end}}) {
 {{- range .Methods}}
 {{- if .Local}}
 	d.Register("{{.Name}}", localRead(expandHome("{{.Local.Store}}"))) // {{.Duration}} (local metadata)
+{{- else if .Upload}}
+{{- if eq .Upload.Step "begin"}}
+	d.Register("{{.Name}}", uploadBeginHandler(manifestPath)) // {{.Duration}} (local: stage a file for upload)
+{{- else if eq .Upload.Step "chunk"}}
+	d.Register("{{.Name}}", uploadChunkHandler(manifestPath)) // {{.Duration}} (local: push one chunk)
+{{- else}}
+	d.Register("{{.Name}}", uploadAbortHandler(manifestPath)) // {{.Duration}} (local: discard a staged file)
+{{- end}}
+{{- else if .MCP}}
+	d.Register("{{.Name}}", forwardTool(tools, {{printf "%q" .MCP.Tool}}, {{printf "%q" .MCP.Wrap}}, []string{ {{- range $k := .MCP.Keep}}{{printf "%q" $k}}, {{end -}} }, dur("{{.TimeoutFor}}"))) // {{.Duration}} (tool server, no credentials)
+{{- else if and .HTTP .HTTP.Multipart}}
+	d.Register("{{.Name}}", forwardMultipart(c, multipartRoute{
+		method: "{{.HTTP.Verb}}", pathTmpl: "{{.HTTP.Path}}",
+		fileField:     {{printf "%q" .HTTP.Multipart.FileField}},
+		blobParam:     {{printf "%q" .HTTP.Multipart.BlobParam}},
+		pathParams:    []string{ {{- range $p := .HTTP.PathParams}}{{printf "%q" $p}}, {{end -}} },
+		rawPathParams: []string{ {{- range $p := .HTTP.RawPathParams}}{{printf "%q" $p}}, {{end -}} },
+	}, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (multipart upload)
 {{- else if .Signup}}
 {{- if eq .Signup.Step "account"}}
 	d.Register("{{.Name}}", accountHandler(accountConfig{
@@ -365,6 +386,48 @@ type route struct {
 // and sends the REMAINING (residual) fields as a JSON body for a body verb or a
 // query string otherwise. One generic forwarder covers every verb + placement,
 // so adding a method is pure pilot.app.yaml.
+{{if .HasMCP}}
+// forwardTool calls one tool on the JSON-RPC tool server. The payload becomes
+// the tool's arguments, optionally nested under a single wrapper key for
+// servers that take one object argument.
+//
+// This path never touches the REST client, so the API key that authenticates
+// the REST backend is not in scope here and cannot reach this host.
+func forwardTool(t *backend.ToolClient, tool, wrap string, keep []string, timeout time.Duration) ipc.Handler {
+	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
+		args := req.Payload
+		if len(bytes.TrimSpace(args)) == 0 {
+			args = json.RawMessage(`{}`)
+		}
+		if wrap != "" {
+			fields, err := objectFields(args)
+			if err != nil {
+				return nil, err
+			}
+			outer := map[string]json.RawMessage{}
+			for _, k := range keep {
+				if v, ok := fields[k]; ok {
+					outer[k] = v
+					delete(fields, k)
+				}
+			}
+			inner, err := json.Marshal(fields)
+			if err != nil {
+				return nil, err
+			}
+			outer[wrap] = inner
+			wrapped, err := json.Marshal(outer)
+			if err != nil {
+				return nil, err
+			}
+			args = wrapped
+		}
+		cctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		return t.Call(cctx, tool, args)
+	}
+}
+{{end}}
 func forward(c *backend.Client, r route, timeout time.Duration) ipc.Handler {
 	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
 		fields, err := objectFields(req.Payload)
@@ -675,6 +738,7 @@ type methodDoc struct {
 	Cost      string            `json:"cost,omitempty"` // what a cloud method debits (empty = free)
 	Roundtrip string            `json:"typical_roundtrip,omitempty"`
 	Gated     string            `json:"requires,omitempty"` // non-empty = needs an account upgrade; the reason it names is shown in the free-plan disclaimer
+	Billable  string            `json:"billable,omitempty"` // non-empty = this call costs real money; the reason says what it costs
 }
 
 var helpMethods = []methodDoc{
@@ -683,6 +747,9 @@ var helpMethods = []methodDoc{
 		Summary: {{printf "%q" $m.Summary}},
 {{- if $m.Gated}}
 		Gated: {{printf "%q" $m.Gated}},
+{{- end}}
+{{- if $m.Billable}}
+		Billable: {{printf "%q" $m.Billable}},
 {{- end}}
 {{- if and $.Pricing (index $.Pricing.CreditCost $m.Name)}}
 		Cost: "{{index $.Pricing.CreditCost $m.Name}} credit(s)",
@@ -749,6 +816,8 @@ type helpDoc struct {
 	// of methods that need an account upgrade before they work.
 	GatedNote       string            `json:"gated_note,omitempty"`
 	GatedMethods    []methodDoc       `json:"gated_methods,omitempty"`
+	BillableNote    string            `json:"billable_note,omitempty"`
+	BillableMethods []methodDoc       `json:"billable_methods,omitempty"`
 }
 
 // splitPlanes groups methods into local vs cloud so <ns>.help reads clearly.
@@ -794,6 +863,18 @@ func splitPlanes(ms []methodDoc) (local, cloud []methodDoc) {
 		if m.Gated != "" {
 			doc.GatedMethods = append(doc.GatedMethods, m)
 		}
+	}
+	for _, m := range helpMethods {
+		if m.Billable != "" {
+			doc.BillableMethods = append(doc.BillableMethods, m)
+		}
+	}
+	if len(doc.BillableMethods) > 0 {
+		doc.BillableNote = "──────────────  THESE CALLS COST MONEY  ──────────────  " +
+			"The methods listed under billable_methods spend real money on the account whose API key this app is using. " +
+			"They are not plan-gated and they will not warn you first — they work, and you are charged. Every other method is " +
+			"free to call. Each one's `billable` field says exactly what it costs. Confirm with whoever owns the account before " +
+			"calling one on their behalf."
 	}
 	if len(doc.GatedMethods) > 0 {
 		doc.GatedNote = "──────────────  NOT AVAILABLE ON THE FREE PLAN  ──────────────  " +

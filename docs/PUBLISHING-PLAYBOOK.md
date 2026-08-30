@@ -4,7 +4,8 @@ The end-to-end runbook for getting an app live on the Pilot app-store, for **eve
 backend and auth mode. It ties together the focused docs
 ([`PUBLISHING.md`](PUBLISHING.md), [`CLI-ADAPTER.md`](CLI-ADAPTER.md),
 [`NATIVE-APPS.md`](NATIVE-APPS.md), [`R2-ARTIFACT-REGISTRY.md`](R2-ARTIFACT-REGISTRY.md),
-[`MANAGED-KEY.md`](MANAGED-KEY.md), [`CI-AB-REPORT.md`](CI-AB-REPORT.md),
+[`MANAGED-KEY.md`](MANAGED-KEY.md), [`MULTIPART-UPLOADS.md`](MULTIPART-UPLOADS.md),
+[`CI-AB-REPORT.md`](CI-AB-REPORT.md),
 [`PRODUCT-DEMOS.md`](PRODUCT-DEMOS.md),
 [`UPDATING.md`](UPDATING.md), [`UPDATING-BUNDLES.md`](UPDATING-BUNDLES.md),
 [`APP-PUBLISHING-SPEC.md`](APP-PUBLISHING-SPEC.md)) into one
@@ -46,6 +47,14 @@ Two orthogonal choices. Get these right first; everything else follows.
 | an HTTP API you host | `http` | each method → an endpoint (GET→query, POST→JSON body) |
 | a CLI tool **already on every host** | `cli` | methods → subprocess argv |
 | a CLI tool **not** on the host | `cli` + `assets[]` | the adapter fetches the binary from the R2 registry at install ([`NATIVE-APPS.md`](NATIVE-APPS.md)) |
+
+> **Edge case — an endpoint takes a file.** A `multipart/form-data` route cannot send
+> the file inside the JSON payload: `ipc.MaxFrameSize` caps an envelope at 1 MiB, so
+> base64 tops out near 740 KiB of real file. Declare `multipart:` on the route and the
+> generator adds the staging methods that push the bytes in frame-sized chunks
+> ([`MULTIPART-UPLOADS.md`](MULTIPART-UPLOADS.md)). Managed apps additionally need
+> `forward_content_types` and `tenancy.body_refs` in the broker registry, or uploads
+> are either undecodable on arrival or ownership-checked against nothing.
 
 **Auth** (`backend.auth`) — only relevant when the backend needs a key:
 

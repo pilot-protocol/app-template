@@ -102,6 +102,27 @@ listing:
   #     date: "2026-06-16"
   #     notes: ["Initial release"]
 
+# --- a multipart upload (see docs/MULTIPART-UPLOADS.md) ---
+# A file cannot ride inside the JSON payload: an IPC envelope is capped at 1 MiB,
+# so base64 tops out around 740 KiB of real file. Declare `multipart:` and the
+# generator adds <ns>.upload_begin / upload_chunk / upload_abort, which stage the
+# bytes in frame-sized pieces; this method then takes the resulting blob_id.
+# Every other param becomes a form field.
+#
+# methods:
+#   - name: weather.report_upload
+#     summary: "Attach a file to a report."
+#     duration: slow
+#     http:
+#       verb: POST                       # multipart needs a body verb
+#       path: /reports
+#       multipart:
+#         file_field: file               # the form field the backend reads
+#         max_bytes: 20971520            # match the backend's own limit
+#     params:
+#       blob_id: "string (required) — from weather.upload_begin"
+#       report_id: "string (optional) — attach to an existing report"
+
 # --- a cli backend instead (see docs/CLI-ADAPTER.md) ---
 # backend:
 #   type: cli

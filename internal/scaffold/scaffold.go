@@ -48,6 +48,20 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 		if cfg.HasSignup() {
 			files = append(files, file{filepath.Join("cmd", cfg.BinaryName, "signup.go"), "signup.go.tmpl"})
 		}
+		// Multipart uploads: the blob store + form builder go beside the client
+		// (package backend), the IPC staging handlers beside main.go. All three
+		// or none — a staged upload with no way to stage is a method that always
+		// fails.
+		if cfg.HasMCP() {
+			files = append(files, file{filepath.Join("internal", "backend", "mcp.go"), "mcp.go.tmpl"})
+		}
+		if cfg.HasMultipart() {
+			files = append(files,
+				file{filepath.Join("internal", "backend", "blob.go"), "blob.go.tmpl"},
+				file{filepath.Join("internal", "backend", "multipartform.go"), "multipartform.go.tmpl"},
+				file{filepath.Join("cmd", cfg.BinaryName, "upload.go"), "upload.go.tmpl"},
+			)
+		}
 		// The broker-call runtime is a separate file emitted only for broker apps
 		// (it imports the signer, absent from a plain register/verify app).
 		if cfg.HasBrokerSignup() {

@@ -247,12 +247,26 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	maxBody := b.MaxBody
+	if app.MaxBodyBytes > 0 {
+		maxBody = app.MaxBodyBytes
+	}
 	if app.Provision != nil && mpath == app.Provision.PushPath {
 		maxBody = app.Provision.ArtifactMaxBytes
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
+	// Read ONE byte past the cap so an oversize body is detectable. Reading
+	// exactly maxBody silently truncates it instead, and a truncated body is far
+	// worse than a refused one: the signature no longer matches (401) or, for a
+	// multipart upload, the closing boundary is missing and the request dies as
+	// an opaque tenancy refusal — neither of which tells the caller their file
+	// was too big.
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body"})
+		return
+	}
+	if int64(len(body)) > maxBody {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+			"error": fmt.Sprintf("request body exceeds %d bytes", maxBody)})
 		return
 	}
 
@@ -300,7 +314,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//     indistinguishable, otherwise the broker is an oracle for enumerating
 	//     other tenants' resource ids.
 	if app.Tenancy != nil {
-		if _, ok := app.Tenancy.EnforceRequest(b.ownerStore(), appID, app.allowSegs, r.Method, mpath, r.URL.RawQuery, body, string(caller)); !ok {
+		if _, ok := app.Tenancy.EnforceRequest(b.ownerStore(), appID, app.allowSegs, r.Method, mpath, r.URL.RawQuery, r.Header.Get("Content-Type"), body, string(caller)); !ok {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -411,7 +425,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b.internalError(w, http.StatusBadGateway, appID, "build upstream", err)
 		return
 	}
-	ureq.Header.Set("Content-Type", "application/json")
+	ureq.Header.Set("Content-Type", app.forwardContentType(r.Header.Get("Content-Type")))
 	app.injector.Inject(ureq, app.master)
 
 	resp, err := b.Client.Do(ureq)
