@@ -106,7 +106,7 @@ func TestGeneratedManagedUploadThroughBrokerE2E(t *testing.T) {
 		}
 		mt, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || mt != "multipart/form-data" {
-			http.Error(w, `{"detail":"not multipart: `+r.Header.Get("Content-Type")+`"}`, 422)
+			http.Error(w, `{"detail":"not multipart: `+r.Header.Get("Content-Type")+`"}`, http.StatusUnprocessableEntity)
 			return
 		}
 		a := arrived{fields: map[string]string{}, auth: r.Header.Get("Authorization")}
@@ -117,7 +117,7 @@ func TestGeneratedManagedUploadThroughBrokerE2E(t *testing.T) {
 				break
 			}
 			if err != nil {
-				http.Error(w, `{"detail":"bad multipart"}`, 400)
+				http.Error(w, `{"detail":"bad multipart"}`, http.StatusBadRequest)
 				return
 			}
 			b, _ := io.ReadAll(p)

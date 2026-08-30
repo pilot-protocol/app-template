@@ -90,7 +90,7 @@ func TestGeneratedMultipartUploadE2E(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mt, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || mt != "multipart/form-data" {
-			http.Error(w, `{"detail":"expected multipart/form-data, got `+r.Header.Get("Content-Type")+`"}`, 422)
+			http.Error(w, `{"detail":"expected multipart/form-data, got `+r.Header.Get("Content-Type")+`"}`, http.StatusUnprocessableEntity)
 			return
 		}
 		g := &gotUpload{path: r.URL.Path, contentType: r.Header.Get("Content-Type"), fields: map[string]string{}}
@@ -101,7 +101,7 @@ func TestGeneratedMultipartUploadE2E(t *testing.T) {
 				break
 			}
 			if err != nil {
-				http.Error(w, `{"detail":"bad multipart"}`, 400)
+				http.Error(w, `{"detail":"bad multipart"}`, http.StatusBadRequest)
 				return
 			}
 			b, _ := io.ReadAll(p)

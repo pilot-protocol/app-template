@@ -66,7 +66,7 @@ func partnerServer(t *testing.T, got *received) *httptest.Server {
 		}
 		mt, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || mt != "multipart/form-data" {
-			http.Error(w, `{"detail":"not multipart"}`, 422)
+			http.Error(w, `{"detail":"not multipart"}`, http.StatusUnprocessableEntity)
 			return
 		}
 		rec := received{fields: map[string]string{}, auth: r.Header.Get("Authorization")}
@@ -77,7 +77,7 @@ func partnerServer(t *testing.T, got *received) *httptest.Server {
 				break
 			}
 			if err != nil {
-				http.Error(w, `{"detail":"bad multipart"}`, 400)
+				http.Error(w, `{"detail":"bad multipart"}`, http.StatusBadRequest)
 				return
 			}
 			b, _ := io.ReadAll(p)

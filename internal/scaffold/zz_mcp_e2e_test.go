@@ -94,7 +94,7 @@ func newToolServer(t *testing.T) (*httptest.Server, *toolServer) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"protocolVersion\":\"2025-06-18\",\"serverInfo\":{\"name\":\"mock\"}}}\n\n", req.ID)
 		case "notifications/initialized":
-			w.WriteHeader(202)
+			w.WriteHeader(http.StatusAccepted)
 		case "tools/call":
 			rec.mu.Lock()
 			rec.lastTool, rec.lastArgs, rec.calls = req.Params.Name, req.Params.Arguments, rec.calls+1
@@ -104,7 +104,7 @@ func newToolServer(t *testing.T) (*httptest.Server, *toolServer) {
 			fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"structuredContent\":{\"tool\":%q,\"ok\":true}}}\n\n",
 				req.ID, req.Params.Name)
 		default:
-			w.WriteHeader(400)
+			w.WriteHeader(http.StatusBadRequest)
 		}
 	}))
 	return srv, rec

@@ -80,7 +80,7 @@ func glUpstream(t *testing.T, got *[]glUpload) *httptest.Server {
 		case r.Method == "POST" && r.URL.Path == "/api/v1/documents":
 			mt, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 			if err != nil || mt != "multipart/form-data" {
-				http.Error(w, `{"detail":"expected multipart/form-data"}`, 422)
+				http.Error(w, `{"detail":"expected multipart/form-data"}`, http.StatusUnprocessableEntity)
 				return
 			}
 			u := glUpload{
@@ -95,7 +95,7 @@ func glUpstream(t *testing.T, got *[]glUpload) *httptest.Server {
 					break
 				}
 				if err != nil {
-					http.Error(w, `{"detail":"malformed multipart"}`, 400)
+					http.Error(w, `{"detail":"malformed multipart"}`, http.StatusBadRequest)
 					return
 				}
 				b, _ := io.ReadAll(p)
