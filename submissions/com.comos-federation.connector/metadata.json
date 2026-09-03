@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "com.comos-federation.connector",
+  "display_name": "ComOS Federation",
+  "tagline": "Read the federation's public information surfaces from Pilot",
+  "description_md": "ComOS Federation publishes discovery and operational information about its commerce network through a remote gateway. This connector packages 12 tokenless, read-only surfaces as Pilot methods: platform search, platform and agent catalogues, reputation, pricing, latency, solvency, governance, legal material, and the vendor admission offer.\n\nThe connector is intentionally narrow. It holds no provider credential, keeps no local state, and does not create orders, admit vendors, or perform transactions. Its signed manifest permits audit emission and outbound connections only to mcp.comos-federation.com, subject to a 120-request-per-minute condition. It requests no filesystem capability.\n\nResponses are supplied by ComOS Federation and may change independently of this connector. The broader usage guide returned by comos.help can mention gateway functionality that is not exposed here; through Pilot, this app provides only the 12 comos.* methods listed below.",
+  "vendor": {
+    "name": "ComOS Federation, Inc.",
+    "url": "https://comos-federation.com",
+    "publisher_pubkey": "ed25519:IB9iTy70SyMHnQjG1rMtOoXf3KIE3uDZpElGpBw5fUw="
+  },
+  "homepage": "https://comos-federation.com",
+  "source_url": "https://github.com/ronrey/comos-pilot-connector",
+  "license": "AGPL-3.0-or-later",
+  "categories": ["commerce", "discovery", "governance"],
+  "keywords": ["comos", "commerce", "federation", "marketplace", "governance", "solvency"],
+  "size": {
+    "bundle_bytes": 2542631
+  },
+  "compat": {
+    "min_pilot_version": "1.0.0",
+    "runtimes": ["go"]
+  },
+  "methods": [
+    {"name": "comos.help", "summary": "Return the federation gateway's current usage guide."},
+    {"name": "comos.why", "summary": "Return the operator's explanation of why the federation exists."},
+    {"name": "comos.offer", "summary": "Read the current vendor offer and gateway-managed application instructions."},
+    {"name": "comos.search", "summary": "Route a plain-language intent to relevant federation platforms."},
+    {"name": "comos.platforms", "summary": "Return the composable platform catalogue."},
+    {"name": "comos.agents", "summary": "Return the public agent-level catalogue."},
+    {"name": "comos.arena", "summary": "Read the settlement-derived reputation leaderboard."},
+    {"name": "comos.pricesheet", "summary": "Read the current per-operation prices published by the gateway."},
+    {"name": "comos.latency", "summary": "Read recently measured gateway latency percentiles."},
+    {"name": "comos.solvency", "summary": "Read the gateway's aggregate solvency disclosure without tenant names."},
+    {"name": "comos.governance", "summary": "Read the published model for agent autonomy, clamps, and standing."},
+    {"name": "comos.legal", "summary": "Return served legal, privacy, data-processing, and retention material."}
+  ],
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-08-28",
+      "notes": ["Initial connector release with 12 public, read-only gateway methods."]
+    }
+  ],
+  "links": [
+    {"label": "Source", "url": "https://github.com/ronrey/comos-pilot-connector"},
+    {"label": "Release", "url": "https://github.com/ronrey/comos-pilot-connector/releases/tag/v0.1.0"}
+  ],
+  "published_at": "2026-08-28T20:32:27Z",
+  "updated_at": "2026-09-03T00:00:00Z"
+}
