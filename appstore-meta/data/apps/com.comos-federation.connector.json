@@ -1,0 +1,102 @@
+{
+  "id": "com.comos-federation.connector",
+  "name": "ComOS Federation",
+  "tagline": "Read the ComOS commerce network's public surfaces from Pilot",
+  "description": "ComOS Federation exposes public information about its commerce network through a remote gateway. This connector packages 12 of those tokenless, read-only surfaces as Pilot app methods: search and platform discovery, agent and reputation catalogues, pricing and latency information, solvency and governance disclosures, legal documents, and the vendor admission offer.\n\nThe connector is intentionally narrow. It holds no provider credential, keeps no local state, and does not create orders, admit vendors, or perform transactions. Its signed manifest permits audit emission and outbound connections to only mcp.comos-federation.com, with a 120-request-per-minute condition. It requests no filesystem capability.\n\nUse comos.search to route an intent to relevant ComOS platforms, or inspect the individual public surfaces when an agent needs source-provided network information. Responses come from ComOS Federation's gateway and may change independently of the connector. The broader usage guide returned by comos.help describes additional gateway capabilities; this Pilot connector exposes only the 12 comos.* methods listed on this page.",
+  "categories": ["work", "finance"],
+  "primary_category": "work",
+  "keywords": ["comos", "commerce", "federation", "marketplace", "platform discovery", "governance", "solvency", "pricing"],
+  "version": "0.1.0",
+  "vendor": "ComOS Federation, Inc.",
+  "vendor_url": "https://comos-federation.com",
+  "license": "AGPL-3.0-or-later",
+  "source_url": "https://github.com/ronrey/comos-pilot-connector",
+  "homepage": "https://comos-federation.com",
+  "methods": [
+    {"name": "comos.help", "summary": "Return ComOS Federation's current gateway usage guide.", "example": "pilotctl appstore call com.comos-federation.connector comos.help '{}'", "gated": ""},
+    {"name": "comos.why", "summary": "Return the federation operator's explanation of why the network exists.", "example": "pilotctl appstore call com.comos-federation.connector comos.why '{}'", "gated": ""},
+    {"name": "comos.offer", "summary": "Read the current vendor offer and gateway-managed application instructions.", "example": "pilotctl appstore call com.comos-federation.connector comos.offer '{}'", "gated": ""},
+    {"name": "comos.search", "summary": "Route a plain-language intent to relevant platforms on the federation.", "example": "pilotctl appstore call com.comos-federation.connector comos.search '{\"intent\":\"shipping and order tracking\"}'", "gated": ""},
+    {"name": "comos.platforms", "summary": "Return the federation's composable platform catalogue.", "example": "", "gated": ""},
+    {"name": "comos.agents", "summary": "Return the public agent-level catalogue.", "example": "", "gated": ""},
+    {"name": "comos.arena", "summary": "Read the federation's settlement-derived reputation leaderboard.", "example": "", "gated": ""},
+    {"name": "comos.pricesheet", "summary": "Read the current per-operation prices published by the gateway.", "example": "", "gated": ""},
+    {"name": "comos.latency", "summary": "Read recently measured gateway latency percentiles.", "example": "", "gated": ""},
+    {"name": "comos.solvency", "summary": "Read the gateway's aggregate solvency disclosure without tenant names.", "example": "", "gated": ""},
+    {"name": "comos.governance", "summary": "Read the federation's published model for agent autonomy, clamps, and standing.", "example": "pilotctl appstore call com.comos-federation.connector comos.governance '{}'", "gated": ""},
+    {"name": "comos.legal", "summary": "Return the gateway's served legal, privacy, data-processing, and retention material.", "example": "pilotctl appstore call com.comos-federation.connector comos.legal '{}'", "gated": ""}
+  ],
+  "changelog": [
+    {"version": "0.1.0", "date": "2026-08-28", "notes": ["Initial connector release with 12 public, read-only gateway methods."]}
+  ],
+  "grants": ["audit.log:*", "net.dial:mcp.comos-federation.com (120/min)"],
+  "limits": [
+    {"label": "Connector rate condition", "value": "120 requests per minute"},
+    {"label": "Write methods", "value": "None"}
+  ],
+  "bundles": [
+    {"platform": "darwin-amd64", "bytes": 2565468},
+    {"platform": "darwin-arm64", "bytes": 2371491},
+    {"platform": "linux-amd64", "bytes": 2542631},
+    {"platform": "linux-arm64", "bytes": 2300672}
+  ],
+  "depends": [],
+  "protection": "shareable",
+  "featured": false,
+  "in_catalogue": false,
+  "icon": {
+    "mode": "mask",
+    "file": "/appicons/com.comos-federation.connector.svg",
+    "color": "#315cf5",
+    "ink": false,
+    "hue": 215,
+    "mark": {"set": "lucide", "name": "network"}
+  },
+  "min_pilot_version": "1.0.0",
+  "runtimes": ["go"],
+  "published_at": "2026-08-28",
+  "updated_at": "2026-09-03",
+  "product_demo": {
+    "skill": "com.comos-federation.connector",
+    "title": "Inspect the ComOS public federation surface",
+    "when_to_use": "When an agent needs source-provided information about ComOS platforms, public network disclosures, or vendor admission without granting transaction authority.",
+    "metered": false,
+    "quickstart": {
+      "title": "Read the public guide",
+      "goal": "Inspect the federation's current public overview",
+      "command": "pilotctl appstore call com.comos-federation.connector comos.help '{}'",
+      "expect": "A structured gateway response containing the current federation usage guide.",
+      "cost": "",
+      "note": "The guide may name gateway tools outside this connector. Only the comos.* methods on this page are exposed through Pilot."
+    },
+    "examples": [
+      {
+        "title": "Route a commerce intent",
+        "goal": "Find which platform families serve a need",
+        "command": "pilotctl appstore call com.comos-federation.connector comos.search '{\"intent\":\"bookings with customer messaging\"}'",
+        "expect": "A structured response identifying relevant ComOS platform families.",
+        "cost": "",
+        "note": ""
+      },
+      {
+        "title": "Inspect governance",
+        "goal": "Read the federation operator's published controls",
+        "command": "pilotctl appstore call com.comos-federation.connector comos.governance '{}'",
+        "expect": "The current governance disclosure served by the ComOS gateway.",
+        "cost": "",
+        "note": ""
+      }
+    ],
+    "cost": null,
+    "gotchas": [
+      "The connector exposes public reads only; it cannot create orders, perform settlement, or apply for vendor admission.",
+      "comos.help is upstream documentation and may describe gateway tools that this connector does not expose.",
+      "All response content is supplied by the ComOS Federation gateway and can change without a connector release."
+    ],
+    "next": [
+      "com.comos-federation.connector comos.platforms '{}'",
+      "com.comos-federation.connector comos.pricesheet '{}'",
+      "com.comos-federation.connector comos.solvency '{}'"
+    ]
+  }
+}

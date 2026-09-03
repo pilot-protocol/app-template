@@ -58,6 +58,7 @@
   ],
   "app_order": [
     "io.pilot.generallegal",
+    "com.comos-federation.connector",
     "io.pilot.dial",
     "io.pilot.deadsimple",
     "io.pilot.kinetic",
