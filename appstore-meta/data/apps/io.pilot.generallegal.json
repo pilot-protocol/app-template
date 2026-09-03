@@ -210,15 +210,18 @@
   "featured": false,
   "in_catalogue": true,
   "icon": {
-    "mode": "image",
-    "img": "/appicons/io.pilot.generallegal.png",
-    "file": "",
-    "fit": "cover",
-    "pos": "center",
+    "mode": "mask",
+    "img": "",
+    "file": "/appicons/io.pilot.generallegal.svg",
+    "fit": "",
+    "pos": "",
     "color": "#0e1a2b",
     "ink": false,
     "hue": 45,
-    "mark": null
+    "mark": {
+      "set": "lucide",
+      "name": "scale"
+    }
   },
   "min_pilot_version": "",
   "runtimes": [
