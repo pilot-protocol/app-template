@@ -208,7 +208,7 @@
   "depends": [],
   "protection": "shareable",
   "featured": false,
-  "in_catalogue": false,
+  "in_catalogue": true,
   "icon": {
     "mode": "image",
     "img": "/appicons/io.pilot.generallegal.png",
