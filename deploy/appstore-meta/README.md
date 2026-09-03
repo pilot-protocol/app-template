@@ -48,6 +48,11 @@ curl -sI https://$HOST/v1/appstore/metadata | grep -i etag
 
 ## Update
 
+Repository deployments use a dedicated `APPSTORE_META_GCP_SA_KEY` secret.
+The service account must be able to read and SSH to the `appstore-meta`
+instance in this project, including IAP tunnel access. The general publishing
+VM credential is intentionally not reused across this project boundary.
+
 `startup.sh` re-clones and rebuilds on every boot:
 
 ```bash
