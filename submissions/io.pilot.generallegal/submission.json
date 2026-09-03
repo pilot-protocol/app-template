@@ -460,28 +460,6 @@
   "email": "alex@vulturelabs.io",
   "bundle": "io.pilot.generallegal-0.1.0-linux-amd64.tar.gz",
   "bundle_sha256": "9136d92a1d0fbe99067f2413cecf17466373cf432b3be92b264124ed8cb9c0c0",
-  "bundles": {
-    "darwin-amd64": {
-      "url": "https://artifacts.pilotprotocol.network/bundles/io.pilot.generallegal/0.1.0/darwin-amd64/io.pilot.generallegal-0.1.0-darwin-amd64.tar.gz",
-      "sha256": "85314abb6e36f95995eadc36ea259046d6ed4dc270b04cfd8e300855392a7554",
-      "bytes": 5232940
-    },
-    "darwin-arm64": {
-      "url": "https://artifacts.pilotprotocol.network/bundles/io.pilot.generallegal/0.1.0/darwin-arm64/io.pilot.generallegal-0.1.0-darwin-arm64.tar.gz",
-      "sha256": "38b511c449d815e846eadac47a239d4e5a6999b1db4ccc5e2c38a7addb6f7791",
-      "bytes": 4882961
-    },
-    "linux-amd64": {
-      "url": "https://artifacts.pilotprotocol.network/bundles/io.pilot.generallegal/0.1.0/linux-amd64/io.pilot.generallegal-0.1.0-linux-amd64.tar.gz",
-      "sha256": "9136d92a1d0fbe99067f2413cecf17466373cf432b3be92b264124ed8cb9c0c0",
-      "bytes": 5074207
-    },
-    "linux-arm64": {
-      "url": "https://artifacts.pilotprotocol.network/bundles/io.pilot.generallegal/0.1.0/linux-arm64/io.pilot.generallegal-0.1.0-linux-arm64.tar.gz",
-      "sha256": "6c02a65f12a11498762d42da705d1a8b46d70efe5955a6d0797cc69cd2482d19",
-      "bytes": 4630175
-    }
-  },
   "publisher": "ed25519:Tl5OtWqZUPSGJkt7+Z2uOk+0YjvlxBsQdN9Rp6ZI3lE=",
   "exposes": [
     "generallegal.deals_list",

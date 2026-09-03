@@ -60,6 +60,13 @@ REL_BASE="https://github.com/${CATALOG_REPO}/releases/download/${TAG}"
 BUNDLE_URL="${REL_BASE}/${PRIMARY_FILE}"
 
 # Every asset to release: the .bundles map's files, or just .bundle when absent.
+if ! jq -e '
+  ((.bundles // {}) | length) == 0
+  or all(.bundles[]; (.file | type) == "string" and (.file | length) > 0)
+' "$META" >/dev/null; then
+  echo "ERROR: $META ($ID v$VERSION) has a .bundles entry without a non-empty .file; URL-only bundle declarations are not publishable by this workflow"
+  exit 1
+fi
 mapfile -t FILES < <(jq -r 'if (.bundles // {}) | length > 0 then (.bundles | to_entries[] | .value.file) else .bundle end' "$META")
 
 # Re-enforce the UPDATE gate against the LIVE catalogue before touching any org
