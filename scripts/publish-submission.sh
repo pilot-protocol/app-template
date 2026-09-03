@@ -113,7 +113,12 @@ BUNDLE_BYTES="$(wc -c < "$DIR/$PRIMARY_FILE" | tr -d ' ')"
 # fail-closes any entry without a `publisher` pin, so every published app MUST
 # carry it. Source of truth is the bundle's signed manifest (store.publisher) —
 # NOT metadata.json, whose publisher_pubkey can be a placeholder/stale.
-PUBLISHER="$(tar -xzOf "$DIR/$PRIMARY_FILE" ./manifest.json 2>/dev/null | jq -r '.store.publisher // empty')"
+MANIFEST_MEMBER="$(
+  tar -tzf "$DIR/$PRIMARY_FILE" |
+    awk '$0 == "manifest.json" || $0 == "./manifest.json" { member = $0 } END { print member }'
+)"
+[ -n "$MANIFEST_MEMBER" ] || { echo "ERROR: $PRIMARY_FILE has no root manifest.json"; exit 1; }
+PUBLISHER="$(tar -xzOf "$DIR/$PRIMARY_FILE" "$MANIFEST_MEMBER" | jq -r '.store.publisher // empty')"
 [ -n "$PUBLISHER" ] || echo "WARNING: no store.publisher in $PRIMARY_FILE manifest — catalogue entry will be UNPINNED (refused on v1.12.3+ hosts)"
 
 MDSRC="$DIR/metadata.json"   # the v2 store-page record, emitted by `pilot-app submit`
