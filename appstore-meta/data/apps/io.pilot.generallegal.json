@@ -200,27 +200,15 @@
   ],
   "bundles": [
     {
-      "platform": "darwin-arm64",
-      "bytes": 0
-    },
-    {
-      "platform": "darwin-amd64",
-      "bytes": 0
-    },
-    {
-      "platform": "linux-arm64",
-      "bytes": 0
-    },
-    {
       "platform": "linux-amd64",
-      "bytes": 0
+      "bytes": 5074207
     }
   ],
   "installed_bytes": 0,
   "depends": [],
   "protection": "shareable",
   "featured": false,
-  "in_catalogue": true,
+  "in_catalogue": false,
   "icon": {
     "mode": "image",
     "img": "/appicons/io.pilot.generallegal.png",
