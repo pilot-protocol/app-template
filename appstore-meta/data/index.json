@@ -23,7 +23,7 @@
     {
       "id": "infra",
       "name": "Infrastructure",
-      "blurb": "Containers, microVMs, and deploys — the compute layer for agents.",
+      "blurb": "Containers, microVMs, and deploys \u2014 the compute layer for agents.",
       "hue": 30
     },
     {
@@ -41,13 +41,13 @@
     {
       "id": "work",
       "name": "Work & Research",
-      "blurb": "Put real-world work in motion and get real answers back — human hands on a task, and pricing research with your own customers.",
+      "blurb": "Put real-world work in motion and get real answers back \u2014 human hands on a task, and pricing research with your own customers.",
       "hue": 45
     },
     {
       "id": "comms",
       "name": "Communications",
-      "blurb": "Give an agent its own phone number or email inbox — voice, SMS/iMessage, email, and threaded conversations.",
+      "blurb": "Give an agent its own phone number or email inbox \u2014 voice, SMS/iMessage, email, and threaded conversations.",
       "hue": 315
     }
   ],
@@ -57,6 +57,7 @@
     "io.pilot.docker"
   ],
   "app_order": [
+    "io.pilot.generallegal",
     "io.pilot.dial",
     "io.pilot.deadsimple",
     "io.pilot.kinetic",

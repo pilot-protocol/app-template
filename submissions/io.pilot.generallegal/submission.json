@@ -1,0 +1,551 @@
+{
+  "product_demo": {
+    "skill": "io.pilot.generallegal",
+    "title": "Full usage demo",
+    "metered": false,
+    "when_to_use": "When a contract needs a licensed attorney to review, redline or draft it, or when an agent needs its own Delaware company. Formation works on a fresh install; contract review needs your own General Legal API key.",
+    "quickstart": {
+      "goal": "Price a Delaware company \u2014 works on a fresh install, no account, no key",
+      "command": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+      "expect": "{\"options\":[{\"filing_speed\":\"instant\",\"total_cents\":19000},{\"filing_speed\":\"standard\",\"total_cents\":21000}]}",
+      "note": "Free, and it needs no account or key at all \u2014 the fastest way to confirm the app works. Contract review is the half that needs a key; see the examples."
+    },
+    "examples": [
+      {
+        "title": "Form a Delaware company \u2014 no API key needed",
+        "goal": "Price it, file it, hand the founder a payment link",
+        "command": "pilotctl appstore call io.pilot.generallegal generallegal.formation_start_llc '{\"filing_speed\":\"standard\",\"company_name\":\"NewCo LLC\",\"founder\":{\"full_name\":\"Ada Lovelace\",\"email\":\"ada@example.com\"},\"principal_address\":{\"street\":\"1 Main St\",\"city\":\"Dover\",\"state\":\"DE\",\"postal_code\":\"19901\"},\"ai_agent_description\":\"Procurement agent\",\"authority_limits\":\"No commitments above $5,000 without sign-off\",\"contract_threshold\":\"$5,000\"}'",
+        "expect": "{\"formation_id\":\"f-...\",\"payment_url\":\"https://...\",\"status\":\"awaiting_payment\"}",
+        "note": "BILLABLE - files a real company. $190 instant / $210 standard / $260 next-day / $310 same-day, paid by the founder at the returned link. No account or key needed to call it. formation_id is shown once."
+      },
+      {
+        "title": "Track the filing and collect the paperwork",
+        "goal": "Poll to completion, then pull the documents",
+        "command": "pilotctl appstore call io.pilot.generallegal generallegal.formation_status '{\"formation_id\":\"f-...\"}'",
+        "expect": "{\"status\":\"filed\",\"poll_after_seconds\":30} then {\"status\":\"complete\"}",
+        "note": "Free. Repeat only after poll_after_seconds. When complete, generallegal.formation_documents returns short-lived links."
+      },
+      {
+        "title": "Bring your own key, then confirm it works",
+        "goal": "Authenticate as your own General Legal organization",
+        "command": "pilotctl appstore call io.pilot.generallegal generallegal.deals_list '{\"page\":1,\"page_size\":5}'",
+        "expect": "{\"items\":[...],\"total\":n} once the key is in place; 401 until then",
+        "note": "Contract review only. Sign up at https://portal.general.legal/signup, then account menu -> API keys (shown once). Import: printf '{\"GENERAL_LEGAL_API_KEY\":\"glk_YOUR_KEY\"}' > ~/.pilot/apps/io.pilot.generallegal/secrets.json && chmod 600 ~/.pilot/apps/io.pilot.generallegal/secrets.json && pilotctl appstore restart io.pilot.generallegal"
+      },
+      {
+        "title": "Ask an attorney to review a contract",
+        "goal": "Open a matter a real lawyer picks up",
+        "command": "pilotctl appstore call io.pilot.generallegal generallegal.deal_open '{\"initial_request\":\"Please review this mutual NDA. We are the disclosing party; flag anything unusual in the confidentiality term.\",\"deal_name\":\"Acme mutual NDA\"}'",
+        "expect": "{\"deal_id\":\"d-9f3...\",\"status\":\"open\"}",
+        "note": "BILLABLE - flat fee per contract: $250 (<=3 pages), $500 (3-50), $10/page (50+), $2,000 to draft. Covers every turn through signature. Keep the deal_id."
+      },
+      {
+        "title": "Stage the document, then send it",
+        "goal": "Push the bytes in chunks (a file cannot cross in one message), then upload",
+        "command": "pilotctl appstore call io.pilot.generallegal generallegal.upload_begin '{\"file_name\":\"nda.docx\",\"content_type\":\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\",\"total_bytes\":3145728,\"sha256\":\"<sha256 of the file>\"}'",
+        "expect": "{\"blob_id\":\"a1b2...\",\"max_chunk_bytes\":524288,\"next_seq\":0}",
+        "note": "Then generallegal.upload_chunk with seq 0,1,2... and base64 of at most max_chunk_bytes raw bytes. The last returns complete:true. Finally generallegal.document_upload with the blob_id and deal_id (BILLABLE)."
+      },
+      {
+        "title": "Collect the released redline",
+        "goal": "Get a downloadable link to counsel's version",
+        "command": "pilotctl appstore call io.pilot.generallegal generallegal.version_download_link '{\"version_id\":\"v-07...\"}'",
+        "expect": "{\"file_name\":\"nda-redline.docx\",\"download_url\":\"https://...\",\"download_token_expires_at\":\"...\"}",
+        "note": "Free. The URL needs no auth and expires in ~15 minutes - fetch it yourself. Find version ids via generallegal.deal_get or generallegal.contract_get."
+      }
+    ],
+    "gotchas": [
+      "Two halves, different requirements. Company formation needs no account and no key. Contract review needs a General Legal account and an API key imported.",
+      "For contract review: sign up at portal.general.legal/signup, mint a key under API keys, write it to $APP/secrets.json, then restart the app - the key is read at startup.",
+      "Five methods spend money: deal_open and document_upload are flat-fee per contract ($250/$500/$10-per-page/$2,000); formation_start_llc and formation_start_c_corp file a real company ($190-$318); thread_post is covered by the matter's fee.",
+      "A document cannot ride in one call. Use upload_begin then upload_chunk (<=512 KiB raw each) and pass the blob_id. A blob is single-use and dropped once sent.",
+      "Matters reach a real attorney and formations file a real company. Neither is a sandbox - confirm before calling a billable method.",
+      "Contract-review limits are per organization: 120 reads/min, 25 new matters/day, 50 uploads/day. Honour Retry-After on a 429."
+    ],
+    "next": [
+      "generallegal.formation_options to price a company, or generallegal.deals_list to see the matters your key can reach.",
+      "generallegal.help lists every method and marks exactly which ones cost money."
+    ]
+  },
+  "next_steps": {
+    "schema": 1,
+    "app": "io.pilot.generallegal",
+    "edges": [
+      {
+        "from": "*",
+        "on": "err",
+        "match": "401|[Uu]nauthorized",
+        "why": "contract review needs your own General Legal API key; company formation needs none and works right now",
+        "then": [
+          {
+            "cmd": "pilotctl appstore view io.pilot.generallegal",
+            "why": "the store page carries the exact key-import command; mint the key at portal.general.legal/api-keys first",
+            "kind": "gateway"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.deals_list",
+        "on": "ok",
+        "why": "your key works; open a new matter or inspect one you already have",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.deal_open '{\"initial_request\":\"Please review this mutual NDA.\"}'",
+            "why": "opens a matter with a licensed attorney \u2014 billable, so confirm with whoever owns the account",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.deal_get '{\"deal_id\":\"<id from items[]>\"}'",
+            "why": "free, and it lists a matter's documents and released versions",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.deal_open",
+        "on": "ok",
+        "why": "the matter exists; give counsel the contract, or read what they have already asked",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.upload_begin '{\"file_name\":\"nda.docx\",\"content_type\":\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\",\"total_bytes\":3145728,\"sha256\":\"<sha256>\"}'",
+            "why": "a document cannot cross in one message, so stage it first",
+            "kind": "gateway"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.thread_get '{\"deal_id\":\"<deal_id>\"}'",
+            "why": "free polling; counsel often asks a clarifying question before delivering",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.deal_get",
+        "on": "ok",
+        "why": "you can see the matter's documents; walk one's versions or answer counsel",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.contract_get '{\"contract_id\":\"<contract_id>\"}'",
+            "why": "free, and its version ids are what the download link needs",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.thread_get '{\"deal_id\":\"<deal_id>\"}'",
+            "why": "free, and it shows whether counsel is waiting on you",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.thread_get",
+        "on": "ok",
+        "why": "you have counsel's messages; answer them or go back to the matter itself",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.thread_post '{\"deal_id\":\"<deal_id>\",\"text\":\"Yes, proceed on that basis.\"}'",
+            "why": "replies are billable attorney time; free when target is \"ai\"",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.deal_get '{\"deal_id\":\"<deal_id>\"}'",
+            "why": "free, and it shows any version released since you last looked",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.thread_post",
+        "on": "ok",
+        "why": "your reply is with counsel; watch for their answer and for a released version",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.thread_get '{\"deal_id\":\"<deal_id>\"}'",
+            "why": "free polling for the reply",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.deal_get '{\"deal_id\":\"<deal_id>\"}'",
+            "why": "free, and a redline usually lands here rather than in the thread",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.contracts_list",
+        "on": "ok",
+        "why": "you have your documents; open one to reach its versions",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.contract_get '{\"contract_id\":\"<id>\"}'",
+            "why": "free, and the version ids feed the download link",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.deals_list '{\"page\":1,\"page_size\":20}'",
+            "why": "free, and it shows which matter each document belongs to",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.contract_get",
+        "on": "ok",
+        "why": "you have the version ids, so you can pull the released document",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.version_download_link '{\"version_id\":\"<version_id>\"}'",
+            "why": "free; returns a short-lived unauthenticated URL you fetch yourself",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.deals_list '{\"page\":1,\"page_size\":20}'",
+            "why": "free, and it takes you back to everything currently open",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.version_download_link",
+        "on": "ok",
+        "why": "the link expires in about 15 minutes, so fetch it now, then carry on with the matter",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.thread_get '{\"deal_id\":\"<deal_id>\"}'",
+            "why": "free, and counsel's notes usually explain what changed in the version",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.deals_list '{\"page\":1,\"page_size\":20}'",
+            "why": "free, and it shows what else is still open",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.upload_begin",
+        "on": "ok",
+        "why": "you have a blob_id and the chunk size; push the bytes in order until complete is true",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.upload_chunk '{\"blob_id\":\"<blob_id>\",\"seq\":0,\"data_base64\":\"<first chunk>\"}'",
+            "why": "chunks must be strictly sequential; the last one verifies your sha256 and seals the blob",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.upload_chunk",
+        "on": "ok",
+        "why": "the bytes are staged and the checksum verified, so the document can be sent",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.document_upload '{\"blob_id\":\"<blob_id>\",\"deal_id\":\"<deal_id>\",\"context_for_legal\":\"Standard mutual NDA.\"}'",
+            "why": "sends it into AI + attorney review \u2014 billable on your engagement",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ],
+        "match": "\"complete\"\\s*:\\s*true"
+      },
+      {
+        "from": "generallegal.document_upload",
+        "on": "ok",
+        "why": "review has started; watch the thread and the matter for what counsel returns",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.thread_get '{\"deal_id\":\"<deal_id>\"}'",
+            "why": "free polling; counsel often asks something before delivering",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.deal_get '{\"deal_id\":\"<deal_id>\"}'",
+            "why": "free, and released versions appear here as they land",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.formation_options",
+        "on": "ok",
+        "why": "you have every option and its total; present them and let the founder choose before filing anything",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_start_llc '{\"filing_speed\":\"standard\",\"company_name\":\"NewCo LLC\",\"founder\":{\"full_name\":\"...\",\"email\":\"...\"},\"principal_address\":{\"street\":\"...\",\"city\":\"...\",\"state\":\"DE\",\"postal_code\":\"...\"},\"ai_agent_description\":\"...\",\"authority_limits\":\"...\",\"contract_threshold\":\"...\"}'",
+            "why": "the simpler default; files a real company and returns a payment link",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_start_c_corp '{\"filing_speed\":\"standard\",\"founder\":{\"full_name\":\"...\",\"email\":\"...\"},\"principal_address\":{\"street\":\"...\",\"city\":\"...\",\"state\":\"DE\",\"postal_code\":\"...\"},\"ai_agent_description\":\"...\",\"authority_limits\":\"...\",\"contract_threshold\":\"...\",\"director\":{\"full_name\":\"...\",\"email\":\"...\"},\"officer\":{\"full_name\":\"...\",\"email\":\"...\"}}'",
+            "why": "only when corporate stock or fundraising justifies it",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.formation_start_llc",
+        "on": "ok",
+        "why": "the filing is open and the founder has a payment link; store formation_id, it grants full access",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_status '{\"formation_id\":\"<formation_id>\"}'",
+            "why": "poll while poll_after_seconds keeps coming back",
+            "kind": "gateway"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_update '{\"formation_id\":\"<formation_id>\",\"company_name\":\"Better Name LLC\"}'",
+            "why": "renaming is only possible before the documents are generated",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.formation_start_c_corp",
+        "on": "ok",
+        "why": "the filing is open and the founder has a payment link; store formation_id, it grants full access",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_status '{\"formation_id\":\"<formation_id>\"}'",
+            "why": "poll while poll_after_seconds keeps coming back",
+            "kind": "gateway"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_update '{\"formation_id\":\"<formation_id>\",\"company_name\":\"Better Name Inc\"}'",
+            "why": "renaming is only possible before the documents are generated",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.formation_update",
+        "on": "ok",
+        "why": "the name is changed; confirm it took and carry on watching the filing",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_status '{\"formation_id\":\"<formation_id>\"}'",
+            "why": "confirms the new name is the one being filed",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "generallegal.formation_status",
+        "on": "ok",
+        "why": "the filing is still moving; wait the interval it gave you rather than polling tightly",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_status '{\"formation_id\":\"<formation_id>\"}'",
+            "why": "repeat only after poll_after_seconds",
+            "kind": "recovery"
+          }
+        ],
+        "match": "poll_after_seconds"
+      },
+      {
+        "from": "generallegal.formation_status",
+        "on": "ok",
+        "why": "the company exists; collect the paperwork",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_documents '{\"formation_id\":\"<formation_id>\"}'",
+            "why": "returns short-lived links; call again once they expire",
+            "kind": "flow"
+          }
+        ],
+        "match": "complete|filed|ready"
+      },
+      {
+        "from": "generallegal.formation_documents",
+        "on": "ok",
+        "why": "the entity is formed and papered; the other half of this app puts an attorney on its contracts",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.deal_open '{\"initial_request\":\"We just incorporated. Please review our standard mutual NDA.\"}'",
+            "why": "needs a General Legal account and an imported API key; billable attorney work",
+            "kind": "gateway"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_status '{\"formation_id\":\"<formation_id>\"}'",
+            "why": "free, and it re-checks state if a document link looked wrong",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "*",
+        "on": "err",
+        "match": "429",
+        "why": "the organization's rate budget is spent; every key on the account shares it",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.deals_list '{\"page\":1,\"page_size\":20}'",
+            "why": "wait out Retry-After, then resume with a paginated read instead of a tight poll",
+            "kind": "recovery"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.generallegal generallegal.formation_options '{\"entity_type\":\"llc\"}'",
+            "why": "company formation is the other half of this app and needs no account or key at all \u2014 free to explore any time",
+            "kind": "gateway"
+          }
+        ]
+      }
+    ]
+  },
+  "id": "io.pilot.generallegal",
+  "version": "0.1.0",
+  "namespace": "generallegal",
+  "description": "Attorney-backed contract review and Delaware company formation for agents. Flat-fee legal work from a licensed US law firm.",
+  "email": "alex@vulturelabs.io",
+  "bundle": "io.pilot.generallegal-0.1.0-linux-amd64.tar.gz",
+  "bundle_sha256": "9136d92a1d0fbe99067f2413cecf17466373cf432b3be92b264124ed8cb9c0c0",
+  "bundles": {
+    "darwin-amd64": {
+      "url": "https://artifacts.pilotprotocol.network/bundles/io.pilot.generallegal/0.1.0/darwin-amd64/io.pilot.generallegal-0.1.0-darwin-amd64.tar.gz",
+      "sha256": "85314abb6e36f95995eadc36ea259046d6ed4dc270b04cfd8e300855392a7554",
+      "bytes": 5232940
+    },
+    "darwin-arm64": {
+      "url": "https://artifacts.pilotprotocol.network/bundles/io.pilot.generallegal/0.1.0/darwin-arm64/io.pilot.generallegal-0.1.0-darwin-arm64.tar.gz",
+      "sha256": "38b511c449d815e846eadac47a239d4e5a6999b1db4ccc5e2c38a7addb6f7791",
+      "bytes": 4882961
+    },
+    "linux-amd64": {
+      "url": "https://artifacts.pilotprotocol.network/bundles/io.pilot.generallegal/0.1.0/linux-amd64/io.pilot.generallegal-0.1.0-linux-amd64.tar.gz",
+      "sha256": "9136d92a1d0fbe99067f2413cecf17466373cf432b3be92b264124ed8cb9c0c0",
+      "bytes": 5074207
+    },
+    "linux-arm64": {
+      "url": "https://artifacts.pilotprotocol.network/bundles/io.pilot.generallegal/0.1.0/linux-arm64/io.pilot.generallegal-0.1.0-linux-arm64.tar.gz",
+      "sha256": "6c02a65f12a11498762d42da705d1a8b46d70efe5955a6d0797cc69cd2482d19",
+      "bytes": 4630175
+    }
+  },
+  "publisher": "ed25519:Tl5OtWqZUPSGJkt7+Z2uOk+0YjvlxBsQdN9Rp6ZI3lE=",
+  "exposes": [
+    "generallegal.deals_list",
+    "generallegal.deal_open",
+    "generallegal.deal_get",
+    "generallegal.thread_get",
+    "generallegal.thread_post",
+    "generallegal.contracts_list",
+    "generallegal.contract_get",
+    "generallegal.document_upload",
+    "generallegal.version_download_link",
+    "generallegal.formation_options",
+    "generallegal.formation_start_llc",
+    "generallegal.formation_start_c_corp",
+    "generallegal.formation_status",
+    "generallegal.formation_update",
+    "generallegal.formation_documents",
+    "generallegal.upload_begin",
+    "generallegal.upload_chunk",
+    "generallegal.upload_abort",
+    "generallegal.help"
+  ],
+  "grants": [
+    {
+      "cap": "fs.read",
+      "target": "$APP/config.json"
+    },
+    {
+      "cap": "fs.read",
+      "target": "$APP/secrets.json"
+    },
+    {
+      "cap": "fs.read",
+      "target": "$APP/blobs"
+    },
+    {
+      "cap": "fs.write",
+      "target": "$APP/blobs"
+    },
+    {
+      "cap": "net.dial",
+      "target": "api.general.legal",
+      "if": {
+        "kind": "rate",
+        "params": {
+          "per": "min",
+          "limit": 120
+        }
+      }
+    },
+    {
+      "cap": "net.dial",
+      "target": "incorp-mcp.general.legal",
+      "if": {
+        "kind": "rate",
+        "params": {
+          "per": "min",
+          "limit": 120
+        }
+      }
+    },
+    {
+      "cap": "audit.log",
+      "target": "*"
+    }
+  ]
+}

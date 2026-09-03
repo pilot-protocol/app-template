@@ -3,6 +3,7 @@ package broker
 import (
 	"encoding/json"
 	"fmt"
+	"mime"
 	"os"
 	"sort"
 	"strings"
@@ -54,11 +55,37 @@ type AppEntry struct {
 	// otherwise just a self-minted keypair.
 	RequireAccessKey bool `json:"require_access_key"`
 
+	// ForwardContentTypes allow-lists request media types the broker may forward
+	// to the partner VERBATIM instead of forcing application/json.
+	//
+	// This exists for multipart uploads: a multipart/form-data body is
+	// meaningless without its boundary parameter, which lives in the
+	// Content-Type header. Forcing application/json (the historical behaviour)
+	// makes the partner reject every upload.
+	//
+	// It is an ALLOW-LIST, not a passthrough, and it is deliberately opt-in.
+	// The broker is the only thing between an untrusted caller and the master
+	// key, and the request media type selects which PARSER the partner runs.
+	// Letting a caller choose that freely is the same class of lever as the
+	// duplicate-key parser differential tenancy already refuses: a body the
+	// broker validated as one thing could be re-read by the partner as another.
+	// Unlisted types are forced to application/json exactly as before.
+	ForwardContentTypes []string `json:"forward_content_types,omitempty"`
+
+	// MaxBodyBytes overrides the broker-wide body cap for this app (0 = use it).
+	//
+	// The default is tuned for JSON calls and is smaller than what an upload
+	// partner accepts, so an app with a multipart route needs to raise it to at
+	// least the partner's own limit — otherwise the broker refuses (413) uploads
+	// the partner would have taken.
+	MaxBodyBytes int64 `json:"max_body_bytes,omitempty"`
+
 	master        string          // resolved from KeyEnv at load (managed: partner key; provisioned: cloud master, e.g. smk_)
 	injector      AuthInjector    // built from AuthHeader/Scheme
 	allowSet      map[string]bool // key = costKey(method, path); method "" = any method
 	allowPatterns []allowPattern  // templated allow entries ("{x}" matches any one segment)
 	allowSegs     [][]string      // every templated allow path (method-independent), for tenancy param extraction
+	fwdCT         map[string]bool // normalised ForwardContentTypes (media type only, lowercased)
 	breaker       *Breaker
 
 	creditSeed         int            // Credit.SeedCredits (0 ⇒ no budget)
@@ -376,6 +403,17 @@ func ParseRegistry(raw []byte, getenv func(string) string) (*Registry, error) {
 				a.allowSet[costKey(method, p)] = true
 			}
 		}
+		a.fwdCT = map[string]bool{}
+		for _, ct := range a.ForwardContentTypes {
+			mt, _, err := mime.ParseMediaType(strings.TrimSpace(ct))
+			if err != nil {
+				return nil, fmt.Errorf("registry: app %s: forward_content_types %q is not a media type: %w", a.ID, ct, err)
+			}
+			if mt == "application/json" {
+				continue // already the default; listing it is a no-op, not an error
+			}
+			a.fwdCT[strings.ToLower(mt)] = true
+		}
 		if a.CostField == "" {
 			a.CostField = "cost_cents"
 		}
@@ -517,4 +555,30 @@ func (r *Registry) AppsRequiringAccessKey() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// forwardContentType decides the Content-Type the broker sends upstream.
+//
+// Default (and the historical behaviour) is application/json: the caller does
+// not get to choose the partner's parser. An app may opt specific media types
+// in via forward_content_types, and only then is the caller's header forwarded
+// VERBATIM — parameters included, because a multipart body without its
+// boundary= parameter is undecodable.
+func (a *AppEntry) forwardContentType(incoming string) string {
+	if incoming == "" || len(a.fwdCT) == 0 {
+		return "application/json"
+	}
+	mt, _, err := mime.ParseMediaType(incoming)
+	if err != nil {
+		return "application/json" // unparseable → do not let it through
+	}
+	if !a.fwdCT[strings.ToLower(mt)] {
+		return "application/json"
+	}
+	return incoming
+}
+
+// forwardsMultipart reports whether this app may forward multipart bodies.
+func (a *AppEntry) forwardsMultipart() bool {
+	return a.fwdCT["multipart/form-data"]
 }

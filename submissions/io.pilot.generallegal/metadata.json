@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "id": "io.pilot.generallegal",
+  "display_name": "General Legal",
+  "tagline": "Attorney-backed contract review and Delaware company formation for agents",
+  "description_md": "General Legal is a Y Combinator-backed law firm. This app puts a licensed\nattorney and a Delaware filing desk behind your agent — contract review and\ncompany formation, in one namespace.\n\nThe two halves have different requirements. Formation works the moment you\ninstall. Contract review needs a General Legal account and an API key.\n\n### Company formation — nothing to set up\n\nNo account, no key, no configuration. Call\n`generallegal.formation_options` and it works on a fresh install.\n\nYou will still need to pay: `formation_start_llc` and\n`formation_start_c_corp` return a payment link, and the founder pays there.\nUse the founder's real details — this files an actual Delaware company.\n\n### Contract review — bring your own API key\n\n1. Sign up at https://portal.general.legal/signup\n2. Open the account menu and choose **API keys**\n   (https://portal.general.legal/api-keys)\n3. Create a key and copy it — the full value is shown **once**\n4. Import it into the app:\n\n```\nprintf '{\"GENERAL_LEGAL_API_KEY\":\"glk_YOUR_KEY\"}' \u003e ~/.pilot/apps/io.pilot.generallegal/secrets.json\nchmod 600 ~/.pilot/apps/io.pilot.generallegal/secrets.json\npilotctl appstore restart io.pilot.generallegal\n```\n\nThe restart matters: the key is read at startup. Verify with\n`pilotctl appstore call io.pilot.generallegal generallegal.deals_list '{}'`.\nThe key stays on your machine, is never sent to the formation service, and\nscopes you to your own General Legal organization.\n\n### What it costs\n\nContract review is flat-fee, with no hourly billing and no minimums. The fee\ncovers every turn through signature, including negotiation with the\ncounterparty.\n\n| Work | Price |\n| --- | --- |\n| Contract, 3 pages or fewer | $250 |\n| Contract, 3-50 pages | $500 |\n| Contract, 50+ pages | $10 per page |\n| Drafting from scratch | $2,000 |\n| Delaware LLC | $190 instant / $210 standard / $260 next-day / $310 same-day |\n| Delaware C-corp | $218 standard / $268 next-day / $318 same-day |\n\n### What the app does\n\n**Company formation** — `formation_options` (free), `formation_start_llc`\n(**paid**), `formation_start_c_corp` (**paid**), `formation_status`,\n`formation_update`, `formation_documents` (free).\n\n**Contract review** — `deal_open` (**paid**), `document_upload` (**paid**),\n`thread_post` (**paid**, covered by the matter's flat fee), plus\n`deals_list`, `deal_get`, `thread_get`, `contracts_list`, `contract_get`,\n`version_download_link` (free) and `upload_begin`, `upload_chunk`,\n`upload_abort` (free — a document is staged in chunks because a single call\ncannot carry a file).\n\n### What costs money\n\nFive methods spend real money and will not warn you first:\n`formation_start_llc`, `formation_start_c_corp`, `deal_open`,\n`document_upload` and `thread_post`. Every other method is free.\n`generallegal.help` lists them under `billable_methods` with the price.\n",
+  "vendor": {
+    "name": ""
+  },
+  "license": "Apache-2.0",
+  "categories": [
+    "legal",
+    "business"
+  ],
+  "keywords": [
+    "legal",
+    "contracts",
+    "attorney",
+    "review",
+    "nda",
+    "redline"
+  ],
+  "size": {
+    "bundle_bytes": 0,
+    "installed_bytes": 0
+  },
+  "compat": {
+    "min_pilot_version": "1.0.0",
+    "runtimes": [
+      "go"
+    ]
+  },
+  "methods": [
+    {
+      "name": "generallegal.deals_list",
+      "summary": "List your matters (paginated, optional status filter)."
+    },
+    {
+      "name": "generallegal.deal_open",
+      "summary": "Open a new matter from a written request. Reaches a real attorney."
+    },
+    {
+      "name": "generallegal.deal_get",
+      "summary": "One matter with its documents and released versions."
+    },
+    {
+      "name": "generallegal.thread_get",
+      "summary": "Read the lawyer-client thread on a matter."
+    },
+    {
+      "name": "generallegal.thread_post",
+      "summary": "Reply to the attorney on a matter's thread."
+    },
+    {
+      "name": "generallegal.contracts_list",
+      "summary": "List your documents."
+    },
+    {
+      "name": "generallegal.contract_get",
+      "summary": "One document with its released versions (version ids feed downloads)."
+    },
+    {
+      "name": "generallegal.document_upload",
+      "summary": "Upload a DOCX, PDF, PNG, JPEG, or Markdown document for AI + attorney review (20 MiB max). Stage the bytes with generallegal.upload_begin/generallegal.upload_chunk first."
+    },
+    {
+      "name": "generallegal.version_download_link",
+      "summary": "Issue a short-lived (~15 min) direct download URL for a released version."
+    },
+    {
+      "name": "generallegal.formation_options",
+      "summary": "Price every Delaware company type and filing speed, itemised. No account and no credentials needed — this works on a fresh install. Call it first and present every option and total to the founder before filing anything."
+    },
+    {
+      "name": "generallegal.formation_start_llc",
+      "summary": "Start a sole-member Delaware LLC and get back a payment link plus a formation_id. No account or credentials needed to call it. The founder acts as member, manager and AI oversight officer. filing_speed 'instant' hands over a pre-formed 'GL AgentCo \u003cn\u003e, LLC' and requires company_name to be omitted; the other speeds file a new LLC under a name you choose. Call generallegal.formation_options first and let the founder pick."
+    },
+    {
+      "name": "generallegal.formation_start_c_corp",
+      "summary": "Start a Delaware C-corp and get back a payment link plus a formation_id. No account or credentials needed to call it. The founder acts as sole incorporator. Suggest an LLC first unless corporate stock or fundraising justifies a C-corp. Call generallegal.formation_options first and let the founder pick."
+    },
+    {
+      "name": "generallegal.formation_status",
+      "summary": "Poll a formation's progress. No account or credentials needed to call it. Repeat after poll_after_seconds for as long as that field comes back."
+    },
+    {
+      "name": "generallegal.formation_update",
+      "summary": "Change the company name before the documents are generated. No account or credentials needed to call it. Late changes are rejected."
+    },
+    {
+      "name": "generallegal.formation_documents",
+      "summary": "Get short-lived links to a completed formation's documents. No account or credentials needed to call it. Call again once they expire."
+    },
+    {
+      "name": "generallegal.upload_begin",
+      "summary": "Start a staged upload and get a blob_id. The file does NOT travel in one IPC message — an envelope is capped at 1 MiB — so declare it here ({\"file_name\",\"content_type\",\"total_bytes\",\"sha256\"}), push the bytes with generallegal.upload_chunk, then pass the blob_id to the upload method."
+    },
+    {
+      "name": "generallegal.upload_chunk",
+      "summary": "Append the next chunk of a staged upload: {\"blob_id\",\"seq\" (0-based, strictly sequential),\"data_base64\"}. Send at most 512 KiB of raw bytes per call. Returns {\"received\",\"total_bytes\",\"complete\"}; when complete, the sha256 you declared has been verified and the blob is ready to send."
+    },
+    {
+      "name": "generallegal.upload_abort",
+      "summary": "Discard a staged upload and its bytes: {\"blob_id\"}. Staged uploads are also reclaimed automatically once they go stale."
+    },
+    {
+      "name": "generallegal.help",
+      "summary": "Discovery: every method with params, kind, and latency class."
+    }
+  ],
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "notes": [
+        "Released v0.1.0"
+      ]
+    }
+  ]
+}

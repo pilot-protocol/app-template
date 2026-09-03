@@ -170,6 +170,25 @@ func (c *Client) PostRaw(ctx context.Context, path string, payload json.RawMessa
 	return c.do(req)
 }
 
+// DoMultipart sends a pre-assembled multipart/form-data body.
+//
+// The body arrives already built (see backend.BuildForm) rather than being
+// streamed, because a managed adapter signs base64(sha256(BODY)) and you cannot
+// hash a body you have not finished producing. contentType carries the
+// generated boundary and MUST be sent verbatim — without it the body is
+// undecodable on arrival, so it is a parameter rather than a constant.
+func (c *Client) DoMultipart(ctx context.Context, method, path string, body []byte, contentType string) (json.RawMessage, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.base()+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+{{- if .Managed}}
+	c.applySig(req, body)
+{{- end}}
+	return c.do(req)
+}
+
 // Do issues an arbitrary method on <path> with an optional query string, extra
 // per-call headers, and JSON body, and returns the raw JSON body. Path
 // placeholders are already filled by the caller; query carries the query-located
