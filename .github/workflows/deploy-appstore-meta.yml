@@ -1,0 +1,79 @@
+name: deploy-appstore-meta
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "appstore-meta/data/**"
+      - "cmd/appstore-meta-api/**"
+      - "internal/appstoremeta/**"
+      - "deploy/appstore-meta/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-appstore-meta
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gate on credentials
+        id: gate
+        env:
+          SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          if [ -n "$SA_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "GCP_SA_KEY is not configured; metadata deploy skipped."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: google-github-actions/auth@v2
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        if: steps.gate.outputs.enabled == 'true'
+
+      - name: Rebuild and restart metadata API
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          PROJECT: ${{ vars.APPSTORE_META_PROJECT || 'pilot-protocol-stg-vl' }}
+          ZONE: ${{ vars.APPSTORE_META_ZONE || 'europe-west3-c' }}
+          INSTANCE: ${{ vars.APPSTORE_META_INSTANCE || 'appstore-meta' }}
+        run: |
+          # shellcheck disable=SC2016 # Variables in the quoted command expand on the VM.
+          gcloud compute ssh "$INSTANCE" \
+            --project "$PROJECT" \
+            --zone "$ZONE" \
+            --tunnel-through-iap \
+            --command '
+              set -e
+              sudo -u pilot bash -c "export PATH=\$PATH:/usr/local/go/bin; \
+                cd /opt/pilot/app-template && git pull --ff-only && \
+                go run ./cmd/appstore-meta-api -check && \
+                go build -o /tmp/appstore-meta-api ./cmd/appstore-meta-api"
+              sudo install -o pilot -g pilot -m 0755 /tmp/appstore-meta-api /opt/pilot/appstore-meta-api
+              sudo systemctl restart appstore-meta-api
+              curl -fsS http://127.0.0.1:8080/healthz
+            '
+
+      - name: Verify public metadata
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          curl --fail --show-error --silent \
+            --retry 8 --retry-delay 3 --retry-all-errors \
+            https://appstore-meta.pilotprotocol.network/healthz
+          count="$(curl --fail --show-error --silent \
+            https://appstore-meta.pilotprotocol.network/v1/appstore/metadata |
+            jq '.apps | length')"
+          test "$count" -gt 0
+          echo "public metadata serves $count apps"
