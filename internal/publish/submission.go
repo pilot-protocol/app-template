@@ -247,6 +247,7 @@ type SubCLIService struct {
 	ForceArgs     []string `json:"force_args,omitempty"`
 	Tools         []string `json:"tools,omitempty"`
 	ReadyPortFlag string   `json:"ready_port_flag,omitempty"`
+	StopSignal    string   `json:"stop_signal,omitempty"`
 }
 
 // SubParam is one structured input parameter (vs the old free-text field).
@@ -742,6 +743,7 @@ func (s Submission) ToConfig() *scaffold.Config {
 					ForceArgs:     sv.ForceArgs,
 					Tools:         sv.Tools,
 					ReadyPortFlag: sv.ReadyPortFlag,
+					StopSignal:    sv.StopSignal,
 				}
 			}
 		default:

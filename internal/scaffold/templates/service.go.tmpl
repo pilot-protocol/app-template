@@ -67,6 +67,22 @@ type ServiceSpec struct {
 	// binary's first launch can take seconds (macOS assesses it; Rosetta
 	// translates it) before it listens.
 	ReadyPortFlag string
+	// StopSignal asks the server to stop: "SIGTERM" (default), "SIGINT" or
+	// "SIGQUIT". Some servers treat SIGTERM as a slow, polite stop that waits
+	// for clients (PostgreSQL's "smart" shutdown); SIGINT is their fast,
+	// clean one. SIGKILL still follows after serviceStopGrace.
+	StopSignal string
+}
+
+// stopSignal maps ServiceSpec.StopSignal to a signal (validated at generation).
+func stopSignal(name string) syscall.Signal {
+	switch name {
+	case "SIGINT":
+		return syscall.SIGINT
+	case "SIGQUIT":
+		return syscall.SIGQUIT
+	}
+	return syscall.SIGTERM
 }
 
 // appliesTo reports whether this call starts a server. Every call of an
@@ -92,6 +108,7 @@ type service struct {
 	name string
 	cmd  *exec.Cmd
 	out  *tailBuffer
+	sig  syscall.Signal // asks it to stop (ServiceSpec.StopSignal)
 	done chan struct{} // closed once Wait has returned
 	err  error         // Wait's result, valid after done
 }
@@ -135,7 +152,7 @@ func (r *Runner) startService(ctx context.Context, sv *ServiceSpec, args []strin
 		name = filepath.Base(argv[0])
 	}
 
-	s := &service{name: name, out: &tailBuffer{limit: serviceTailBytes}, done: make(chan struct{})}
+	s := &service{name: name, sig: stopSignal(sv.StopSignal), out: &tailBuffer{limit: serviceTailBytes}, done: make(chan struct{})}
 	cmd := exec.Command(r.base[0], argv...)
 	cmd.Env = r.childEnv()
 	cmd.Stdout, cmd.Stderr = s.out, s.out
@@ -229,9 +246,9 @@ func (r *Runner) startService(ctx context.Context, sv *ServiceSpec, args []strin
 	}
 }
 
-// stop SIGTERMs the service, then SIGKILLs it after grace, and waits for it.
+// stop sends the service its stop signal, then SIGKILL after grace, and waits.
 func (s *service) stop(grace time.Duration) {
-	_ = s.cmd.Process.Signal(syscall.SIGTERM)
+	_ = s.cmd.Process.Signal(s.sig)
 	select {
 	case <-s.done:
 		return
@@ -259,7 +276,7 @@ func StopServices() {
 		return
 	}
 	for _, s := range list {
-		_ = s.cmd.Process.Signal(syscall.SIGTERM)
+		_ = s.cmd.Process.Signal(s.sig)
 	}
 	deadline := time.After(serviceStopGrace)
 wait:
@@ -274,7 +291,7 @@ wait:
 		select {
 		case <-s.done:
 		default:
-			log.Printf("backend: service %s (pid %d) ignored SIGTERM for %s; killing it", s.name, s.cmd.Process.Pid, serviceStopGrace)
+			log.Printf("backend: service %s (pid %d) ignored %s for %s; killing it", s.name, s.cmd.Process.Pid, s.sig, serviceStopGrace)
 			_ = s.cmd.Process.Kill()
 			select {
 			case <-s.done:

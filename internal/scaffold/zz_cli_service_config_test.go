@@ -38,6 +38,8 @@ methods:
 		{"service.tools on enumerated", `    cli: {args: ["x"], service: {tools: ["a"]}}`, "tools only applies to a passthrough route"},
 		{"ok ready_port_flag", `    cli: {passthrough: true, tools: ["a"], service: {tools: ["a"], ready_port_flag: "--port"}}`, ""},
 		{"ready_port_flag not a flag", `    cli: {passthrough: true, tools: ["a"], service: {tools: ["a"], ready_port_flag: "port"}}`, "must be a flag such as --port"},
+		{"ok stop_signal", `    cli: {args: ["x"], service: {stop_signal: "SIGINT"}}`, ""},
+		{"bad stop_signal", `    cli: {args: ["x"], service: {stop_signal: "SIGKILL"}}`, "stop_signal \"SIGKILL\" must be SIGTERM, SIGINT or SIGQUIT"},
 		{"ready_port_flag on enumerated", `    cli: {args: ["x"], service: {ready_port_flag: "--port"}}`, "ready_port_flag only applies to a passthrough route"},
 	}
 	for _, tc := range cases {
