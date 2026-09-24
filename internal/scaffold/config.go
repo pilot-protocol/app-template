@@ -949,6 +949,10 @@ type CLIService struct {
 	// `--port=N`), the server is ready once 127.0.0.1:N accepts (and the call
 	// fails fast if something already does) instead of after ReadyAfter.
 	ReadyPortFlag string `yaml:"ready_port_flag,omitempty"`
+	// StopSignal is sent to stop the server: SIGTERM (default), SIGINT or
+	// SIGQUIT; SIGKILL follows after a grace period. Use it when SIGTERM is
+	// not the server's fast clean stop (PostgreSQL: SIGINT).
+	StopSignal string `yaml:"stop_signal,omitempty"`
 }
 
 // ReadyAfterOrDefault / ReadyTimeoutOrDefault feed the generated Spec.
@@ -1620,6 +1624,11 @@ func validateCLIService(i int, m Method, sv *CLIService) []error {
 	}
 	if mt, err := time.ParseDuration(m.TimeoutFor()); err == nil && rt >= mt {
 		errs = append(errs, fmt.Errorf("%s.ready_timeout %s must be below the method timeout %s", at, rt, mt))
+	}
+	switch sv.StopSignal {
+	case "", "SIGTERM", "SIGINT", "SIGQUIT":
+	default:
+		errs = append(errs, fmt.Errorf("%s.stop_signal %q must be SIGTERM, SIGINT or SIGQUIT", at, sv.StopSignal))
 	}
 	if m.CLI.Passthrough {
 		if len(sv.Tools) == 0 {

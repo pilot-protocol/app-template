@@ -107,6 +107,7 @@ func TestCLIServiceLifetime(t *testing.T) {
 	script := "#!/bin/sh\n" +
 		"case \"$1\" in\n" +
 		"  serve) echo \"$$ $*\" > \"$2\"; trap 'echo term > \"$2.term\"; kill $! 2>/dev/null; exit 0' TERM; sleep 300 & wait;;\n" +
+		"  servei) echo \"$$ $*\" > \"$2\"; trap 'echo int > \"$2.int\"; kill $! 2>/dev/null; exit 0' INT; trap 'echo term > \"$2.term\"; kill $! 2>/dev/null; exit 0' TERM; sleep 300 & wait;;\n" +
 		"  quick) echo quick-out; exit 3;;\n" +
 		"  listen) shift; exec env " + slowListenerEnv + "=1 '" + os.Args[0] + "' -test.run='^TestHelperSlowListener$' -- \"$@\";;\n" +
 		"  *) echo '{}';;\n" +
@@ -128,6 +129,11 @@ methods:
     cli:
       args: ["serve", "${pidfile}"]
       service: {ready_after: "300ms", ready_timeout: "10s", force_args: ["--daemonize", "no"]}
+  - name: svctool.startint
+    summary: "Start a server whose fast clean stop is SIGINT."
+    cli:
+      args: ["servei", "${pidfile}"]
+      service: {ready_after: "300ms", ready_timeout: "10s", stop_signal: "SIGINT"}
   - name: svctool.listen
     summary: "Start a server that must answer on a port."
     cli:
@@ -454,6 +460,38 @@ methods:
 			if _, err := os.Stat(filepath.Join(dir, fmt.Sprintf("m%d.pid.term", i))); err != nil {
 				t.Errorf("server %d was not stopped with SIGTERM", p)
 			}
+		}
+		if left := groupMembers(apid); len(left) > 0 {
+			t.Errorf("process group %d not empty after SIGTERM: %v", apid, left)
+		}
+	})
+
+	// stop_signal: a service declared with SIGINT (PostgreSQL's fast
+	// shutdown; its SIGTERM is a "smart" one that waits for every client) gets
+	// SIGINT, not SIGTERM, when the adapter stops.
+	t.Run("stop-signal", func(t *testing.T) {
+		dir := shortDir(t)
+		sock := filepath.Join(dir, "app.sock")
+		a := spawn(t, sock)
+		apid := a.Process.Pid
+		pf := filepath.Join(dir, "i.pid")
+		if _, err := call(sock, "svctool.startint", map[string]string{"pidfile": pf}); err != nil {
+			t.Fatalf("startint: %v", err)
+		}
+		pid, _ := readPid(t, pf)
+		_ = a.Process.Signal(syscall.SIGTERM)
+		st, _ := a.Process.Wait()
+		if st == nil || !st.Success() {
+			t.Errorf("adapter exit after SIGTERM = %v, want 0", st)
+		}
+		if procAlive(pid) {
+			t.Errorf("server %d alive after the adapter's SIGTERM exit", pid)
+		}
+		if _, err := os.Stat(pf + ".int"); err != nil {
+			t.Errorf("server was not stopped with its stop_signal SIGINT (no i.pid.int)")
+		}
+		if _, err := os.Stat(pf + ".term"); err == nil {
+			t.Errorf("server got SIGTERM although its stop_signal is SIGINT")
 		}
 		if left := groupMembers(apid); len(left) > 0 {
 			t.Errorf("process group %d not empty after SIGTERM: %v", apid, left)

@@ -74,6 +74,18 @@ down; on Linux it also gets SIGTERM from the kernel when the adapter dies. A
 starts, and a process that exits before it is ready (`--version`, a config
 error) returns its output like a plain command.
 
+`stop_signal` (`SIGTERM`, the default, or `SIGINT` or `SIGQUIT`) replaces
+SIGTERM in that clean stop. Use it when SIGTERM is not the server's fast clean
+stop. PostgreSQL's SIGTERM is a "smart" shutdown that waits for every client to
+disconnect, so one open connection would run out the 8 s and end in a SIGKILL
+and crash recovery. Its SIGINT is a fast shutdown with a checkpoint.
+
+A server must never be started through a wrapper that daemonizes it. For
+example, `pg_ctl start` forks the postmaster into its own session. Run the
+server binary itself in the foreground. For PostgreSQL that is
+`postgres -D <datadir> -p <port> -h 127.0.0.1`, with `stop_signal: SIGINT`.
+Leave the wrapper out of a passthrough route's `cli.tools`.
+
 On a passthrough route, `service.tools` names the tools that start a server
 (needs `cli.tools`). There are no `${field}` params, so readiness comes from
 the argv: with `ready_port_flag`, a call that passes that flag (`--port N` or
