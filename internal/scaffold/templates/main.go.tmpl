@@ -42,6 +42,14 @@ import (
 )
 
 func main() {
+{{- if or (eq .Backend.Type "cli") (eq .Backend.Type "hybrid")}}
+	// This binary doubles as the guard that stops in-flight CLI children if
+	// the adapter is killed (backend/childguard.go); that mode takes no flags.
+	if backend.IsChildGuard(os.Args) {
+		backend.ChildGuardMain()
+		return
+	}
+{{- end}}
 	// Captured first, before anything slow (asset staging), so a parent that
 	// dies while we start up is still noticed by watchParent.
 	parentPID := os.Getppid()
@@ -156,8 +164,12 @@ func main() {
 	registerHandlers(d, runner, readAppVersion(*manifestPath))
 {{- end}}
 
-	if err := serve(ctx, *socket, d); err != nil {
-		log.Fatalf("{{.BinaryName}}: serve: %v", err)
+	serveErr := serve(ctx, *socket, d)
+{{- if or (eq .Backend.Type "cli") (eq .Backend.Type "hybrid")}}
+	backend.CloseChildGuard(2 * time.Second)
+{{- end}}
+	if serveErr != nil {
+		log.Fatalf("{{.BinaryName}}: serve: %v", serveErr)
 	}
 }
 

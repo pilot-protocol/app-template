@@ -132,9 +132,13 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
+	// While the child runs, a guard process stands by to take it down if this
+	// adapter is SIGKILLed (childguard.go).
+	guard.acquire()
 	unlock := lockForChild()
 	runErr := cmd.Run()
 	unlock()
+	guard.release()
 
 	exitCode := 0
 	if runErr != nil {
