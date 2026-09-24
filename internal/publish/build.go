@@ -240,6 +240,8 @@ func tarGz(dir string) ([]byte, error) {
 		if err != nil {
 			return err
 		}
+		// Bundles are public: never record the builder's account in them.
+		hdr.Uid, hdr.Gid, hdr.Uname, hdr.Gname = 0, 0, "", ""
 		hdr.Name = "./" + filepath.ToSlash(rel)
 		if fi.IsDir() {
 			hdr.Name += "/"
