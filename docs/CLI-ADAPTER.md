@@ -75,14 +75,22 @@ starts, and a process that exits before it is ready (`--version`, a config
 error) returns its output like a plain command.
 
 On a passthrough route, `service.tools` names the tools that start a server
-(needs `cli.tools`); readiness is `ready_after` (default 1 s) of staying up,
-since there are no `${field}` params:
+(needs `cli.tools`). There are no `${field}` params, so readiness comes from
+the argv: with `ready_port_flag`, a call that passes that flag (`--port N` or
+`--port=N`) is ready once `127.0.0.1:N` accepts (and fails fast if something
+already does); otherwise it is ready after staying up for `ready_after`
+(default 1 s). Prefer the port: a freshly staged binary's first launch can
+take seconds before it listens (macOS assesses it on first run; Rosetta
+translates an amd64 binary), well past `ready_after`.
 
 ```yaml
 cli:
   passthrough: true
   tools: [redis-server, redis-cli, redis-sentinel]
-  service: {tools: [redis-server, redis-sentinel], force_args: [--daemonize, "no"]}
+  service:
+    tools: [redis-server, redis-sentinel]
+    ready_port_flag: --port
+    force_args: [--daemonize, "no"]
 ```
 
 ## Hardening built into the runner

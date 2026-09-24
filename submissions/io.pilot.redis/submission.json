@@ -205,7 +205,7 @@
     },
     {
       "name": "redis.exec",
-      "description": "Run any bundled Redis tool with a verbatim argv — the full surface beyond the curated methods. Payload is {\"args\":[<tool>, ...]} where the first element is the tool (redis-cli, redis-server, redis-benchmark, redis-check-rdb, redis-check-aof, redis-sentinel) and the rest are its args; optional {\"stdin\":\"...\"} is piped to it. This is how you run ANY Redis command: {\"args\":[\"redis-cli\",\"-p\",\"6399\",\"LPUSH\",\"mylist\",\"a\",\"b\",\"c\"]}, {\"args\":[\"redis-cli\",\"-p\",\"6399\",\"-n\",\"1\",\"HSET\",\"h\",\"f\",\"v\"]}, a pipelined script via stdin {\"args\":[\"redis-cli\",\"-p\",\"6399\"],\"stdin\":\"SET a 1\\nINCR a\\nGET a\"}, or a benchmark {\"args\":[\"redis-benchmark\",\"-p\",\"6399\",\"-n\",\"1000\",\"-q\"]}. The REDISCLI_AUTH env var is passed through for password auth. args[0] must be one of the six bundled tools. A redis-server or redis-sentinel started here runs like redis.start: under this app, kept in the foreground (--daemonize no is appended), returned once it has stayed up for 1s (a --help/--version/config-error run just returns its output), and stopped when the app stops.",
+      "description": "Run any bundled Redis tool with a verbatim argv — the full surface beyond the curated methods. Payload is {\"args\":[<tool>, ...]} where the first element is the tool (redis-cli, redis-server, redis-benchmark, redis-check-rdb, redis-check-aof, redis-sentinel) and the rest are its args; optional {\"stdin\":\"...\"} is piped to it. This is how you run ANY Redis command: {\"args\":[\"redis-cli\",\"-p\",\"6399\",\"LPUSH\",\"mylist\",\"a\",\"b\",\"c\"]}, {\"args\":[\"redis-cli\",\"-p\",\"6399\",\"-n\",\"1\",\"HSET\",\"h\",\"f\",\"v\"]}, a pipelined script via stdin {\"args\":[\"redis-cli\",\"-p\",\"6399\"],\"stdin\":\"SET a 1\\nINCR a\\nGET a\"}, or a benchmark {\"args\":[\"redis-benchmark\",\"-p\",\"6399\",\"-n\",\"1000\",\"-q\"]}. The REDISCLI_AUTH env var is passed through for password auth. args[0] must be one of the six bundled tools. A redis-server or redis-sentinel started here runs like redis.start: under this app, kept in the foreground (--daemonize no is appended), returned once it accepts connections on 127.0.0.1:<--port> (or, with no --port, once it has stayed up for 1s; a --help/--version/config-error run just returns its output), and stopped when the app stops.",
       "latency": "med",
       "params": [
         {
@@ -227,6 +227,7 @@
         "service": {
           "tools": ["redis-server", "redis-sentinel"],
           "force_args": ["--daemonize", "no"],
+          "ready_port_flag": "--port",
           "ready_after": "1s",
           "ready_timeout": "30s"
         }

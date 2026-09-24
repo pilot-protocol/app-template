@@ -240,12 +240,13 @@ type SubCLIRoute struct {
 
 // SubCLIService mirrors scaffold.CLIService.
 type SubCLIService struct {
-	ReadyTCP     string   `json:"ready_tcp,omitempty"`
-	ReadyAfter   string   `json:"ready_after,omitempty"`
-	ReadyTimeout string   `json:"ready_timeout,omitempty"`
-	LogFile      string   `json:"log_file,omitempty"`
-	ForceArgs    []string `json:"force_args,omitempty"`
-	Tools        []string `json:"tools,omitempty"`
+	ReadyTCP      string   `json:"ready_tcp,omitempty"`
+	ReadyAfter    string   `json:"ready_after,omitempty"`
+	ReadyTimeout  string   `json:"ready_timeout,omitempty"`
+	LogFile       string   `json:"log_file,omitempty"`
+	ForceArgs     []string `json:"force_args,omitempty"`
+	Tools         []string `json:"tools,omitempty"`
+	ReadyPortFlag string   `json:"ready_port_flag,omitempty"`
 }
 
 // SubParam is one structured input parameter (vs the old free-text field).
@@ -734,12 +735,13 @@ func (s Submission) ToConfig() *scaffold.Config {
 			}
 			if sv := m.CLI.Service; sv != nil {
 				method.CLI.Service = &scaffold.CLIService{
-					ReadyTCP:     sv.ReadyTCP,
-					ReadyAfter:   sv.ReadyAfter,
-					ReadyTimeout: sv.ReadyTimeout,
-					LogFile:      sv.LogFile,
-					ForceArgs:    sv.ForceArgs,
-					Tools:        sv.Tools,
+					ReadyTCP:      sv.ReadyTCP,
+					ReadyAfter:    sv.ReadyAfter,
+					ReadyTimeout:  sv.ReadyTimeout,
+					LogFile:       sv.LogFile,
+					ForceArgs:     sv.ForceArgs,
+					Tools:         sv.Tools,
+					ReadyPortFlag: sv.ReadyPortFlag,
 				}
 			}
 		default:

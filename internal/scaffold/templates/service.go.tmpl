@@ -37,6 +37,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -60,6 +61,12 @@ type ServiceSpec struct {
 	LogFile      string        // the server's own log (${field}); its tail is returned on failure
 	ForceArgs    []string      // appended after every other argument (last-wins flags)
 	Tools        []string      // passthrough: the args[0] names that start a server
+	// ReadyPortFlag (passthrough): the argv flag carrying the server's TCP port
+	// (e.g. "--port"). When the call passes it, the server is ready once
+	// 127.0.0.1:<port> accepts, not merely after ReadyAfter: a freshly staged
+	// binary's first launch can take seconds (macOS assesses it; Rosetta
+	// translates it) before it listens.
+	ReadyPortFlag string
 }
 
 // appliesTo reports whether this call starts a server. Every call of an
@@ -105,11 +112,17 @@ func (r *Runner) startService(ctx context.Context, sv *ServiceSpec, args []strin
 			return nil, err
 		}
 		readyAddr = a
-		// Something already answering there would make the readiness probe
-		// report success for a server that is about to fail to bind.
-		if dialOK(readyAddr, 300*time.Millisecond) {
-			return nil, fmt.Errorf("backend: %s is already accepting connections — a server is already running there; stop it or use another port", readyAddr)
+	} else if sv.ReadyPortFlag != "" {
+		if port := flagValue(call.Args, sv.ReadyPortFlag); port != "" {
+			if n, err := strconv.Atoi(port); err == nil && n > 0 && n < 65536 {
+				readyAddr = net.JoinHostPort("127.0.0.1", port)
+			}
 		}
+	}
+	// Something already answering there would make the readiness probe
+	// report success for a server that is about to fail to bind.
+	if readyAddr != "" && dialOK(readyAddr, 300*time.Millisecond) {
+		return nil, fmt.Errorf("backend: %s is already accepting connections — a server is already running there; stop it or use another port", readyAddr)
 	}
 	if sv.LogFile != "" {
 		if lf, err := substitute(sv.LogFile, call.Params); err == nil {
@@ -322,6 +335,21 @@ func fileTail(path string, n int64) string {
 	}
 	b, _ := io.ReadAll(io.LimitReader(f, n))
 	return strings.TrimSpace(string(b))
+}
+
+// flagValue returns the value of the last `flag value` or `flag=value` in
+// args ("" if absent): servers such as redis-server take the last one.
+func flagValue(args []string, flag string) string {
+	v := ""
+	for i, a := range args {
+		switch {
+		case a == flag && i+1 < len(args):
+			v = args[i+1]
+		case strings.HasPrefix(a, flag+"="):
+			v = strings.TrimPrefix(a, flag+"=")
+		}
+	}
+	return v
 }
 
 func dialOK(addr string, timeout time.Duration) bool {

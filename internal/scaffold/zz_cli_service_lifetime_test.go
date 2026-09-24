@@ -5,10 +5,12 @@ package scaffold
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,6 +20,57 @@ import (
 
 	"github.com/pilot-protocol/app-store/pkg/ipc"
 )
+
+// slowListenerEnv switches the test binary into a server that starts
+// listening only after a delay, as a freshly staged binary does on its first
+// launch (macOS assesses it, Rosetta translates it): TestHelperSlowListener.
+const slowListenerEnv = "SCAFFOLD_TEST_SLOW_LISTENER"
+
+// TestHelperSlowListener is not a test: it is the `listen` tool of
+// TestCLIServiceLifetime and skips unless slowListenerEnv is set. Args (after
+// --): --port P (or --port=P) --delay D --pidfile F; it listens on
+// 127.0.0.1:P after D and runs until SIGTERM.
+func TestHelperSlowListener(t *testing.T) {
+	if os.Getenv(slowListenerEnv) == "" {
+		t.Skip("helper process for TestCLIServiceLifetime")
+	}
+	args := flag.Args()
+	val := func(name string) string {
+		v := ""
+		for i, a := range args {
+			if a == name && i+1 < len(args) {
+				v = args[i+1]
+			} else if strings.HasPrefix(a, name+"=") {
+				v = strings.TrimPrefix(a, name+"=")
+			}
+		}
+		return v
+	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGTERM)
+	_ = os.WriteFile(val("--pidfile"), []byte(strconv.Itoa(os.Getpid())), 0o644)
+	delay, _ := time.ParseDuration(val("--delay"))
+	select {
+	case <-sig:
+		os.Exit(0)
+	case <-time.After(delay):
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:"+val("--port"))
+	if err != nil {
+		os.Exit(3)
+	}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	<-sig
+	os.Exit(0)
+}
 
 // TestCLIServiceLifetime: a server started by a cli.service method must not
 // outlive the adapter, however the adapter goes away. Found with io.pilot.redis
@@ -55,6 +108,7 @@ func TestCLIServiceLifetime(t *testing.T) {
 		"case \"$1\" in\n" +
 		"  serve) echo \"$$ $*\" > \"$2\"; trap 'echo term > \"$2.term\"; kill $! 2>/dev/null; exit 0' TERM; sleep 300 & wait;;\n" +
 		"  quick) echo quick-out; exit 3;;\n" +
+		"  listen) shift; exec env " + slowListenerEnv + "=1 '" + os.Args[0] + "' -test.run='^TestHelperSlowListener$' -- \"$@\";;\n" +
 		"  *) echo '{}';;\n" +
 		"esac\n"
 	if err := os.WriteFile(tool, []byte(script), 0o755); err != nil {
@@ -83,8 +137,8 @@ methods:
     summary: "Passthrough."
     cli:
       passthrough: true
-      tools: ["serve", "quick"]
-      service: {tools: ["serve"], ready_after: "300ms", force_args: ["--daemonize", "no"]}
+      tools: ["serve", "quick", "listen"]
+      service: {tools: ["serve", "listen"], ready_after: "300ms", ready_port_flag: "--port", force_args: ["--daemonize", "no"]}
 `)
 	proj := filepath.Join(root, "proj")
 	if _, err := Generate(cfg, proj); err != nil {
@@ -326,6 +380,50 @@ methods:
 		}
 		srv, _ := readPid(t, pf2)
 		waitFor(t, func() bool { return !procAlive(srv) }, 12*time.Second, "never-ready server to be stopped")
+	})
+
+	// Passthrough readiness follows the server's --port: a server that takes
+	// longer than ready_after to listen (a first launch) is only reported
+	// started once 127.0.0.1:<port> accepts, and a busy port fails fast.
+	t.Run("passthrough-ready-port", func(t *testing.T) {
+		dir := shortDir(t)
+		sock := filepath.Join(dir, "app.sock")
+		spawn(t, sock)
+		ln, _ := net.Listen("tcp", "127.0.0.1:0")
+		port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+		ln.Close()
+		for i, portArgs := range [][]string{{"--port", port}, {"--port=" + port}} {
+			pf := filepath.Join(dir, fmt.Sprintf("l%d.pid", i))
+			args := append([]string{"listen", "--delay", "1500ms", "--pidfile", pf}, portArgs...)
+			t0 := time.Now()
+			res, err := call(sock, "svctool.exec", map[string]any{"args": args})
+			if err != nil || res["exit"] != float64(0) {
+				t.Fatalf("listen %v = %v, %v", portArgs, res, err)
+			}
+			if took := time.Since(t0); took < 1400*time.Millisecond {
+				t.Errorf("listen %v returned after %s, before the server listened (1.5s)", portArgs, took)
+			}
+			if c, err := net.DialTimeout("tcp", "127.0.0.1:"+port, time.Second); err != nil {
+				t.Errorf("listen %v reported started but 127.0.0.1:%s refuses: %v", portArgs, port, err)
+			} else {
+				c.Close()
+			}
+			if !strings.Contains(fmt.Sprint(res["stdout"]), "accepting connections on 127.0.0.1:"+port) {
+				t.Errorf("reply %v does not name the address it waited for", res)
+			}
+			// The same port again: already accepting, so nothing starts.
+			pf2 := filepath.Join(dir, fmt.Sprintf("l%d-busy.pid", i))
+			if _, err := call(sock, "svctool.exec", map[string]any{"args": []string{"listen", "--port", port, "--delay", "0s", "--pidfile", pf2}}); err == nil || !strings.Contains(err.Error(), "already accepting connections") {
+				t.Errorf("second listen on %s: err = %v, want already-accepting refusal", port, err)
+			}
+			if _, err := os.Stat(pf2); err == nil {
+				t.Errorf("a server was started on the busy port %s", port)
+			}
+			// Stop this one before the next form reuses the port.
+			pid, _ := readPid(t, pf)
+			_ = syscall.Kill(pid, syscall.SIGTERM)
+			waitFor(t, func() bool { return !procAlive(pid) }, 5*time.Second, "listener to stop")
+		}
 	})
 
 	// Several services at once all stop on SIGTERM, within the grace.

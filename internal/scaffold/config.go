@@ -944,6 +944,11 @@ type CLIService struct {
 	// Tools (passthrough only): the args[0] names that start a server; any
 	// other tool runs as a plain command. Required for a passthrough service.
 	Tools []string `yaml:"tools,omitempty"`
+	// ReadyPortFlag (passthrough only): the argv flag that carries the
+	// server's TCP port, e.g. "--port". When a call passes it (`--port N` or
+	// `--port=N`), the server is ready once 127.0.0.1:N accepts (and the call
+	// fails fast if something already does) instead of after ReadyAfter.
+	ReadyPortFlag string `yaml:"ready_port_flag,omitempty"`
 }
 
 // ReadyAfterOrDefault / ReadyTimeoutOrDefault feed the generated Spec.
@@ -1623,6 +1628,9 @@ func validateCLIService(i int, m Method, sv *CLIService) []error {
 		if sv.ReadyTCP != "" || sv.LogFile != "" {
 			errs = append(errs, fmt.Errorf("%s: ready_tcp/log_file need ${field} params, which a passthrough route does not have", at))
 		}
+		if f := sv.ReadyPortFlag; f != "" && (!strings.HasPrefix(f, "-") || strings.ContainsAny(f, "= ")) {
+			errs = append(errs, fmt.Errorf("%s.ready_port_flag %q must be a flag such as --port", at, f))
+		}
 		// Without an allowlist a caller could name the server by another path
 		// (or wrap it in a shell) and start it daemonized, outside the service.
 		if len(m.CLI.Tools) == 0 {
@@ -1640,6 +1648,9 @@ func validateCLIService(i int, m Method, sv *CLIService) []error {
 	} else {
 		if len(sv.Tools) > 0 {
 			errs = append(errs, fmt.Errorf("%s.tools only applies to a passthrough route", at))
+		}
+		if sv.ReadyPortFlag != "" {
+			errs = append(errs, fmt.Errorf("%s.ready_port_flag only applies to a passthrough route (use ready_tcp)", at))
 		}
 		if sv.ReadyTCP != "" {
 			host, port, err := net.SplitHostPort(sv.ReadyTCP)
