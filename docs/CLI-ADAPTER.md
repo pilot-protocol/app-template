@@ -93,6 +93,55 @@ cli:
     force_args: [--daemonize, "no"]
 ```
 
+## What a call leaves running outside the app — `cli.teardown`, `cli.env_rules`
+
+Some CLIs hand what they start to a process outside the adapter's process
+group and return: `smolvm machine start` and `machine run -d` leave a VM
+running in its own group, reparented to init. Nothing in the group-based
+lifecycle (clean stop, child guard, Pdeathsig, the supervisor's group stop)
+reaches it. Declare the command that undoes such a call:
+
+```yaml
+- name: smol.exec
+  cli:
+    passthrough: true
+    teardown:
+      - argv_prefix: [machine, start]          # which calls start something
+        name_flags: [--name, -n]               # --name x / --name=x names it
+        default_name: default                  # no flag: this name
+        run: [machine, stop, --name, "${name}"] # argv after the base command
+        clear_prefixes: [[machine, stop], [machine, delete]]
+      - argv_prefix: [machine, run]
+        when_flags: [-d, --detach]             # only a detached run
+        name_flags: [--name, -n]
+        default_name: default
+        run: [machine, stop, --name, "${name}"]
+        clear_prefixes: [[machine, stop], [machine, delete]]
+```
+
+A matching call opens a record (before the CLI runs, so a start cut short
+by a stop is still covered). A clean stop of the app runs every open record's
+command (30 s each, concurrently); if the app is SIGKILLed, the child guard,
+which stays up while any record is open, runs them before it takes the group
+down. A successful call under `clear_prefixes` for the same name closes the
+record, and a start that exits non-zero closes the record it opened. Flags
+are only looked for before a `--`.
+
+`env_rules` add environment to the child of one kind of call. smol uses it
+to arm smolvm's own parent-death watchdog for an ephemeral VM, since
+`machine run` tears its VM down only on SIGINT, and SIGTERM or SIGKILL of the
+CLI orphans it:
+
+```yaml
+    env_rules:
+      - argv_prefix: [machine, run]
+        unless_flags: [-d, --detach]   # a detached VM must outlive its CLI
+        env: {SMOLVM_BOOT_BINARY: "${command_dir}/smolvm-bin"}
+```
+
+`${command_dir}` is the directory of the resolved base command (the staged
+binary's directory for an app with assets).
+
 ## Hardening built into the runner
 
 The generated `exec.go` is defensive by default:

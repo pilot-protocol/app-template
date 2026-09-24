@@ -26,6 +26,29 @@ import (
 // primary (the bare bundle_url older clients fetch).
 var DefaultPlatforms = []string{"linux/amd64", "linux/arm64", "darwin/arm64", "darwin/amd64"}
 
+// BuildPlatforms is the subset of DefaultPlatforms cfg can run on. An app that
+// stages native assets (install.json) runs only where it has an asset: on any
+// other platform its adapter builds, but exits on every spawn with "no asset
+// for <os>/<arch>". io.pilot.smol 1.2.0 shipped such a darwin/amd64 bundle
+// (upstream smolvm has no darwin x86_64 build), which crash-looped. Apps with
+// no assets run everywhere the pure-Go adapter compiles for.
+func BuildPlatforms(cfg *scaffold.Config) []string {
+	if len(cfg.Assets) == 0 {
+		return DefaultPlatforms
+	}
+	have := map[string]bool{}
+	for _, a := range cfg.Assets {
+		have[a.OS+"/"+a.Arch] = true
+	}
+	var out []string
+	for _, p := range DefaultPlatforms {
+		if have[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // PlatformBundle is one OS/arch's signed tarball.
 type PlatformBundle struct {
 	Platform    string // "darwin/arm64"
@@ -106,7 +129,7 @@ func BuildBundle(cfg *scaffold.Config, priv ed25519.PrivateKey) (*Bundle, error)
 		primaryBinBytes int
 		primaryTarBytes int
 	)
-	for _, plat := range DefaultPlatforms {
+	for _, plat := range BuildPlatforms(cfg) {
 		pb, binLen, err := buildPlatform(tmp, cfg, mfRaw, priv, plat)
 		if err != nil {
 			return nil, fmt.Errorf("build %s: %w", plat, err)

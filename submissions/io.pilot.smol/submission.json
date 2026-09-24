@@ -192,7 +192,7 @@
     ]
   },
   "id": "io.pilot.smol",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Smol Machines — fast, hardware-isolated Linux microVMs for agents, now local AND cloud. Create and run sub-second microVMs locally with the smolvm CLI (real hypervisor isolation, networking off by default), then push a VM to the smol cloud with a single method. Pilot provisions a per-user cloud key automatically on install; each user's cloud machines are isolated and metered against their own free credit. No cloud account, no API key to manage.",
   "email": "apps@pilotprotocol.network",
   "backend": {
@@ -220,11 +220,86 @@
   "methods": [
     {
       "name": "smol.exec",
-      "description": "Run ANY smolvm subcommand in a fast, hardware-isolated Linux microVM LOCALLY. Payload is {\"args\":[...]} (verbatim smolvm argv) with optional {\"stdin\":\"...\"}. This one method exposes the whole smolvm CLI — for the complete agent reference call smol.exec {\"args\":[\"--help\"]}, and for any subcommand call smol.exec {\"args\":[\"<group>\",\"--help\"]}.\n\nCOMMAND SURFACE:\n• machine run — create an EPHEMERAL VM, run one command, tear down (nothing persists). e.g. [\"machine\",\"run\",\"--net\",\"--image\",\"alpine\",\"--\",\"sh\",\"-c\",\"echo hi\"].\n• machine create | start | stop | delete — lifecycle of a PERSISTENT named VM (--name, default \"default\").\n• machine exec — run a command in a persistent VM; FILESYSTEM CHANGES PERSIST across sessions (package installs stick). e.g. [\"machine\",\"exec\",\"--name\",\"myvm\",\"--\",\"apk\",\"add\",\"python3\"].\n• machine status | ls | images | monitor — read-only introspection (do NOT stop a running VM).\n• machine cp — copy files host↔VM (HOST:GUEST). machine update — change mounts/ports/env/cpu/memory on a STOPPED VM. machine prune — reclaim layers (prune --all needs the VM stopped).\n• pack create -o <out> — build a portable, self-contained .smolmachine executable; pack run — run one. machine create --from <artifact>.smolmachine for fast start.\n• serve start --listen <addr> — HTTP API server (POST/GET /api/v1/machines…); serve openapi — the spec.\n• config — manage registries + defaults.\n\nKEY FLAGS: --net (networking is OFF by default), --image <oci ref | ./archive.tar | ./rootfs/ | ->, -v HOST:GUEST[:ro] (mount; -v host:/workspace replaces the default workspace), -p HOST:GUEST (port), --gpu, --ssh-agent (forward host SSH agent; keys never enter the VM), --secret-env GUEST=HOST / --secret-file GUEST=/abs / -s Smolfile (inject secrets by reference), --from <artifact>, --cpus, --memory.\n\nDEFAULTS: network off; cpus 4; memory 8192 MiB; storage 20 GiB; name \"default\". Elastic memory/CPU via virtio balloon.\n\nNOT SUPPORTED OVER IPC: interactive sessions (-it / machine shell) and long-running serve (no attached TTY).",
+      "description": "Run ANY smolvm subcommand in a fast, hardware-isolated Linux microVM LOCALLY. Payload is {\"args\":[...]} (verbatim smolvm argv) with optional {\"stdin\":\"...\"}. This one method exposes the whole smolvm CLI — for the complete agent reference call smol.exec {\"args\":[\"--help\"]}, and for any subcommand call smol.exec {\"args\":[\"<group>\",\"--help\"]}.\n\nCOMMAND SURFACE:\n• machine run — create an EPHEMERAL VM, run one command, tear down (nothing persists). e.g. [\"machine\",\"run\",\"--net\",\"--image\",\"alpine\",\"--\",\"sh\",\"-c\",\"echo hi\"].\n• machine create | start | stop | delete — lifecycle of a PERSISTENT named VM (--name, default \"default\").\n• machine exec — run a command in a persistent VM; FILESYSTEM CHANGES PERSIST across sessions (package installs stick). e.g. [\"machine\",\"exec\",\"--name\",\"myvm\",\"--\",\"apk\",\"add\",\"python3\"].\n• machine status | ls | images | monitor — read-only introspection (do NOT stop a running VM).\n• machine cp — copy files host↔VM (HOST:GUEST). machine update — change mounts/ports/env/cpu/memory on a STOPPED VM. machine prune — reclaim layers (prune --all needs the VM stopped).\n• pack create -o <out> — build a portable, self-contained .smolmachine executable; pack run — run one. machine create --from <artifact>.smolmachine for fast start.\n• serve start --listen <addr> — HTTP API server (POST/GET /api/v1/machines…); serve openapi — the spec.\n• config — manage registries + defaults.\n\nKEY FLAGS: --net (networking is OFF by default), --image <oci ref | ./archive.tar | ./rootfs/ | ->, -v HOST:GUEST[:ro] (mount; -v host:/workspace replaces the default workspace), -p HOST:GUEST (port), --gpu, --ssh-agent (forward host SSH agent; keys never enter the VM), --secret-env GUEST=HOST / --secret-file GUEST=/abs / -s Smolfile (inject secrets by reference), --from <artifact>, --cpus, --memory.\n\nDEFAULTS: network off; cpus 4; memory 8192 MiB; storage 20 GiB; name \"default\". Elastic memory/CPU via virtio balloon.\n\nLIFETIME: VMs are owned by this app. A persistent VM started here (machine start, machine run -d) is stopped when the app stops (its disk persists; machine start brings it back), and an ephemeral machine run VM never outlives its call.\n\nNOT SUPPORTED OVER IPC: interactive sessions (-it / machine shell) and long-running serve (no attached TTY).",
       "latency": "med",
       "params": [],
       "cli": {
-        "passthrough": true
+        "passthrough": true,
+        "env_rules": [
+          {
+            "argv_prefix": [
+              "machine",
+              "run"
+            ],
+            "unless_flags": [
+              "-d",
+              "--detach"
+            ],
+            "env": {
+              "SMOLVM_BOOT_BINARY": "${command_dir}/smolvm-bin"
+            }
+          }
+        ],
+        "teardown": [
+          {
+            "argv_prefix": [
+              "machine",
+              "start"
+            ],
+            "name_flags": [
+              "--name",
+              "-n"
+            ],
+            "default_name": "default",
+            "run": [
+              "machine",
+              "stop",
+              "--name",
+              "${name}"
+            ],
+            "clear_prefixes": [
+              [
+                "machine",
+                "stop"
+              ],
+              [
+                "machine",
+                "delete"
+              ]
+            ]
+          },
+          {
+            "argv_prefix": [
+              "machine",
+              "run"
+            ],
+            "when_flags": [
+              "-d",
+              "--detach"
+            ],
+            "name_flags": [
+              "--name",
+              "-n"
+            ],
+            "default_name": "default",
+            "run": [
+              "machine",
+              "stop",
+              "--name",
+              "${name}"
+            ],
+            "clear_prefixes": [
+              [
+                "machine",
+                "stop"
+              ],
+              [
+                "machine",
+                "delete"
+              ]
+            ]
+          }
+        ]
       }
     },
     {

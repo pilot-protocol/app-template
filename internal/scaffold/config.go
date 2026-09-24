@@ -914,6 +914,93 @@ type CLIRoute struct {
 	// Service marks the method as starting a long-running server that the
 	// adapter owns (see CLIService), instead of a run-to-completion command.
 	Service *CLIService `yaml:"service,omitempty"`
+	// EnvRules (passthrough only) add environment variables to the CLI child
+	// of a call whose argv matches (see CLIEnvRule).
+	EnvRules []CLIEnvRule `yaml:"env_rules,omitempty"`
+	// Teardown (passthrough only) records what a call started that lives on
+	// after the CLI exits (a detached VM, a background daemon the CLI itself
+	// manages) and the command that stops it. The adapter runs that command
+	// when it stops, and its child guard runs it if the adapter is killed.
+	Teardown []CLITeardown `yaml:"teardown,omitempty"`
+}
+
+// CLIEnvRule adds Env to the child of a passthrough call whose argv starts
+// with ArgvPrefix and carries none of UnlessFlags (before a "--"). Values may
+// use ${command_dir}: the directory of the resolved base command (the staged
+// binary's directory for an app with assets).
+//
+// Written for io.pilot.smol: `smolvm machine run` (an ephemeral VM) tears its
+// VM down only on SIGINT. SIGTERM or SIGKILL of the CLI (a call timeout, the
+// adapter's stop, the child guard) orphaned the VM, which runs in its own
+// process group. With SMOLVM_BOOT_BINARY set, smolvm arms a parent-death
+// watchdog in the VM process, so the VM dies with its CLI whatever signal hits
+// it. A detached run (-d) must not get it, or its VM would die as soon as the
+// CLI returns.
+type CLIEnvRule struct {
+	ArgvPrefix  []string          `yaml:"argv_prefix" json:"argv_prefix"`
+	UnlessFlags []string          `yaml:"unless_flags,omitempty" json:"unless_flags,omitempty"`
+	Env         map[string]string `yaml:"env" json:"env"`
+}
+
+// CLITeardown declares that a passthrough call whose argv starts with
+// ArgvPrefix (and, with WhenFlags, carries one of them) leaves something
+// running that the app owns. The resource is named by the value of the first
+// of NameFlags the call passes (`--name x` or `--name=x`), else DefaultName.
+// Run is the argv (after the base command) that stops it, with ${name}. A
+// successful call whose argv starts with one of ClearPrefixes and resolves to
+// the same name (an explicit stop or delete) drops the record.
+//
+// Written for io.pilot.smol: `machine start` and `machine run -d` leave a VM
+// running after the CLI exits, in its own process group and outside the
+// adapter's reach; it survived the app's SIGTERM, the supervisor's SIGKILL and
+// uninstall. Each is now stopped with `machine stop --name <name>`.
+type CLITeardown struct {
+	ArgvPrefix    []string   `yaml:"argv_prefix" json:"argv_prefix"`
+	WhenFlags     []string   `yaml:"when_flags,omitempty" json:"when_flags,omitempty"`
+	NameFlags     []string   `yaml:"name_flags,omitempty" json:"name_flags,omitempty"`
+	DefaultName   string     `yaml:"default_name,omitempty" json:"default_name,omitempty"`
+	Run           []string   `yaml:"run" json:"run"`
+	ClearPrefixes [][]string `yaml:"clear_prefixes,omitempty" json:"clear_prefixes,omitempty"`
+}
+
+// LifecycleGo renders the route's env rules and teardown rules as Spec
+// fields (a leading ", " each), for the generated registerHandlers.
+func (r *CLIRoute) LifecycleGo() string {
+	if r == nil {
+		return ""
+	}
+	var b strings.Builder
+	if len(r.EnvRules) > 0 {
+		b.WriteString(", EnvRules: []backend.EnvRule{")
+		for i, er := range r.EnvRules {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			keys := make([]string, 0, len(er.Env))
+			for k := range er.Env {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			kv := make([]string, 0, 2*len(keys))
+			for _, k := range keys {
+				kv = append(kv, k, er.Env[k])
+			}
+			fmt.Fprintf(&b, "{Prefix: %#v, Unless: %#v, Env: %#v}", er.ArgvPrefix, er.UnlessFlags, kv)
+		}
+		b.WriteString("}")
+	}
+	if len(r.Teardown) > 0 {
+		b.WriteString(", Teardown: []backend.TeardownRule{")
+		for i, td := range r.Teardown {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "{Prefix: %#v, When: %#v, NameFlags: %#v, DefaultName: %q, Run: %#v, Clear: %#v}",
+				td.ArgvPrefix, td.WhenFlags, td.NameFlags, td.DefaultName, td.Run, td.ClearPrefixes)
+		}
+		b.WriteString("}")
+	}
+	return b.String()
 }
 
 // CLIService declares a method that starts a long-running server. The adapter
@@ -1595,6 +1682,7 @@ func (c *Config) validateCLIMethod(i int, m Method) []error {
 	if sv := m.CLI.Service; sv != nil {
 		errs = append(errs, validateCLIService(i, m, sv)...)
 	}
+	errs = append(errs, validateCLILifecycle(i, m)...)
 	return errs
 }
 
@@ -1863,3 +1951,77 @@ func isLoopbackHost(host string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
+
+var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// validateCLILifecycle checks cli.env_rules and cli.teardown (see CLIEnvRule,
+// CLITeardown).
+func validateCLILifecycle(i int, m Method) []error {
+	var errs []error
+	c := m.CLI
+	if (len(c.EnvRules) > 0 || len(c.Teardown) > 0) && !c.Passthrough {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): cli.env_rules/cli.teardown only apply to a passthrough route", i, m.Name))
+	}
+	flagsOK := func(at string, flags []string) {
+		for _, f := range flags {
+			if !strings.HasPrefix(f, "-") || f == "-" || f == "--" || strings.ContainsAny(f, "= ") {
+				errs = append(errs, fmt.Errorf("%s: %q must be a flag such as --detach or -d", at, f))
+			}
+		}
+	}
+	prefixOK := func(at string, p []string) {
+		if len(p) == 0 {
+			errs = append(errs, fmt.Errorf("%s: argv_prefix must not be empty", at))
+		}
+		for _, a := range p {
+			if a == "" || strings.HasPrefix(a, "-") {
+				errs = append(errs, fmt.Errorf("%s: argv_prefix entry %q must be a subcommand word", at, a))
+			}
+		}
+	}
+	for j, er := range c.EnvRules {
+		at := fmt.Sprintf("methods[%d] (%s): cli.env_rules[%d]", i, m.Name, j)
+		prefixOK(at, er.ArgvPrefix)
+		flagsOK(at+".unless_flags", er.UnlessFlags)
+		if len(er.Env) == 0 {
+			errs = append(errs, fmt.Errorf("%s: env must not be empty", at))
+		}
+		for k, v := range er.Env {
+			if !envNameRE.MatchString(k) {
+				errs = append(errs, fmt.Errorf("%s: env name %q is not a valid variable name", at, k))
+			}
+			for _, tok := range placeholderREScaffold.FindAllString(v, -1) {
+				if tok != "${command_dir}" {
+					errs = append(errs, fmt.Errorf("%s: env %s uses %s; only ${command_dir} is available", at, k, tok))
+				}
+			}
+		}
+	}
+	for j, td := range c.Teardown {
+		at := fmt.Sprintf("methods[%d] (%s): cli.teardown[%d]", i, m.Name, j)
+		prefixOK(at, td.ArgvPrefix)
+		flagsOK(at+".when_flags", td.WhenFlags)
+		flagsOK(at+".name_flags", td.NameFlags)
+		if len(td.Run) == 0 {
+			errs = append(errs, fmt.Errorf("%s: run (the argv that stops what the call started) must not be empty", at))
+		}
+		usesName := false
+		for _, a := range td.Run {
+			for _, tok := range placeholderREScaffold.FindAllString(a, -1) {
+				if tok != "${name}" {
+					errs = append(errs, fmt.Errorf("%s: run uses %s; only ${name} is available", at, tok))
+				}
+				usesName = true
+			}
+		}
+		if usesName && len(td.NameFlags) == 0 && td.DefaultName == "" {
+			errs = append(errs, fmt.Errorf("%s: run uses ${name} but there is no name_flags or default_name to fill it", at))
+		}
+		for _, cp := range td.ClearPrefixes {
+			prefixOK(at+".clear_prefixes", cp)
+		}
+	}
+	return errs
+}
+
+var placeholderREScaffold = regexp.MustCompile(`\$\{[^}]*\}`)

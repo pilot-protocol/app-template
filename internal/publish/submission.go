@@ -236,6 +236,9 @@ type SubCLIRoute struct {
 	// Service marks a method that starts a long-running server the adapter
 	// owns and stops with it (see scaffold.CLIService).
 	Service *SubCLIService `json:"service,omitempty"`
+	// EnvRules / Teardown mirror scaffold.CLIRoute (passthrough only).
+	EnvRules []scaffold.CLIEnvRule  `json:"env_rules,omitempty"`
+	Teardown []scaffold.CLITeardown `json:"teardown,omitempty"`
 }
 
 // SubCLIService mirrors scaffold.CLIService.
@@ -732,6 +735,8 @@ func (s Submission) ToConfig() *scaffold.Config {
 				ParamsAsFlags: m.CLI.ParamsAsFlags,
 				Passthrough:   m.CLI.Passthrough,
 				Tools:         m.CLI.Tools,
+				EnvRules:      m.CLI.EnvRules,
+				Teardown:      m.CLI.Teardown,
 			}
 			if sv := m.CLI.Service; sv != nil {
 				method.CLI.Service = &scaffold.CLIService{

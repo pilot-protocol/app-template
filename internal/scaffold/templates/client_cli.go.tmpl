@@ -77,6 +77,11 @@ type Spec struct {
 	// Service marks a method that starts a long-running server the adapter
 	// owns (service.go); nil for a run-to-completion command.
 	Service *ServiceSpec
+	// EnvRules (passthrough) add environment to a matching call's child, and
+	// Teardown records what a matching call leaves running outside the
+	// adapter's process group, with the command that stops it (teardown.go).
+	EnvRules []EnvRule
+	Teardown []TeardownRule
 }
 
 // Call carries one invocation's dynamic inputs, decoded from the IPC payload.
@@ -127,8 +132,14 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 		return r.startService(ctx, sv, args, call)
 	}
 
+	env := r.childEnv()
+	var opened []tdOpened
+	if spec.Passthrough {
+		env = append(env, r.ruleEnv(spec.EnvRules, call.Args)...)
+		opened = r.openTeardowns(spec.Teardown, call.Args, r.childEnv())
+	}
 	cmd := exec.CommandContext(ctx, r.base[0], args...)
-	cmd.Env = r.childEnv()
+	cmd.Env = env
 	// On timeout/cancel, ask the CLI to stop (SIGTERM) before exec's WaitDelay
 	// escalates to SIGKILL. A bare SIGKILL gives the CLI no chance to stop what
 	// it started itself: aegis's model download (curl) and its L2 llama-server
@@ -155,6 +166,17 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 	guard.release()
 
 	exitCode := 0
+	if spec.Passthrough && (len(spec.Teardown) > 0) {
+		// A start that did not complete (a non-zero exit) closes the record
+		// it opened; one cut short by the deadline or a stop keeps it, since
+		// it may have started its resource before it was killed.
+		var ee *exec.ExitError
+		if runErr == nil {
+			settleTeardowns(spec.Teardown, call.Args, opened, true)
+		} else if ctx.Err() == nil && errors.As(runErr, &ee) && ee.Exited() {
+			settleTeardowns(spec.Teardown, call.Args, opened, false)
+		}
+	}
 	if runErr != nil {
 		var ee *exec.ExitError
 		if ctxErr := ctx.Err(); ctxErr != nil {
