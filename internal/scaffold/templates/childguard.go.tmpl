@@ -26,15 +26,22 @@
 // call starts a new one. The guard runs only when the adapter leads its own
 // process group, as the supervisor spawns it, so it never signals a group the
 // adapter does not own.
+//
+// The guard also holds the adapter's open teardown records (teardown.go): the
+// stop command for each thing a call left running outside the process group,
+// such as a detached VM. While any record is open the guard stays up, and when
+// the adapter dies it runs those commands before it takes the group down.
 package backend
 
 import (
 	"bufio"
+	"encoding/json"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -56,6 +63,54 @@ type childGuard struct {
 	inflight int
 	idle     *time.Timer
 	off      bool // this adapter does not lead its process group
+	// records are the open teardown records (key → JSON), replayed to every
+	// new guard; holding is set while they keep one acquire() outstanding.
+	records map[string][]byte
+	holding bool
+}
+
+// putRecord opens (or replaces) a teardown record and hands it to the guard.
+// The first open record holds the guard until the last one is dropped.
+func (g *childGuard) putRecord(key string, rec []byte) {
+	g.mu.Lock()
+	if g.records == nil {
+		g.records = map[string][]byte{}
+	}
+	g.records[key] = rec
+	if g.w != nil {
+		g.writeRecordLocked(key, rec)
+	}
+	hold := !g.holding
+	g.holding = true
+	g.mu.Unlock()
+	if hold {
+		g.acquire() // starts a guard if none runs; a new guard gets every record
+	}
+}
+
+// dropRecord closes a teardown record (its resource was stopped).
+func (g *childGuard) dropRecord(key string) {
+	g.mu.Lock()
+	if _, ok := g.records[key]; !ok {
+		g.mu.Unlock()
+		return
+	}
+	delete(g.records, key)
+	if g.w != nil {
+		_, _ = g.w.WriteString("untd\t" + key + "\n")
+	}
+	unhold := g.holding && len(g.records) == 0
+	if unhold {
+		g.holding = false
+	}
+	g.mu.Unlock()
+	if unhold {
+		g.release()
+	}
+}
+
+func (g *childGuard) writeRecordLocked(key string, rec []byte) {
+	_, _ = g.w.WriteString("td\t" + key + "\t" + string(rec) + "\n")
 }
 
 var guard childGuard
@@ -136,6 +191,9 @@ func (g *childGuard) startLocked() error {
 	_ = r.Close()
 	done := make(chan struct{})
 	g.w, g.done = w, done
+	for key, rec := range g.records {
+		g.writeRecordLocked(key, rec)
+	}
 	go func() {
 		_ = cmd.Wait()
 		close(done)
@@ -186,10 +244,23 @@ func ChildGuardMain() {
 		return
 	}
 	released := false
+	records := map[string]teardownRecord{}
 	sc := bufio.NewScanner(os.Stdin)
+	sc.Buffer(make([]byte, 64<<10), 4<<20)
 	for sc.Scan() {
-		if sc.Text() == "release" {
+		line := sc.Text()
+		switch {
+		case line == "release":
 			released = true
+		case strings.HasPrefix(line, "td\t"):
+			if f := strings.SplitN(line, "\t", 3); len(f) == 3 {
+				var rec teardownRecord
+				if json.Unmarshal([]byte(f[2]), &rec) == nil {
+					records[f[1]] = rec
+				}
+			}
+		case strings.HasPrefix(line, "untd\t"):
+			delete(records, strings.TrimPrefix(line, "untd\t"))
 		}
 	}
 	if released {
@@ -202,5 +273,17 @@ func ChildGuardMain() {
 			return // the adapter is alive and closed the pipe itself
 		}
 	}
+	// Stop what the adapter's calls left running outside the group first:
+	// those commands are this guard's children, in the group, and would die
+	// with it.
+	var wg sync.WaitGroup
+	for _, rec := range records {
+		wg.Add(1)
+		go func(rec teardownRecord) {
+			defer wg.Done()
+			runTeardown(rec, TeardownTimeout)
+		}(rec)
+	}
+	wg.Wait()
 	_ = syscall.Kill(-syscall.Getpgrp(), syscall.SIGKILL)
 }

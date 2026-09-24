@@ -31,6 +31,7 @@ func childProcFiles() []file {
 		{filepath.Join("internal", "backend", "childproc_other.go"), "childproc_other.go.tmpl"},
 		{filepath.Join("internal", "backend", "childguard.go"), "childguard.go.tmpl"},
 		{filepath.Join("internal", "backend", "service.go"), "service.go.tmpl"},
+		{filepath.Join("internal", "backend", "teardown.go"), "teardown.go.tmpl"},
 		{filepath.Join("internal", "backend", "svcproc_linux.go"), "svcproc_linux.go.tmpl"},
 		{filepath.Join("internal", "backend", "svcproc_other.go"), "svcproc_other.go.tmpl"},
 	}
