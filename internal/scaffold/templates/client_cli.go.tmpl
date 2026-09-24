@@ -63,6 +63,10 @@ var placeholderRE = regexp.MustCompile(`\$\{([^}]+)\}`)
 type Runner struct {
 	base    []string // e.g. ["weathercli"] or ["python", "-m", "tool"]
 	envKeys []string // extra host env vars forwarded to the child (allowlist)
+	// resolve, when set, returns the path of the command binary for a call
+	// (the staged asset, which may still be downloading on first start). ""
+	// keeps base[0].
+	resolve func(context.Context) (string, error)
 }
 
 // Spec is one method's invocation shape, baked in at generation time.
@@ -84,6 +88,15 @@ type Call struct {
 // minimal baseline.
 func NewRunner(base []string, envKeys ...string) *Runner {
 	return &Runner{base: base, envKeys: envKeys}
+}
+
+// SetCommandResolver makes every call resolve its command binary through
+// resolve instead of using base[0] as-is: main wires it to the asset stager, so
+// the adapter can listen (and serve help) while the binary is still being
+// installed, and a call waits for it, bounded by the call's own deadline. An
+// error from resolve fails the call.
+func (r *Runner) SetCommandResolver(resolve func(context.Context) (string, error)) {
+	r.resolve = resolve
 }
 
 // Run executes the command for one call. On clean exit with pure-JSON stdout the
@@ -113,7 +126,18 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, r.base[0], args...)
+	argv0 := r.base[0]
+	if r.resolve != nil {
+		p, err := r.resolve(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("backend: %s: %w", r.base[0], err)
+		}
+		if p != "" {
+			argv0 = p
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, argv0, args...)
 	cmd.Env = r.childEnv()
 	// On timeout/cancel, ask the CLI to stop (SIGTERM) before exec's WaitDelay
 	// escalates to SIGKILL. A bare SIGKILL gives the CLI no chance to stop what
@@ -147,14 +171,14 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 			// exec killed the child because the call's deadline passed or the
 			// adapter is shutting down. That is not a CLI result: an ExitError
 			// here only says "signal: killed" (exit -1).
-			return nil, fmt.Errorf("backend: %s: %w: %s", r.base[0], ctxErr, strings.TrimSpace(stderr.String()))
+			return nil, fmt.Errorf("backend: %s: %w: %s", argv0, ctxErr, strings.TrimSpace(stderr.String()))
 		}
 		if errors.As(runErr, &ee) && ee.Exited() {
 			exitCode = ee.ExitCode() // ran, exited non-zero — a normal CLI result
 		} else {
-			// Failed to start (binary missing) or killed (timeout/cancel): the
-			// command never produced a meaningful result. Surface as an error.
-			return nil, fmt.Errorf("backend: %s: %w: %s", r.base[0], runErr, strings.TrimSpace(stderr.String()))
+			// Failed to start (binary missing) or ended by a signal: the command
+			// never produced a meaningful result. Surface as an error.
+			return nil, fmt.Errorf("backend: %s: %w: %s", argv0, runErr, strings.TrimSpace(stderr.String()))
 		}
 	}
 

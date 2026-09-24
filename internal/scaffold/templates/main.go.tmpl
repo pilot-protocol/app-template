@@ -108,19 +108,12 @@ func main() {
 		appDir = filepath.Dir(*manifestPath)
 	}
 {{- if .HasAssets}}
-	stagedCmd, err := backend.StageAssetsContext(ctx, appDir)
-	if err != nil {
-		if ctx.Err() != nil {
-			log.Printf("{{.BinaryName}}: stopped while installing assets: %v", err)
-			return
-		}
-		log.Fatalf("{{.BinaryName}}: install assets: %v", err)
-	}
-	base := {{printf "%#v" .Backend.Command}}
-	if stagedCmd != "" {
-		base[0] = stagedCmd
-	}
-	runner := backend.NewRunner(base{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+	// Assets are staged in the background (see backend/stage.go): the socket
+	// must appear within the supervisor's readiness window, which a first-start
+	// download does not fit in. Local calls wait for the binary.
+	stager := backend.NewStager(ctx, appDir)
+	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+	runner.SetCommandResolver(stager.Command)
 {{- else}}
 	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
 {{- end}}
@@ -132,24 +125,17 @@ func main() {
 {{- if .HasAssets}}
 	// Native delivery: fetch this host's binaries from the Pilot R2 artifact
 	// registry (verify sha → stage under $APP → run ordered install args) and
-	// exec the staged path, not an assumed-installed command. See backend/stage.go.
+	// exec the staged path, not an assumed-installed command. Staging runs in the
+	// background (see backend/stage.go): the socket must appear within the
+	// supervisor's readiness window, which a first-start download does not fit
+	// in. Help answers at once; a call that needs the binary waits for it.
 	appDir := os.Getenv("APP")
 	if *manifestPath != "" {
 		appDir = filepath.Dir(*manifestPath)
 	}
-	stagedCmd, err := backend.StageAssetsContext(ctx, appDir)
-	if err != nil {
-		if ctx.Err() != nil {
-			log.Printf("{{.BinaryName}}: stopped while installing assets: %v", err)
-			return
-		}
-		log.Fatalf("{{.BinaryName}}: install assets: %v", err)
-	}
-	base := {{printf "%#v" .Backend.Command}}
-	if stagedCmd != "" {
-		base[0] = stagedCmd
-	}
-	runner := backend.NewRunner(base{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+	stager := backend.NewStager(ctx, appDir)
+	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+	runner.SetCommandResolver(stager.Command)
 {{- else}}
 	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
 {{- end}}
@@ -165,6 +151,12 @@ func main() {
 {{- end}}
 
 	serveErr := serve(ctx, *socket, d)
+{{- if and (ne .Backend.Type "http") .HasAssets}}
+	// serve also returns on a listen error: stop staging either way, and let an
+	// interrupted download remove its partial file before the process exits.
+	parentGone()
+	stager.Wait(5 * time.Second)
+{{- end}}
 {{- if or (eq .Backend.Type "cli") (eq .Backend.Type "hybrid")}}
 	backend.CloseChildGuard(2 * time.Second)
 {{- end}}
