@@ -70,6 +70,13 @@ type Spec struct {
 	Args          []string // may contain ${field} placeholders, substituted from params
 	ParamsAsFlags bool     // if true, append --key value for each payload field (sorted)
 	Passthrough   bool     // if true, ignore Args; argv comes from the call's "args" array
+	// Tools (passthrough) allowlists the call's args[0]: it must be exactly one
+	// of these bare names, so a passthrough argv cannot name an arbitrary path
+	// for the base command to run (see checkTool).
+	Tools []string
+	// Service marks a method that starts a long-running server the adapter
+	// owns (service.go); nil for a run-to-completion command.
+	Service *ServiceSpec
 }
 
 // Call carries one invocation's dynamic inputs, decoded from the IPC payload.
@@ -97,6 +104,9 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 
 	args := append([]string(nil), r.base[1:]...)
 	if spec.Passthrough {
+		if err := checkTool(spec.Tools, call.Args); err != nil {
+			return nil, err
+		}
 		args = append(args, call.Args...)
 	} else {
 		for _, a := range spec.Args {
@@ -111,6 +121,10 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 				args = append(args, "--"+k, call.Params[k])
 			}
 		}
+	}
+
+	if sv := spec.Service; sv != nil && sv.appliesTo(spec, call) {
+		return r.startService(ctx, sv, args, call)
 	}
 
 	cmd := exec.CommandContext(ctx, r.base[0], args...)
@@ -186,6 +200,27 @@ func (r *Runner) childEnv() []string {
 		}
 	}
 	return env
+}
+
+// checkTool enforces a passthrough route's tools allowlist (no-op without one).
+// A dispatcher base command (e.g. a `redis` script that runs "$dir/$1") would
+// otherwise resolve "../../bin/sh" and run any host binary.
+func checkTool(tools, args []string) error {
+	if len(tools) == 0 {
+		return nil
+	}
+	if len(args) > 0 {
+		for _, t := range tools {
+			if args[0] == t {
+				return nil
+			}
+		}
+	}
+	got := "(none)"
+	if len(args) > 0 {
+		got = fmt.Sprintf("%q", args[0])
+	}
+	return fmt.Errorf("backend: args[0] must be one of %s; got %s", strings.Join(tools, ", "), got)
 }
 
 // substitute replaces every ${field} token in s with params[field]. An
