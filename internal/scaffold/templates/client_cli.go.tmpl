@@ -41,6 +41,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -48,8 +49,8 @@ import (
 // the adapter's memory. Output past the cap is dropped and flagged truncated.
 const maxOutputBytes = 4 << 20 // 4 MiB
 
-// killGrace is how long the child has to exit after its context is cancelled
-// before Wait abandons it; pairs with the SIGKILL exec sends on cancel.
+// killGrace is how long the child has, after the SIGTERM sent on cancel, to stop
+// before exec escalates to SIGKILL and Wait stops waiting on its pipes.
 const killGrace = 5 * time.Second
 
 // baseEnvKeys is the minimal environment every fronted CLI may see. Anything an
@@ -114,7 +115,15 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 
 	cmd := exec.CommandContext(ctx, r.base[0], args...)
 	cmd.Env = r.childEnv()
+	// On timeout/cancel, ask the CLI to stop (SIGTERM) before exec's WaitDelay
+	// escalates to SIGKILL. A bare SIGKILL gives the CLI no chance to stop what
+	// it started itself: aegis's model download (curl) and its L2 llama-server
+	// kept running, reparented to init, after every timed-out call.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = killGrace
+	// Same process group as the adapter (so a group-wide stop reaches it) and,
+	// on Linux, killed by the kernel if the adapter dies mid-call.
+	cmd.SysProcAttr = childProcAttr()
 	if call.Stdin != "" {
 		cmd.Stdin = strings.NewReader(call.Stdin)
 	}
@@ -123,12 +132,24 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
+	// While the child runs, a guard process stands by to take it down if this
+	// adapter is SIGKILLed (childguard.go).
+	guard.acquire()
+	unlock := lockForChild()
 	runErr := cmd.Run()
+	unlock()
+	guard.release()
 
 	exitCode := 0
 	if runErr != nil {
 		var ee *exec.ExitError
-		if errors.As(runErr, &ee) {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			// exec killed the child because the call's deadline passed or the
+			// adapter is shutting down. That is not a CLI result: an ExitError
+			// here only says "signal: killed" (exit -1).
+			return nil, fmt.Errorf("backend: %s: %w: %s", r.base[0], ctxErr, strings.TrimSpace(stderr.String()))
+		}
+		if errors.As(runErr, &ee) && ee.Exited() {
 			exitCode = ee.ExitCode() // ran, exited non-zero — a normal CLI result
 		} else {
 			// Failed to start (binary missing) or killed (timeout/cancel): the

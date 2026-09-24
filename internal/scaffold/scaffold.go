@@ -21,6 +21,17 @@ type file struct {
 	tmpl string
 }
 
+// childProcFiles are the per-OS process attributes the exec runner applies to
+// every CLI child (Linux: parent-death signal), plus the guard that takes an
+// in-flight child down with a SIGKILLed adapter; emitted with client_cli.go.tmpl.
+func childProcFiles() []file {
+	return []file{
+		{filepath.Join("internal", "backend", "childproc_linux.go"), "childproc_linux.go.tmpl"},
+		{filepath.Join("internal", "backend", "childproc_other.go"), "childproc_other.go.tmpl"},
+		{filepath.Join("internal", "backend", "childguard.go"), "childguard.go.tmpl"},
+	}
+}
+
 // Generate renders a full adapter project for cfg into outDir. cfg must already
 // be Resolve()d and Validate()d. Returns the list of written paths.
 func Generate(cfg *Config, outDir string) ([]string, error) {
@@ -69,6 +80,7 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 		}
 	case "cli":
 		files = append(files, file{filepath.Join("internal", "backend", "exec.go"), "client_cli.go.tmpl"})
+		files = append(files, childProcFiles()...)
 		// Native-binary delivery: emit the staging runtime only when the app
 		// actually ships assets (an already-installed cli needs no stager).
 		if cfg.HasAssets() {
@@ -83,6 +95,7 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 			file{filepath.Join("internal", "backend", "cloud.go"), "cloud.go.tmpl"},
 			file{filepath.Join("internal", "backend", "signer.go"), "signer.go.tmpl"},
 		)
+		files = append(files, childProcFiles()...)
 		if cfg.HasAssets() {
 			files = append(files, file{filepath.Join("internal", "backend", "stage.go"), "stage.go.tmpl"})
 		}
