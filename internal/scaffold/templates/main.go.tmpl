@@ -18,8 +18,10 @@ import (
 {{- end}}
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 {{- if eq .Backend.Type "http"}}
@@ -39,6 +41,9 @@ import (
 )
 
 func main() {
+	// Captured first, before anything slow (asset staging), so a parent that
+	// dies while we start up is still noticed by watchParent.
+	parentPID := os.Getppid()
 	// The pilot daemon spawns every app with the full standard lifecycle flag
 	// set. We MUST define all of them or Go's flag package hard-fails ("flag
 	// provided but not defined") and the supervisor sees a crash-loop. This
@@ -134,23 +139,65 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	ctx, parentGone := context.WithCancel(ctx)
+	defer parentGone()
+	go watchParent(ctx, parentPID, parentGone)
 
 	if err := serve(ctx, *socket, d); err != nil {
 		log.Fatalf("{{.BinaryName}}: serve: %v", err)
 	}
 }
 
-// serve listens on the unix socket and runs ipc.Serve per connection. The
-// daemon dials the socket per call, so connections are short-lived; one Serve
-// goroutine per accepted conn keeps concurrent callers independent.
+// watchParent shuts the app down when the process that spawned it (the pilot
+// daemon's supervisor) is gone. Linux supervisors also set Pdeathsig, but macOS
+// has no parent-death signal and older supervisors set none: without this an app
+// orphaned by a daemon crash keeps serving, reparented to launchd/init, and the
+// next daemon spawns a second copy beside it. A pid of 1 at start means we were
+// launched by init itself (e.g. a container's PID 1): nothing to watch.
+func watchParent(ctx context.Context, parentPID int, cancel context.CancelFunc) {
+	if parentPID <= 1 {
+		return
+	}
+	t := time.NewTicker(250 * time.Millisecond)
+	defer t.Stop()
+	for {
+		if os.Getppid() != parentPID {
+			log.Printf("{{.BinaryName}}: parent pid %d is gone; shutting down", parentPID)
+			cancel()
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// serve listens on the unix socket and serves each connection in its own
+// goroutine. The daemon dials the socket per call, so connections are
+// short-lived and concurrent callers stay independent.
 func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 	_ = os.Remove(socketPath) // a stale socket from a crashed prior instance would block Listen
-	ln, err := net.Listen("unix", socketPath)
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", socketPath, err)
 	}
-	defer ln.Close()
-	defer os.Remove(socketPath)
+	// Go unlinks a unix listener's path on Close, whatever that path names by
+	// then. If a newer instance has replaced app.sock (the daemon respawned the
+	// app while this copy was orphaned), that would delete the live instance's
+	// socket and take it offline. Remove only the socket this process bound.
+	ln.SetUnlinkOnClose(false)
+	owned, ownedErr := os.Stat(socketPath)
+	defer func() {
+		_ = ln.Close()
+		if ownedErr != nil {
+			return
+		}
+		if cur, err := os.Stat(socketPath); err == nil && os.SameFile(cur, owned) {
+			_ = os.Remove(socketPath)
+		}
+	}()
 
 	go func() {
 		<-ctx.Done()
@@ -158,21 +205,68 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 	}()
 
 	log.Printf("{{.BinaryName}}: listening on %s", socketPath)
+	var backoff time.Duration
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil // clean shutdown
 			}
+			// Running out of descriptors is transient (in-flight calls give
+			// theirs back as they finish): back off and keep serving, as
+			// net/http does, instead of exiting and dropping every call.
+			if errors.Is(err, syscall.EMFILE) || errors.Is(err, syscall.ENFILE) || errors.Is(err, syscall.ECONNABORTED) {
+				backoff = acceptBackoff(backoff)
+				log.Printf("{{.BinaryName}}: accept: %v; retrying in %s", err, backoff)
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(backoff):
+				}
+				continue
+			}
 			return fmt.Errorf("accept: %w", err)
 		}
-		go func() {
-			defer conn.Close()
-			if err := ipc.Serve(ctx, conn, d); err != nil {
-				log.Printf("{{.BinaryName}}: conn closed with error: %v", err)
-			}
-		}()
+		backoff = 0
+		go serveConn(ctx, conn, d)
 	}
+}
+
+// acceptBackoff doubles the accept retry delay: 5ms first, capped at 1s.
+func acceptBackoff(prev time.Duration) time.Duration {
+	if prev < 5*time.Millisecond {
+		return 5 * time.Millisecond
+	}
+	if next := 2 * prev; next < time.Second {
+		return next
+	}
+	return time.Second
+}
+
+// serveConn serves one connection. The caller hanging up cancels the context
+// its call runs under, so an abandoned call (the caller timed out or was
+// interrupted) stops its backend request or CLI child at once instead of
+// holding that work, its connection and its descriptors until the method's own
+// timeout. A goroutine is the connection's only reader: it feeds ipc.Serve
+// through a pipe and so sees the hang-up even while a handler is running.
+func serveConn(ctx context.Context, conn net.Conn, d *ipc.Dispatcher) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer conn.Close()
+	pr, pw := io.Pipe()
+	go func() {
+		_, err := io.Copy(pw, conn)
+		cancel()
+		_ = pw.CloseWithError(err) // nil → io.EOF: a clean end for ipc.Serve
+	}()
+	rw := struct {
+		io.Reader
+		io.Writer
+	}{pr, conn}
+	if err := ipc.Serve(ctx, rw, d); err != nil && ctx.Err() == nil {
+		log.Printf("{{.BinaryName}}: conn closed with error: %v", err)
+	}
+	_ = pr.Close() // Serve returned first (shutdown): release the copier
 }
 
 // registerHandlers wires each IPC method to its backend call. Method names MUST
