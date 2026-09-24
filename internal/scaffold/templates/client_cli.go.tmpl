@@ -41,6 +41,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -48,8 +49,9 @@ import (
 // the adapter's memory. Output past the cap is dropped and flagged truncated.
 const maxOutputBytes = 4 << 20 // 4 MiB
 
-// killGrace is how long the child has to exit after its context is cancelled
-// before Wait abandons it; pairs with the SIGKILL exec sends on cancel.
+// killGrace is how long the child has, after the SIGTERM sent when its call is
+// cancelled, to stop before exec escalates to SIGKILL and stops waiting on its
+// output pipes.
 const killGrace = 5 * time.Second
 
 // baseEnvKeys is the minimal environment every fronted CLI may see. Anything an
@@ -114,6 +116,13 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 
 	cmd := exec.CommandContext(ctx, r.base[0], args...)
 	cmd.Env = r.childEnv()
+	// When the call's context ends first (the method timeout, for one), ask the
+	// CLI to stop with SIGTERM; exec sends SIGKILL only if it is still running
+	// killGrace later. exec's default, an immediate SIGKILL, gives the CLI no
+	// chance to stop what it started itself: every timed-out
+	// `aegis.exec install-models` left its curl download running, reparented
+	// to init.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = killGrace
 	if call.Stdin != "" {
 		cmd.Stdin = strings.NewReader(call.Stdin)

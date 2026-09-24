@@ -50,7 +50,8 @@ The generated `exec.go` is defensive by default:
   `{"stdout","stderr","exit","truncated"}` rather than an opaque error, so the
   caller sees everything the CLI produced. Only spawn failures (binary missing)
   and timeouts surface as IPC errors; the per-method `timeout`/`duration` bounds
-  the run and the child is killed on cancel.
+  the run. On cancel the child gets SIGTERM, so it can stop what it started
+  itself, and SIGKILL 5 s later if it is still running.
 
 ## Why HTTP works today and CLI doesn't
 
