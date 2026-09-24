@@ -36,6 +36,55 @@ re-parsed as shell metacharacters. Passthrough is strictly more powerful than an
 enumerated surface — the caller chooses the subcommand and flags — so reserve it
 for trusted callers and keep CLI apps `guarded` (below).
 
+A passthrough route whose base command is a dispatcher (a script that runs
+`$dir/$1`) can be steered to any host binary by a relative `args[0]`
+(`"../../../bin/sh"`). List the tools it may run with `tools:` and every call's
+`args[0]` must be exactly one of those bare names:
+
+```yaml
+cli:
+  passthrough: true
+  tools: [redis-server, redis-cli, redis-benchmark]
+```
+
+## Servers the app owns — `cli.service`
+
+A method that starts a long-running server (a local database, a dev server)
+must not fork it into the background: a daemonized server calls `setsid()`,
+leaves the adapter's process group and is reparented to init, so it survives
+the app's stop, the supervisor's stop and a daemon crash, and nothing ever
+stops it. Declare such a method as a service:
+
+```yaml
+- name: redis.start
+  cli:
+    args: [redis-server, --port, "${port}", --bind, 127.0.0.1, --dir, "${dir}"]
+    service:
+      ready_tcp: "127.0.0.1:${port}"   # the call returns once this accepts
+      ready_timeout: 30s               # not ready by then: stopped, call fails
+      log_file: "${dir}/redis-${port}.log"  # its tail is returned on failure
+      force_args: [--daemonize, "no"]  # appended LAST, so it always wins
+```
+
+The server runs as the adapter's own foreground child, in its process group,
+and stays up after the call returns. A clean stop of the app stops it with
+SIGTERM (SIGKILL after 8 s); if the app is SIGKILLed, the child guard takes it
+down; on Linux it also gets SIGTERM from the kernel when the adapter dies. A
+`ready_tcp` address that is already accepting fails the call before anything
+starts, and a process that exits before it is ready (`--version`, a config
+error) returns its output like a plain command.
+
+On a passthrough route, `service.tools` names the tools that start a server
+(needs `cli.tools`); readiness is `ready_after` (default 1 s) of staying up,
+since there are no `${field}` params:
+
+```yaml
+cli:
+  passthrough: true
+  tools: [redis-server, redis-cli, redis-sentinel]
+  service: {tools: [redis-server, redis-sentinel], force_args: [--daemonize, "no"]}
+```
+
 ## Hardening built into the runner
 
 The generated `exec.go` is defensive by default:
@@ -59,8 +108,9 @@ The generated `exec.go` is defensive by default:
   taken down by the child guard (`internal/backend/childguard.go`, a copy of
   the adapter that exists only while a child is in flight). Children stay in
   the adapter's process group, so a supervisor group stop reaches them too. A
-  server a CLI deliberately daemonizes into its own session is outside all of
-  this.
+  server a CLI daemonizes into its own session (`redis-server --daemonize yes`,
+  `pg_ctl start`, `mysqld --daemonize`) is outside all of this: declare the
+  method as a `cli.service` instead (below).
 - **Staging leaves nothing behind** — native-binary downloads go to
   `$APP/.staged/tmp`, not the shared `TMPDIR`; a stop during the first-spawn
   download removes the partial file, and a SIGKILLed start's leftover is swept

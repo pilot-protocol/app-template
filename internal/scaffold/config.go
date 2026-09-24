@@ -905,6 +905,60 @@ type CLIRoute struct {
 	Args          []string `yaml:"args"`
 	ParamsAsFlags bool     `yaml:"params_as_flags"`
 	Passthrough   bool     `yaml:"passthrough"`
+	// Tools (passthrough only) allowlists the first argv element: a call's
+	// args[0] must be exactly one of these bare names. Without it a
+	// passthrough argv can name any path the base command will exec (e.g. a
+	// dispatcher resolving "../../bin/sh"), including a tool that daemonizes
+	// out of the adapter's reach.
+	Tools []string `yaml:"tools,omitempty"`
+	// Service marks the method as starting a long-running server that the
+	// adapter owns (see CLIService), instead of a run-to-completion command.
+	Service *CLIService `yaml:"service,omitempty"`
+}
+
+// CLIService declares a method that starts a long-running server. The adapter
+// keeps the server as its own foreground child (never daemonized) in its
+// process group, returns once the server is ready, and stops it when the
+// adapter stops or dies — so no server outlives the app. A server that
+// forks itself into the background escapes all of that, which is why
+// ForceArgs exists: it is appended last so a last-wins flag such as
+// `--daemonize no` overrides anything the caller or a config file set.
+type CLIService struct {
+	// ReadyTCP (enumerated methods only) is a host:port, with ${field}
+	// placeholders, that accepts a TCP connection once the server is up. The
+	// call fails fast if something already accepts connections there.
+	ReadyTCP string `yaml:"ready_tcp,omitempty"`
+	// ReadyAfter: with no ReadyTCP, the server counts as ready once it has
+	// stayed up this long (Go duration; default 1s). A process that exits
+	// sooner (--help, --version, a config error) returns its output like a
+	// plain command.
+	ReadyAfter string `yaml:"ready_after,omitempty"`
+	// ReadyTimeout bounds the wait (default 30s); a server not ready by then
+	// is stopped and the call fails. Must be below the method's timeout.
+	ReadyTimeout string `yaml:"ready_timeout,omitempty"`
+	// LogFile (optional, ${field} placeholders) is where the server writes its
+	// own log; its tail is returned when the server fails to start.
+	LogFile string `yaml:"log_file,omitempty"`
+	// ForceArgs are appended after every other argument.
+	ForceArgs []string `yaml:"force_args,omitempty"`
+	// Tools (passthrough only): the args[0] names that start a server; any
+	// other tool runs as a plain command. Required for a passthrough service.
+	Tools []string `yaml:"tools,omitempty"`
+}
+
+// ReadyAfterOrDefault / ReadyTimeoutOrDefault feed the generated Spec.
+func (s *CLIService) ReadyAfterOrDefault() string {
+	if s.ReadyAfter == "" {
+		return "1s"
+	}
+	return s.ReadyAfter
+}
+
+func (s *CLIService) ReadyTimeoutOrDefault() string {
+	if s.ReadyTimeout == "" {
+		return "30s"
+	}
+	return s.ReadyTimeout
 }
 
 // Grants tunes the manifest's declared capabilities. The standard set
@@ -1521,6 +1575,78 @@ func (c *Config) validateCLIMethod(i int, m Method) []error {
 		}
 	case len(m.CLI.Args) == 0 && !m.CLI.ParamsAsFlags:
 		errs = append(errs, fmt.Errorf("methods[%d] (%s): cli route needs args, params_as_flags, or passthrough", i, m.Name))
+	}
+	if m.CLI == nil {
+		return errs
+	}
+	if len(m.CLI.Tools) > 0 && !m.CLI.Passthrough {
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): cli.tools only applies to a passthrough route", i, m.Name))
+	}
+	for _, t := range m.CLI.Tools {
+		if t == "" || strings.ContainsAny(t, "/\\") || t == "." || t == ".." {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): cli.tools entry %q must be a bare tool name", i, m.Name, t))
+		}
+	}
+	if sv := m.CLI.Service; sv != nil {
+		errs = append(errs, validateCLIService(i, m, sv)...)
+	}
+	return errs
+}
+
+// validateCLIService checks a cli.service block (see CLIService).
+func validateCLIService(i int, m Method, sv *CLIService) []error {
+	var errs []error
+	at := fmt.Sprintf("methods[%d] (%s): cli.service", i, m.Name)
+	durOK := func(name, v string) time.Duration {
+		if v == "" {
+			return 0
+		}
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			errs = append(errs, fmt.Errorf("%s.%s %q is not a positive Go duration", at, name, v))
+			return 0
+		}
+		return d
+	}
+	durOK("ready_after", sv.ReadyAfter)
+	rt := durOK("ready_timeout", sv.ReadyTimeout)
+	if rt == 0 {
+		rt = 30 * time.Second
+	}
+	if mt, err := time.ParseDuration(m.TimeoutFor()); err == nil && rt >= mt {
+		errs = append(errs, fmt.Errorf("%s.ready_timeout %s must be below the method timeout %s", at, rt, mt))
+	}
+	if m.CLI.Passthrough {
+		if len(sv.Tools) == 0 {
+			errs = append(errs, fmt.Errorf("%s on a passthrough route needs tools (the args[0] names that start a server)", at))
+		}
+		if sv.ReadyTCP != "" || sv.LogFile != "" {
+			errs = append(errs, fmt.Errorf("%s: ready_tcp/log_file need ${field} params, which a passthrough route does not have", at))
+		}
+		// Without an allowlist a caller could name the server by another path
+		// (or wrap it in a shell) and start it daemonized, outside the service.
+		if len(m.CLI.Tools) == 0 {
+			errs = append(errs, fmt.Errorf("%s on a passthrough route needs cli.tools (the allowlist of args[0] names)", at))
+		}
+		allowed := map[string]bool{}
+		for _, t := range m.CLI.Tools {
+			allowed[t] = true
+		}
+		for _, t := range sv.Tools {
+			if len(m.CLI.Tools) > 0 && !allowed[t] {
+				errs = append(errs, fmt.Errorf("%s.tools entry %q is not in cli.tools", at, t))
+			}
+		}
+	} else {
+		if len(sv.Tools) > 0 {
+			errs = append(errs, fmt.Errorf("%s.tools only applies to a passthrough route", at))
+		}
+		if sv.ReadyTCP != "" {
+			host, port, err := net.SplitHostPort(sv.ReadyTCP)
+			if err != nil || host == "" || port == "" {
+				errs = append(errs, fmt.Errorf("%s.ready_tcp %q must be host:port (placeholders allowed)", at, sv.ReadyTCP))
+			}
+		}
 	}
 	return errs
 }

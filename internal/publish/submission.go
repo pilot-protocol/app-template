@@ -231,6 +231,21 @@ type SubCLIRoute struct {
 	Args          []string `json:"args"`
 	ParamsAsFlags bool     `json:"params_as_flags"`
 	Passthrough   bool     `json:"passthrough"`
+	// Tools allowlists a passthrough call's args[0] (see scaffold.CLIRoute.Tools).
+	Tools []string `json:"tools,omitempty"`
+	// Service marks a method that starts a long-running server the adapter
+	// owns and stops with it (see scaffold.CLIService).
+	Service *SubCLIService `json:"service,omitempty"`
+}
+
+// SubCLIService mirrors scaffold.CLIService.
+type SubCLIService struct {
+	ReadyTCP     string   `json:"ready_tcp,omitempty"`
+	ReadyAfter   string   `json:"ready_after,omitempty"`
+	ReadyTimeout string   `json:"ready_timeout,omitempty"`
+	LogFile      string   `json:"log_file,omitempty"`
+	ForceArgs    []string `json:"force_args,omitempty"`
+	Tools        []string `json:"tools,omitempty"`
 }
 
 // SubParam is one structured input parameter (vs the old free-text field).
@@ -715,6 +730,17 @@ func (s Submission) ToConfig() *scaffold.Config {
 				Args:          m.CLI.Args,
 				ParamsAsFlags: m.CLI.ParamsAsFlags,
 				Passthrough:   m.CLI.Passthrough,
+				Tools:         m.CLI.Tools,
+			}
+			if sv := m.CLI.Service; sv != nil {
+				method.CLI.Service = &scaffold.CLIService{
+					ReadyTCP:     sv.ReadyTCP,
+					ReadyAfter:   sv.ReadyAfter,
+					ReadyTimeout: sv.ReadyTimeout,
+					LogFile:      sv.LogFile,
+					ForceArgs:    sv.ForceArgs,
+					Tools:        sv.Tools,
+				}
 			}
 		default:
 			route := &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path, CaptureTo: m.HTTP.CaptureTo}

@@ -166,6 +166,10 @@ func main() {
 
 	serveErr := serve(ctx, *socket, d)
 {{- if or (eq .Backend.Type "cli") (eq .Backend.Type "hybrid")}}
+	// Servers started by cli.service methods run until the app stops: stop
+	// them now (SIGTERM, then SIGKILL after a grace period). Before the guard
+	// is closed, since a running server holds it.
+	backend.StopServices()
 	backend.CloseChildGuard(2 * time.Second)
 {{- end}}
 	if serveErr != nil {
@@ -729,7 +733,7 @@ func jsonScalar(v json.RawMessage) string {
 func registerHandlers(d *ipc.Dispatcher, r *backend.Runner, c *backend.CloudClient, version, backendURL string) {
 {{- range .Methods}}
 {{- if .CLI}}
-	d.Register("{{.Name}}", forwardExec(r, backend.Spec{ {{if .CLI.Passthrough}}Passthrough: true{{else}}Args: {{printf "%#v" .CLI.Args}}, ParamsAsFlags: {{.CLI.ParamsAsFlags}}{{end}} }, dur("{{.TimeoutFor}}"))) // {{.Duration}} (local)
+	d.Register("{{.Name}}", forwardExec(r, backend.Spec{ {{if .CLI.Passthrough}}Passthrough: true{{if .CLI.Tools}}, Tools: {{printf "%#v" .CLI.Tools}}{{end}}{{else}}Args: {{printf "%#v" .CLI.Args}}, ParamsAsFlags: {{.CLI.ParamsAsFlags}}{{end}}{{with .CLI.Service}}, Service: &backend.ServiceSpec{ReadyTCP: {{printf "%q" .ReadyTCP}}, ReadyAfter: dur({{printf "%q" .ReadyAfterOrDefault}}), ReadyTimeout: dur({{printf "%q" .ReadyTimeoutOrDefault}}), LogFile: {{printf "%q" .LogFile}}, ForceArgs: {{printf "%#v" .ForceArgs}}, Tools: {{printf "%#v" .Tools}}}{{end}} }, dur("{{.TimeoutFor}}"))) // {{.Duration}} (local)
 {{- else}}
 	d.Register("{{.Name}}", cloudHandler(c, "{{.HTTP.Verb}}", "{{.HTTP.Path}}", {{if eq .HTTP.Path $.ProvisionPath}}true{{else}}false{{end}}, dur("{{.TimeoutFor}}"))) // {{.Duration}} (cloud)
 {{- end}}
@@ -823,7 +827,7 @@ func decodeCall(spec backend.Spec, raw json.RawMessage) (backend.Call, error) {
 {{- else}}
 func registerHandlers(d *ipc.Dispatcher, r *backend.Runner, version string) {
 {{- range .Methods}}
-	d.Register("{{.Name}}", forwardExec(r, backend.Spec{ {{if .CLI.Passthrough}}Passthrough: true{{else}}Args: {{printf "%#v" .CLI.Args}}, ParamsAsFlags: {{.CLI.ParamsAsFlags}}{{end}} }, dur("{{.TimeoutFor}}"))) // {{.Duration}}
+	d.Register("{{.Name}}", forwardExec(r, backend.Spec{ {{if .CLI.Passthrough}}Passthrough: true{{if .CLI.Tools}}, Tools: {{printf "%#v" .CLI.Tools}}{{end}}{{else}}Args: {{printf "%#v" .CLI.Args}}, ParamsAsFlags: {{.CLI.ParamsAsFlags}}{{end}}{{with .CLI.Service}}, Service: &backend.ServiceSpec{ReadyTCP: {{printf "%q" .ReadyTCP}}, ReadyAfter: dur({{printf "%q" .ReadyAfterOrDefault}}), ReadyTimeout: dur({{printf "%q" .ReadyTimeoutOrDefault}}), LogFile: {{printf "%q" .LogFile}}, ForceArgs: {{printf "%#v" .ForceArgs}}, Tools: {{printf "%#v" .Tools}}}{{end}} }, dur("{{.TimeoutFor}}"))) // {{.Duration}}
 {{- end}}
 	d.Register("{{.Namespace}}.help", helpHandler(version))
 }

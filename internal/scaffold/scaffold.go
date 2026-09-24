@@ -23,12 +23,16 @@ type file struct {
 
 // childProcFiles are the per-OS process attributes the exec runner applies to
 // every CLI child (Linux: parent-death signal), plus the guard that takes an
-// in-flight child down with a SIGKILLed adapter; emitted with client_cli.go.tmpl.
+// in-flight child down with a SIGKILLed adapter, plus the servers cli.service
+// methods start and own (service.go, svcproc_*.go); emitted with client_cli.go.tmpl.
 func childProcFiles() []file {
 	return []file{
 		{filepath.Join("internal", "backend", "childproc_linux.go"), "childproc_linux.go.tmpl"},
 		{filepath.Join("internal", "backend", "childproc_other.go"), "childproc_other.go.tmpl"},
 		{filepath.Join("internal", "backend", "childguard.go"), "childguard.go.tmpl"},
+		{filepath.Join("internal", "backend", "service.go"), "service.go.tmpl"},
+		{filepath.Join("internal", "backend", "svcproc_linux.go"), "svcproc_linux.go.tmpl"},
+		{filepath.Join("internal", "backend", "svcproc_other.go"), "svcproc_other.go.tmpl"},
 	}
 }
 
