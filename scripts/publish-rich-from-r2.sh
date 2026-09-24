@@ -121,11 +121,15 @@ BUNDLES_JSON="$(
 # NB: vendor.name is the PUBLISHER ("Pilot Protocol" for wrapped tools), not the
 # app, so it is a poor display name. Prefer an explicit display_name, else derive
 # from the id's last dotted segment (title-cased) — predictable and app-specific.
-DISPLAY="$(jq -r '.display_name // (.id | split(".") | last | (.[0:1]|ascii_upcase) + .[1:])' "$META")"
+# Rich submissions carry these store fields under .listing (the pilot-app
+# submission shape); a top-level field, where present, still wins. Reading only
+# the top level turned every rich republish's catalogue entry into
+# categories: [], license: "" and an app-template source_url.
+DISPLAY="$(jq -r '.display_name // .listing.display_name // (.id | split(".") | last | (.[0:1]|ascii_upcase) + .[1:])' "$META")"
 VENDOR="$(jq -r '.vendor.name // ""' "$META")"
-LICENSE="$(jq -r '.license // ""' "$META")"
-SOURCE="$(jq -r '.source_url // "https://github.com/pilot-protocol/app-template/tree/main/submissions/'"$ID"'"' "$META")"
-CATEGORIES_JSON="$(jq -c '.categories // []' "$META")"
+LICENSE="$(jq -r '.license // .listing.license // ""' "$META")"
+SOURCE="$(jq -r '.source_url // .listing.source_url // "https://github.com/pilot-protocol/app-template/tree/main/submissions/'"$ID"'"' "$META")"
+CATEGORIES_JSON="$(jq -c '.categories // .listing.categories // []' "$META")"
 
 # NB: jq's object-construction value grammar is stricter than a full pipe, and
 # some jq builds reject `key: (A) + {..}` / `key: A // {..}` inline. Precompute
