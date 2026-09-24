@@ -21,6 +21,19 @@ type file struct {
 	tmpl string
 }
 
+// cliCallFiles are what the CLI runner (exec.go) needs to keep a call's
+// processes from outliving it: call tracking and the call guardian, plus the
+// per-OS process helpers (process groups, Linux Pdeathsig, reading a process
+// group's members and their environment).
+func cliCallFiles() []file {
+	return []file{
+		{filepath.Join("internal", "backend", "calls.go"), "calls.go.tmpl"},
+		{filepath.Join("internal", "backend", "proc_linux.go"), "proc_linux.go.tmpl"},
+		{filepath.Join("internal", "backend", "proc_darwin.go"), "proc_darwin.go.tmpl"},
+		{filepath.Join("internal", "backend", "proc_other.go"), "proc_other.go.tmpl"},
+	}
+}
+
 // Generate renders a full adapter project for cfg into outDir. cfg must already
 // be Resolve()d and Validate()d. Returns the list of written paths.
 func Generate(cfg *Config, outDir string) ([]string, error) {
@@ -69,6 +82,7 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 		}
 	case "cli":
 		files = append(files, file{filepath.Join("internal", "backend", "exec.go"), "client_cli.go.tmpl"})
+		files = append(files, cliCallFiles()...)
 		// Native-binary delivery: emit the staging runtime only when the app
 		// actually ships assets (an already-installed cli needs no stager).
 		if cfg.HasAssets() {
@@ -83,6 +97,7 @@ func Generate(cfg *Config, outDir string) ([]string, error) {
 			file{filepath.Join("internal", "backend", "cloud.go"), "cloud.go.tmpl"},
 			file{filepath.Join("internal", "backend", "signer.go"), "signer.go.tmpl"},
 		)
+		files = append(files, cliCallFiles()...)
 		if cfg.HasAssets() {
 			files = append(files, file{filepath.Join("internal", "backend", "stage.go"), "stage.go.tmpl"})
 		}

@@ -33,6 +33,7 @@ import (
 {{- if or .Backend.Headers (eq .Backend.Type "http")}}
 	"strings"
 {{- end}}
+	"sync"
 	"syscall"
 	"time"
 
@@ -41,6 +42,14 @@ import (
 )
 
 func main() {
+{{- if ne .Backend.Type "http"}}
+	// The same binary, re-executed by the CLI runner, guards this adapter's
+	// running calls (see backend/calls.go).
+	if len(os.Args) > 1 && os.Args[1] == backend.CallGuardianArg {
+		backend.RunCallGuardian(os.Args[2:])
+		return
+	}
+{{- end}}
 	// Captured first, before anything slow (asset staging), so a parent that
 	// dies while we start up is still noticed by watchParent.
 	parentPID := os.Getppid()
@@ -68,6 +77,14 @@ func main() {
 		log.Fatal("{{.BinaryName}}: --socket is required (the pilot daemon supplies it)")
 	}
 
+	// Installed before any startup work, so a stop during a slow first start
+	// (asset staging) is a clean shutdown rather than a kill mid-download.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	ctx, parentGone := context.WithCancel(ctx)
+	defer parentGone()
+	go watchParent(ctx, parentPID, parentGone)
+
 {{- if eq .Backend.Type "http"}}
 	cfg := resolveConfig(*manifestPath)
 {{- if or .Managed .HasBrokerSignup}}
@@ -88,9 +105,16 @@ func main() {
 	if *manifestPath != "" {
 		appDir = filepath.Dir(*manifestPath)
 	}
+	if reaped := backend.ReapStaleCalls(appDir); len(reaped) > 0 {
+		log.Printf("{{.BinaryName}}: killed %d call process group(s) a previous instance left running: %v", len(reaped), reaped)
+	}
 {{- if .HasAssets}}
-	stagedCmd, err := backend.StageAssets(appDir)
+	stagedCmd, err := backend.StageAssets(ctx, appDir)
 	if err != nil {
+		if ctx.Err() != nil {
+			log.Printf("{{.BinaryName}}: stopped during asset staging")
+			return
+		}
 		log.Fatalf("{{.BinaryName}}: install assets: %v", err)
 	}
 	base := {{printf "%#v" .Backend.Command}}
@@ -101,21 +125,30 @@ func main() {
 {{- else}}
 	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
 {{- end}}
+	runner.TrackCalls(appDir)
+	defer runner.Close()
 	cloudCli, err := backend.NewCloudClient(cfg.BackendURL, *identity, appDir)
 	if err != nil {
 		log.Fatalf("{{.BinaryName}}: cloud client: %v", err)
 	}
 {{- else}}
-{{- if .HasAssets}}
-	// Native delivery: fetch this host's binaries from the Pilot R2 artifact
-	// registry (verify sha → stage under $APP → run ordered install args) and
-	// exec the staged path, not an assumed-installed command. See backend/stage.go.
 	appDir := os.Getenv("APP")
 	if *manifestPath != "" {
 		appDir = filepath.Dir(*manifestPath)
 	}
-	stagedCmd, err := backend.StageAssets(appDir)
+	if reaped := backend.ReapStaleCalls(appDir); len(reaped) > 0 {
+		log.Printf("{{.BinaryName}}: killed %d call process group(s) a previous instance left running: %v", len(reaped), reaped)
+	}
+{{- if .HasAssets}}
+	// Native delivery: fetch this host's binaries from the Pilot R2 artifact
+	// registry (verify sha → stage under $APP → run ordered install args) and
+	// exec the staged path, not an assumed-installed command. See backend/stage.go.
+	stagedCmd, err := backend.StageAssets(ctx, appDir)
 	if err != nil {
+		if ctx.Err() != nil {
+			log.Printf("{{.BinaryName}}: stopped during asset staging")
+			return
+		}
 		log.Fatalf("{{.BinaryName}}: install assets: %v", err)
 	}
 	base := {{printf "%#v" .Backend.Command}}
@@ -126,6 +159,8 @@ func main() {
 {{- else}}
 	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
 {{- end}}
+	runner.TrackCalls(appDir)
+	defer runner.Close()
 {{- end}}
 
 	d := ipc.NewDispatcher()
@@ -137,13 +172,10 @@ func main() {
 	registerHandlers(d, runner, readAppVersion(*manifestPath))
 {{- end}}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	ctx, parentGone := context.WithCancel(ctx)
-	defer parentGone()
-	go watchParent(ctx, parentPID, parentGone)
-
 	if err := serve(ctx, *socket, d); err != nil {
+{{- if ne .Backend.Type "http"}}
+		runner.Close() // log.Fatalf skips deferred calls
+{{- end}}
 		log.Fatalf("{{.BinaryName}}: serve: %v", err)
 	}
 }
@@ -176,8 +208,13 @@ func watchParent(ctx context.Context, parentPID int, cancel context.CancelFunc) 
 
 // serve listens on the unix socket and serves each connection in its own
 // goroutine. The daemon dials the socket per call, so connections are
-// short-lived and concurrent callers stay independent.
+// short-lived and concurrent callers stay independent. It returns once every
+// connection has been served: on shutdown the running calls are cancelled
+// (a CLI call's process group is killed) and waited for, up to shutdownGrace,
+// so the process never exits while a call it started is still running.
 func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
+	var conns connSet
+	defer conns.drain(shutdownGrace)
 	_ = os.Remove(socketPath) // a stale socket from a crashed prior instance would block Listen
 	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
 	if err != nil {
@@ -228,7 +265,56 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 			return fmt.Errorf("accept: %w", err)
 		}
 		backoff = 0
-		go serveConn(ctx, conn, d)
+		conns.serve(ctx, conn, d)
+	}
+}
+
+// shutdownGrace bounds how long a stopping adapter waits for its running calls
+// to return. A cancelled CLI call is SIGKILLed at once and then has
+// backend.killGrace (5s) for its output pipes to close.
+const shutdownGrace = 6 * time.Second
+
+// connSet tracks the open connections so shutdown can wait for their calls.
+type connSet struct {
+	mu    sync.Mutex
+	conns map[net.Conn]struct{}
+	wg    sync.WaitGroup
+}
+
+func (c *connSet) serve(ctx context.Context, conn net.Conn, d *ipc.Dispatcher) {
+	c.mu.Lock()
+	if c.conns == nil {
+		c.conns = map[net.Conn]struct{}{}
+	}
+	c.conns[conn] = struct{}{}
+	c.mu.Unlock()
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		defer func() {
+			c.mu.Lock()
+			delete(c.conns, conn)
+			c.mu.Unlock()
+		}()
+		serveConn(ctx, conn, d)
+	}()
+}
+
+// drain closes every open connection, which ends an idle one and cancels the
+// call on a busy one (the caller can no longer get its reply), then waits up
+// to grace for them all to finish.
+func (c *connSet) drain(grace time.Duration) {
+	c.mu.Lock()
+	for conn := range c.conns {
+		_ = conn.Close()
+	}
+	c.mu.Unlock()
+	done := make(chan struct{})
+	go func() { c.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(grace):
+		log.Printf("{{.BinaryName}}: calls still running %s after shutdown began; exiting anyway", grace)
 	}
 }
 

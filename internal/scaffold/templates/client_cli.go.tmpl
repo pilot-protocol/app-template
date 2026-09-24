@@ -18,7 +18,13 @@
 //   - Bounded output: stdout/stderr are capped so a runaway child cannot OOM the
 //     adapter; truncation is flagged in the reply.
 //   - A non-zero exit is a normal result returned structurally ({stdout, stderr,
-//     exit}); only spawn/timeout failures surface as IPC errors.
+//     exit}); only spawn/timeout failures surface as IPC errors. A call that
+//     was cancelled (its deadline passed, its caller hung up, the adapter is
+//     stopping) is an IPC error too, never {"exit":-1}.
+//   - Nothing a call starts outlives it: the child leads its own process group,
+//     and a cancelled call has the whole group SIGKILLed, so what the CLI forked
+//     (a shell escape, a helper) dies with it. calls.go covers an adapter that
+//     is killed outright.
 //
 // Native delivery: when the app ships `assets`, the binary is delivered from the
 // Pilot R2 artifact registry (per-OS/arch url+sha256 in install.json, fetched +
@@ -48,8 +54,8 @@ import (
 // the adapter's memory. Output past the cap is dropped and flagged truncated.
 const maxOutputBytes = 4 << 20 // 4 MiB
 
-// killGrace is how long the child has to exit after its context is cancelled
-// before Wait abandons it; pairs with the SIGKILL exec sends on cancel.
+// killGrace is how long Wait keeps waiting for the child's output pipes to
+// close once the child has exited or its process group has been SIGKILLed.
 const killGrace = 5 * time.Second
 
 // baseEnvKeys is the minimal environment every fronted CLI may see. Anything an
@@ -60,8 +66,9 @@ var placeholderRE = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 // Runner invokes a fixed base command, appending per-call args.
 type Runner struct {
-	base    []string // e.g. ["weathercli"] or ["python", "-m", "tool"]
-	envKeys []string // extra host env vars forwarded to the child (allowlist)
+	base    []string     // e.g. ["weathercli"] or ["python", "-m", "tool"]
+	envKeys []string     // extra host env vars forwarded to the child (allowlist)
+	calls   *callTracker // nil: calls are not recorded (see TrackCalls)
 }
 
 // Spec is one method's invocation shape, baked in at generation time.
@@ -83,6 +90,20 @@ type Call struct {
 // minimal baseline.
 func NewRunner(base []string, envKeys ...string) *Runner {
 	return &Runner{base: base, envKeys: envKeys}
+}
+
+// TrackCalls records every call's process group under appDir/.calls, with a
+// guardian process that kills them if the adapter is killed outright (see
+// calls.go). Without it, a call is still killed with everything it started
+// when it is cancelled or the adapter stops.
+func (r *Runner) TrackCalls(appDir string) {
+	r.calls = newCallTracker(appDir)
+}
+
+// Close kills whatever the adapter's calls left running and stops the call
+// guardian. main calls it after serve has returned.
+func (r *Runner) Close() {
+	r.calls.Close()
 }
 
 // Run executes the command for one call. On clean exit with pure-JSON stdout the
@@ -112,8 +133,13 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 		}
 	}
 
+	marker := newCallMarker()
 	cmd := exec.CommandContext(ctx, r.base[0], args...)
-	cmd.Env = r.childEnv()
+	cmd.Env = append(r.childEnv(), callMarkerKey+"="+marker)
+	cmd.SysProcAttr = callSysProcAttr()
+	// exec's default Cancel kills only the direct child: anything it started
+	// would keep running, reparented to init. Kill the call's process group.
+	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
 	cmd.WaitDelay = killGrace
 	if call.Stdin != "" {
 		cmd.Stdin = strings.NewReader(call.Stdin)
@@ -123,7 +149,27 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	runErr := cmd.Run()
+	unpin := pinSpawnThread()
+	defer unpin()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("backend: %s: %w", r.base[0], err)
+	}
+	pgid := cmd.Process.Pid
+	r.calls.begin(pgid, marker)
+	runErr := cmd.Wait()
+	r.calls.end(pgid)
+
+	if runErr != nil && ctx.Err() != nil {
+		// The call was cancelled and its process group killed: whatever the
+		// child printed is not a result.
+		return nil, fmt.Errorf("backend: %s: call %w; its processes were killed: %s", r.base[0], ctx.Err(), strings.TrimSpace(stderr.String()))
+	}
+	if errors.Is(runErr, exec.ErrWaitDelay) {
+		// The CLI exited 0, but something it left running in the background
+		// still holds its output open. The output is complete; the leftover
+		// stays tracked and is killed when the adapter stops.
+		runErr = nil
+	}
 
 	exitCode := 0
 	if runErr != nil {
@@ -131,8 +177,8 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 		if errors.As(runErr, &ee) {
 			exitCode = ee.ExitCode() // ran, exited non-zero — a normal CLI result
 		} else {
-			// Failed to start (binary missing) or killed (timeout/cancel): the
-			// command never produced a meaningful result. Surface as an error.
+			// Wait failed: the command never produced a meaningful result.
+			// Surface as an error.
 			return nil, fmt.Errorf("backend: %s: %w: %s", r.base[0], runErr, strings.TrimSpace(stderr.String()))
 		}
 	}

@@ -49,8 +49,28 @@ The generated `exec.go` is defensive by default:
 - **Structured failures** — a non-zero exit is returned as
   `{"stdout","stderr","exit","truncated"}` rather than an opaque error, so the
   caller sees everything the CLI produced. Only spawn failures (binary missing)
-  and timeouts surface as IPC errors; the per-method `timeout`/`duration` bounds
-  the run and the child is killed on cancel.
+  and cancelled calls surface as IPC errors: the per-method `timeout`/`duration`
+  bounds the run, and a call that hits it, whose caller hangs up, or that is
+  running when the adapter stops, fails with `call context deadline exceeded;
+  its processes were killed` (or `canceled`), never `{"exit":-1}`.
+- **Nothing a call starts outlives it** — each call's child leads its own
+  process group, and a cancelled call has the whole group SIGKILLed, so what
+  the CLI forks (a shell escape such as duckdb's `.shell`, a helper process)
+  dies with it. A call that returns but leaves something running in its group
+  (`cmd &`) keeps that group tracked until the adapter stops. On a stop
+  (SIGTERM, or the parent daemon going away) the adapter kills every call group
+  and waits for its calls before exiting. For an adapter that is killed outright
+  (SIGKILL, OOM, Linux Pdeathsig), `calls.go` has two backstops: a guardian
+  process (the adapter binary re-executed with `--pilot-call-guardian`, in its
+  own process group) that kills the listed call groups as soon as the adapter's
+  pipe to it closes, and a record per call under `$APP/.calls` that the next
+  start reaps. A recorded group is only killed while one of its members is
+  provably the call's (its `PILOT_APP_CALL` environment marker, or a pid and
+  start time the adapter recorded), so a reused process group id is never hit.
+  On Linux the call's child also gets Pdeathsig=SIGKILL.
+- **Interrupted first start** — asset downloads land in `$APP/.staging`, which
+  every start clears, so a stop mid-download leaves no partial file behind; a
+  SIGTERM during staging exits 0 (`stopped during asset staging`).
 
 ## Why HTTP works today and CLI doesn't
 
