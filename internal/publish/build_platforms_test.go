@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"strings"
 	"testing"
+
+	"github.com/pilot-protocol/app-template/internal/scaffold"
 )
 
 // magicForPlatform returns the executable magic an os should produce.
@@ -95,5 +98,22 @@ func TestBuildBundle_AllPlatforms(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Errorf("missing platforms: %v", want)
+	}
+}
+
+// TestBuildPlatforms_AssetsLimitTargets: an app that stages native assets is
+// built only for the platforms it has an asset for (io.pilot.smol 1.2.0
+// shipped a darwin/amd64 bundle with no smolvm for it, which exited on every
+// spawn). An app without assets builds for every default platform.
+func TestBuildPlatforms_AssetsLimitTargets(t *testing.T) {
+	cfg := sampleSubmission().ToConfig()
+	if got := BuildPlatforms(cfg); len(got) != len(DefaultPlatforms) {
+		t.Fatalf("no assets: platforms = %v, want %v", got, DefaultPlatforms)
+	}
+	cfg.Assets = []scaffold.Asset{{OS: "darwin", Arch: "arm64"}, {OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"}, {OS: "linux", Arch: "arm64"}}
+	got := BuildPlatforms(cfg)
+	want := []string{"linux/amd64", "linux/arm64", "darwin/arm64"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("platforms = %v, want %v", got, want)
 	}
 }
