@@ -389,8 +389,18 @@ func (c *Config) SignupHint() string {
 	name := c.SignupMethodName()
 	for _, m := range c.Methods {
 		if sk := m.saveKey(); sk != nil && (name == sk.Start || name == m.Name) {
+			issuer := m.Name
+			n := 0
+			for _, o := range c.Methods {
+				if o.saveKey() != nil {
+					n++
+				}
+			}
+			if n > 1 {
+				issuer = "the provider" // several steps can issue it (e.g. sign-in vs new account)
+			}
 			hint := "No API key on this host yet. Call " + name + " to start signup; the key is stored on this host as soon as " +
-				m.Name + " issues it, and injected on every call automatically."
+				issuer + " issues it, and injected on every call automatically."
 			for _, o := range c.Methods {
 				if o.Signup != nil && o.Signup.IsSetKey() {
 					hint += " Already have a key? Save it with " + o.Name + "."
