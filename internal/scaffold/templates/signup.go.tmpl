@@ -285,6 +285,50 @@ func accountHandler(ac accountConfig, manifestPath string) ipc.Handler {
 	}
 }
 
+// setKeyConfig / setKeyHandler are the plain byo leg: the user creates a key at
+// the provider (keyURL says where) and hands it over once. It is cached under
+// secretKey in $APP/secrets.json and injected on every later call. Unlike the
+// minting steps this OVERWRITES a cached key, so a revoked or mistyped key can be
+// replaced without touching files by hand. Local, no backend call.
+type setKeyConfig struct {
+	secretKey string
+	keyURL    string
+}
+
+func setKeyHandler(sc setKeyConfig, manifestPath string) ipc.Handler {
+	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
+		var in struct {
+			APIKey string `json:"api_key"`
+		}
+		if len(req.Payload) > 0 {
+			_ = json.Unmarshal(req.Payload, &in)
+		}
+		in.APIKey = strings.TrimSpace(in.APIKey)
+		if in.APIKey == "" {
+			where := ""
+			if sc.keyURL != "" {
+				where = " (create one at " + sc.keyURL + ")"
+			}
+			return nil, errors.New("set_key: api_key is required — pass {\"api_key\":\"...\"}" + where)
+		}
+		dir := signupAppDir(manifestPath)
+		if dir == "" {
+			return nil, errors.New("set_key: cannot locate the app directory to cache the key")
+		}
+		path := filepath.Join(dir, "secrets.json")
+		m := signupReadSecrets(path)
+		replaced := m[sc.secretKey] != ""
+		m[sc.secretKey] = in.APIKey
+		if err := signupWriteSecrets(path, m); err != nil {
+			return nil, fmt.Errorf("set_key: cache key: %w", err)
+		}
+		return signupResult(map[string]any{
+			"ok": true, "key_field": sc.secretKey, "api_key": "saved", "replaced": replaced,
+			"message": "key cached to secrets.json and used on every subsequent call",
+		})
+	}
+}
+
 // ── shared helpers ──────────────────────────────────────────────────────────
 
 func signupResult(m map[string]any) (json.RawMessage, error) {
@@ -326,6 +370,11 @@ func signupMergeSecrets(path string, add map[string]string) error {
 			m[k] = v
 		}
 	}
+	return signupWriteSecrets(path, m)
+}
+
+// signupWriteSecrets atomically replaces path (0600) with m.
+func signupWriteSecrets(path string, m map[string]string) error {
 	out, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err

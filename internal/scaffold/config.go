@@ -324,7 +324,7 @@ func (c *Config) HasSignup() bool {
 // unauthenticated calls with activation instructions instead of a raw 401.
 func (c *Config) HasKeyMintSignup() bool {
 	for _, m := range c.Methods {
-		if m.Signup != nil && (m.Signup.IsCreate() || m.Signup.IsVerify() || m.Signup.IsBroker()) {
+		if m.Signup != nil && m.Signup.mintsKey() {
 			return true
 		}
 	}
@@ -335,7 +335,7 @@ func (c *Config) HasKeyMintSignup() bool {
 // (the first key-minting signup route's SecretKey), or "".
 func (c *Config) AuthSecretKey() string {
 	for _, m := range c.Methods {
-		if m.Signup != nil && (m.Signup.IsCreate() || m.Signup.IsVerify() || m.Signup.IsBroker()) {
+		if m.Signup != nil && m.Signup.mintsKey() {
 			return m.Signup.SecretKey
 		}
 	}
@@ -355,7 +355,39 @@ func (c *Config) SignupMethodName() string {
 			return m.Name
 		}
 	}
+	for _, m := range c.Methods {
+		if m.Signup != nil && m.Signup.IsSetKey() {
+			return m.Name
+		}
+	}
 	return ""
+}
+
+// SignupHint is the one-line activation instruction the adapter returns, in
+// place of a doomed 401, when an authenticated call arrives before any key is
+// on the host. It names the method SignupMethodName picks and says what to pass.
+func (c *Config) SignupHint() string {
+	name := c.SignupMethodName()
+	for _, m := range c.Methods {
+		if m.Name != name || m.Signup == nil {
+			continue
+		}
+		switch {
+		case m.Signup.IsSetKey():
+			where := "from your account with the provider"
+			if m.Signup.URL != "" {
+				where = "at " + m.Signup.URL
+			}
+			return "No API key on this host yet. Create one " + where + ", then call " + name +
+				` once with {"api_key":"..."} — it is stored locally under ~/.pilot and injected on every call automatically.`
+		case strings.EqualFold(m.Signup.Step, "register"):
+			return "No API key on this host yet. Call " + name +
+				" to start signup, then finish with the verify method — the key is then stored locally under ~/.pilot and injected on every call automatically."
+		}
+	}
+	return "No API key on this host yet. Call " + name +
+		" once (no arguments required) to provision a free account and managed inbox — " +
+		"the key is then stored locally under ~/.pilot and injected on every call automatically; you never pass it."
 }
 
 // HasBrokerSignup reports whether any signup route is the broker step — the
@@ -701,7 +733,7 @@ type Method struct {
 //     {email, api_key}. The adapter caches BOTH to secrets.json; ops stay byo.
 //     No user email, no code, one call.
 type SignupRoute struct {
-	Step        string         `yaml:"step"`         // "create" | "register" | "verify" | "broker" | "account"
+	Step        string         `yaml:"step"`         // "create" | "register" | "verify" | "broker" | "account" | "set_key"
 	URL         string         `yaml:"url"`          // create/register/verify: the provider endpoint POSTed
 	BrokerURL   string         `yaml:"broker_url"`   // broker: the Pilot broker /signup endpoint (signed)
 	KeyPath     string         `yaml:"key_path"`     // create/verify: dotted path to the key in the response (default application.api_key; create defaults to data.api_key)
@@ -721,6 +753,16 @@ func (s *SignupRoute) IsVerify() bool { return strings.EqualFold(s.Step, "verify
 
 // IsBroker is the fully-autonomous leg that signs a call to the Pilot broker.
 func (s *SignupRoute) IsBroker() bool { return strings.EqualFold(s.Step, "broker") }
+
+// IsSetKey is the plain byo leg: the user obtains a key from the provider
+// themselves (URL, when set, says where) and hands it to this local method,
+// which caches it under SecretKey. No backend call is made.
+func (s *SignupRoute) IsSetKey() bool { return strings.EqualFold(s.Step, "set_key") }
+
+// mintsKey reports whether this route is what puts the byo auth key on the host.
+func (s *SignupRoute) mintsKey() bool {
+	return s.IsCreate() || s.IsVerify() || s.IsBroker() || s.IsSetKey()
+}
 
 // BodyJSON renders the static create body as a compact JSON object literal (or
 // "{}"), baked into the generated adapter and re-parsed at runtime.
@@ -1442,13 +1484,21 @@ func (c *Config) validateSignupMethod(i int, m Method) []error {
 		if strings.TrimSpace(m.Signup.SecretKey) == "" {
 			errs = append(errs, fmt.Errorf("methods[%d] (%s): a broker signup step needs signup.secret_key (the key the minted secret is cached under)", i, m.Name))
 		}
+	case "set_key":
+		// A local writer of a user-supplied key — no backend call to validate.
+		if strings.TrimSpace(m.Signup.SecretKey) == "" {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): a set_key step needs signup.secret_key (the key the supplied secret is cached under)", i, m.Name))
+		}
+		if strings.TrimSpace(m.Signup.URL) != "" {
+			httpsURL("url", m.Signup.URL)
+		}
 	case "account":
 		// A local reader of the cached account — needs only the secrets keys.
 		if strings.TrimSpace(m.Signup.SecretKey) == "" {
 			errs = append(errs, fmt.Errorf("methods[%d] (%s): an account step needs signup.secret_key", i, m.Name))
 		}
 	default:
-		errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.step %q must be create|register|verify|broker|account", i, m.Name, m.Signup.Step))
+		errs = append(errs, fmt.Errorf("methods[%d] (%s): signup.step %q must be create|register|verify|broker|account|set_key", i, m.Name, m.Signup.Step))
 	}
 	if c.Managed() {
 		errs = append(errs, fmt.Errorf("methods[%d] (%s): a signup (no-broker) route cannot be combined with managed/provisioned auth", i, m.Name))

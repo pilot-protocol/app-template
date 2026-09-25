@@ -180,7 +180,7 @@ type SubMethod struct {
 // $APP/secrets.json under SecretKey, from which the byo ${TOKEN} headers resolve
 // it). One SubSignup describes one leg, selected by Step.
 type SubSignup struct {
-	Step        string         `json:"step"`         // "create" | "register" | "verify" | "broker" | "account"
+	Step        string         `json:"step"`         // "create" | "register" | "verify" | "broker" | "account" | "set_key"
 	URL         string         `json:"url"`          // create/register/verify: the provider endpoint POSTed
 	BrokerURL   string         `json:"broker_url"`   // broker: the Pilot broker /signup endpoint (signed)
 	KeyPath     string         `json:"key_path"`     // create/verify: dotted path to the key (create defaults to data.api_key)
@@ -468,12 +468,19 @@ func validateSubSignupMethod(n string, m SubMethod) []string {
 		if strings.TrimSpace(m.Signup.SecretKey) == "" {
 			e = append(e, fmt.Sprintf("Method %q: a broker signup step needs signup.secret_key", n))
 		}
+	case "set_key":
+		if strings.TrimSpace(m.Signup.SecretKey) == "" {
+			e = append(e, fmt.Sprintf("Method %q: a set_key step needs signup.secret_key", n))
+		}
+		if strings.TrimSpace(m.Signup.URL) != "" {
+			https("url", m.Signup.URL)
+		}
 	case "account":
 		if strings.TrimSpace(m.Signup.SecretKey) == "" {
 			e = append(e, fmt.Sprintf("Method %q: an account step needs signup.secret_key", n))
 		}
 	default:
-		e = append(e, fmt.Sprintf("Method %q: signup.step must be create|register|verify|broker|account", n))
+		e = append(e, fmt.Sprintf("Method %q: signup.step must be create|register|verify|broker|account|set_key", n))
 	}
 	if m.HasHTTP() || m.HasCLI() || m.HasLocal() {
 		e = append(e, fmt.Sprintf("Method %q: a signup method must not also declare an http/cli/local route", n))
