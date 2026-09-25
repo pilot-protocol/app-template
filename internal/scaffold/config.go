@@ -312,11 +312,19 @@ func (c *Config) Provisioned() bool { return c.Backend.Auth == "provisioned" }
 // locally, so — like a provisioned app — it needs fs.read+fs.write on that file.
 func (c *Config) HasSignup() bool {
 	for _, m := range c.Methods {
-		if m.Signup != nil {
+		if m.Signup != nil || m.saveKey() != nil {
 			return true
 		}
 	}
 	return false
+}
+
+// saveKey returns the method's key-issuing http route config, or nil.
+func (m Method) saveKey() *SaveKeyRoute {
+	if m.HTTP != nil {
+		return m.HTTP.SaveKey
+	}
+	return nil
 }
 
 // HasKeyMintSignup reports whether any method mints the byo auth key itself (a
@@ -324,7 +332,7 @@ func (c *Config) HasSignup() bool {
 // unauthenticated calls with activation instructions instead of a raw 401.
 func (c *Config) HasKeyMintSignup() bool {
 	for _, m := range c.Methods {
-		if m.Signup != nil && m.Signup.mintsKey() {
+		if (m.Signup != nil && m.Signup.mintsKey()) || m.saveKey() != nil {
 			return true
 		}
 	}
@@ -337,6 +345,9 @@ func (c *Config) AuthSecretKey() string {
 	for _, m := range c.Methods {
 		if m.Signup != nil && m.Signup.mintsKey() {
 			return m.Signup.SecretKey
+		}
+		if sk := m.saveKey(); sk != nil {
+			return sk.SecretKey
 		}
 	}
 	return ""
@@ -356,6 +367,14 @@ func (c *Config) SignupMethodName() string {
 		}
 	}
 	for _, m := range c.Methods {
+		if sk := m.saveKey(); sk != nil {
+			if sk.Start != "" {
+				return sk.Start
+			}
+			return m.Name
+		}
+	}
+	for _, m := range c.Methods {
 		if m.Signup != nil && m.Signup.IsSetKey() {
 			return m.Name
 		}
@@ -368,6 +387,18 @@ func (c *Config) SignupMethodName() string {
 // on the host. It names the method SignupMethodName picks and says what to pass.
 func (c *Config) SignupHint() string {
 	name := c.SignupMethodName()
+	for _, m := range c.Methods {
+		if sk := m.saveKey(); sk != nil && (name == sk.Start || name == m.Name) {
+			hint := "No API key on this host yet. Call " + name + " to start signup; the key is stored on this host as soon as " +
+				m.Name + " issues it, and injected on every call automatically."
+			for _, o := range c.Methods {
+				if o.Signup != nil && o.Signup.IsSetKey() {
+					hint += " Already have a key? Save it with " + o.Name + "."
+				}
+			}
+			return hint
+		}
+	}
 	for _, m := range c.Methods {
 		if m.Name != name || m.Signup == nil {
 			continue
@@ -777,6 +808,15 @@ func (s *SignupRoute) BodyJSON() string {
 	return string(b)
 }
 
+// SaveKeyRoute says where a route's response carries the API key it issues.
+type SaveKeyRoute struct {
+	Path      string `yaml:"path"`       // dotted path to the key in the JSON response, e.g. apiKey or data.api_key
+	SecretKey string `yaml:"secret_key"` // secrets.json key it is cached under, e.g. DIAL_API_KEY
+	// Start names the method an agent calls to begin the signup that ends in
+	// this route (e.g. dial.signup); it is what the no-key-yet hint points to.
+	Start string `yaml:"start"`
+}
+
 // LocalRoute makes a method run entirely on the host with NO backend call: it
 // reads a local JSON metadata file (see HTTPRoute.CaptureTo, which writes it) and
 // returns its contents. Used for host-local state an agent should recall without
@@ -882,6 +922,13 @@ type HTTPRoute struct {
 	// from a signup route soft-fails authenticated calls until a key exists;
 	// a public route is exempt, so it keeps working before signup.
 	Public bool `yaml:"public"`
+
+	// SaveKey, when set, makes this route the one that issues the byo API key
+	// (a provider whose signup returns the key from an ordinary endpoint, e.g.
+	// Dial's /auth/verify-number). On a 2xx JSON answer the string at Path is
+	// cached under SecretKey in $APP/secrets.json and replaced in the reply, so
+	// the key is never handed to the agent and every later call carries it.
+	SaveKey *SaveKeyRoute `yaml:"save_key"`
 
 	// Multipart, when set, sends this method as multipart/form-data built from a
 	// staged blob rather than as a JSON body. See MultipartRoute.
@@ -1524,6 +1571,23 @@ func (c *Config) validateHTTPMethod(i int, m Method) []error {
 	}
 	if m.HTTP.Path == "" || !strings.HasPrefix(m.HTTP.Path, "/") {
 		errs = append(errs, fmt.Errorf("methods[%d].http.path must start with /", i))
+	}
+	if sk := m.HTTP.SaveKey; sk != nil {
+		if strings.TrimSpace(sk.Path) == "" || strings.TrimSpace(sk.SecretKey) == "" {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): http.save_key needs both path and secret_key", i, m.Name))
+		}
+		if c.Managed() {
+			errs = append(errs, fmt.Errorf("methods[%d] (%s): http.save_key cannot be combined with managed/provisioned auth", i, m.Name))
+		}
+		if sk.Start != "" {
+			found := false
+			for _, o := range c.Methods {
+				found = found || o.Name == sk.Start
+			}
+			if !found {
+				errs = append(errs, fmt.Errorf("methods[%d] (%s): http.save_key.start %q is not a method of this app", i, m.Name, sk.Start))
+			}
+		}
 	}
 	switch m.HTTP.Verb {
 	case "GET", "POST", "PATCH", "PUT", "DELETE":
