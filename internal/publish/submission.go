@@ -220,6 +220,9 @@ type SubRoute struct {
 	// metadata file so a SubLocal method can recall it (e.g. buy_number →
 	// ~/.pilot/.agentphone). Best-effort; never fails the call.
 	CaptureTo string `json:"capture_to"`
+	// Public marks an endpoint the provider serves without credentials; it is
+	// exempt from the adapter's no-key-yet gate (see scaffold.HTTPRoute.Public).
+	Public bool `json:"public"`
 }
 
 // SubCLIRoute is the backend CLI mapping for a method. Enumerated methods bake
@@ -724,7 +727,7 @@ func (s Submission) ToConfig() *scaffold.Config {
 				Passthrough:   m.CLI.Passthrough,
 			}
 		default:
-			route := &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path, CaptureTo: m.HTTP.CaptureTo}
+			route := &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path, CaptureTo: m.HTTP.CaptureTo, Public: m.HTTP.Public}
 			// Carry each param's explicit request location so the generator can
 			// resolve query/path/path_raw/body/header placement. Omitted `in`
 			// keeps the verb/path default (back-compat).

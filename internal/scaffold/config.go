@@ -877,6 +877,12 @@ type HTTPRoute struct {
 	// the provisioned number to ~/.pilot/.agentphone.
 	CaptureTo string `yaml:"capture_to"`
 
+	// Public marks an endpoint the provider serves without credentials (a
+	// catalogue, a recommendation, a signup handshake). An app whose key comes
+	// from a signup route soft-fails authenticated calls until a key exists;
+	// a public route is exempt, so it keeps working before signup.
+	Public bool `yaml:"public"`
+
 	// Multipart, when set, sends this method as multipart/form-data built from a
 	// staged blob rather than as a JSON body. See MultipartRoute.
 	Multipart *MultipartRoute `yaml:"multipart"`

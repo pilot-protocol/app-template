@@ -31,6 +31,10 @@ methods:
     summary: "List open bounties."
     duration: fast
     http: {verb: GET, path: /api/partner/v1/bounties}
+  - name: rentahuman.list_humans
+    summary: "Browse humans (public)."
+    duration: fast
+    http: {verb: GET, path: /api/humans, public: true}
 `
 
 func TestSetKeyStepGeneratesAndCompiles(t *testing.T) {
@@ -62,6 +66,15 @@ func TestSetKeyStepGeneratesAndCompiles(t *testing.T) {
 	for _, want := range []string{"setKeyHandler(setKeyConfig{", "requireKey(", "rentahuman.ai/account/api-keys", "HeaderFunc:"} {
 		if !strings.Contains(string(main), want) {
 			t.Errorf("generated main.go missing %q", want)
+		}
+	}
+	// The gated route is wrapped; the public one is not.
+	if !strings.Contains(string(main), `requireKey(manifestPath, "RENTAHUMAN_API_KEY", "rentahuman.set_key", `) {
+		t.Error("list_bounties should be wrapped in requireKey")
+	}
+	for _, line := range strings.Split(string(main), "\n") {
+		if strings.Contains(line, `d.Register("rentahuman.list_humans"`) && strings.Contains(line, "requireKey(") {
+			t.Errorf("public route must not be gated on a key: %s", line)
 		}
 	}
 	mf, _ := os.ReadFile(filepath.Join(dir, "manifest.json"))

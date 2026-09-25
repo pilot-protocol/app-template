@@ -243,7 +243,7 @@ func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL 
 	}, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (no-broker self-signup: register)
 {{- end}}
 {{- else}}
-	d.Register("{{.Name}}", {{if $.HasKeyMintSignup}}requireKey(manifestPath, {{printf "%q" $.AuthSecretKey}}, {{printf "%q" $.SignupMethodName}}, {{printf "%q" $.SignupHint}}, {{end}}{{if .HTTP.CaptureTo}}captureWrap(expandHome("{{.HTTP.CaptureTo}}"), {{end}}forward(c, route{
+	d.Register("{{.Name}}", {{if and $.HasKeyMintSignup (not .HTTP.Public)}}requireKey(manifestPath, {{printf "%q" $.AuthSecretKey}}, {{printf "%q" $.SignupMethodName}}, {{printf "%q" $.SignupHint}}, {{end}}{{if .HTTP.CaptureTo}}captureWrap(expandHome("{{.HTTP.CaptureTo}}"), {{end}}forward(c, route{
 		method: "{{.HTTP.Verb}}", pathTmpl: "{{.HTTP.Path}}", bodyVerb: {{.HTTP.BodyVerb}},
 		pathParams:    []string{ {{- range $p := .HTTP.PathParams}}{{printf "%q" $p}}, {{end -}} },
 		rawPathParams: []string{ {{- range $p := .HTTP.RawPathParams}}{{printf "%q" $p}}, {{end -}} },
@@ -251,7 +251,7 @@ func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL 
 		bodyParams:    []string{ {{- range $p := .HTTP.BodyParams}}{{printf "%q" $p}}, {{end -}} },
 		headerParams:  []string{ {{- range $p := .HTTP.HeaderParams}}{{printf "%q" $p}}, {{end -}} },
 		bodyRawParam:  "{{.HTTP.BodyRawParam}}",
-	}, dur("{{.TimeoutFor}}")){{if .HTTP.CaptureTo}}){{end}}{{if $.HasKeyMintSignup}}){{end}}) // {{.Duration}}
+	}, dur("{{.TimeoutFor}}")){{if .HTTP.CaptureTo}}){{end}}{{if and $.HasKeyMintSignup (not .HTTP.Public)}}){{end}}) // {{.Duration}}
 {{- end}}
 {{- end}}
 	d.Register("{{.Namespace}}.help", helpHandler(version, backendURL))
