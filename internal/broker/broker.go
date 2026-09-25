@@ -314,7 +314,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//     indistinguishable, otherwise the broker is an oracle for enumerating
 	//     other tenants' resource ids.
 	if app.Tenancy != nil {
-		if _, ok := app.Tenancy.EnforceRequest(b.ownerStore(), appID, app.allowSegs, r.Method, mpath, r.URL.RawQuery, r.Header.Get("Content-Type"), body, string(caller)); !ok {
+		if _, ok := app.Tenancy.EnforceRequest(b.ownerStore(), appID, app.tenancyPatterns(r.Method, mpath), r.Method, mpath, r.URL.RawQuery, r.Header.Get("Content-Type"), body, string(caller)); !ok {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -463,7 +463,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if app.Tenancy != nil && resp.StatusCode/100 == 2 {
 		os := b.ownerStore()
 		app.Tenancy.ClaimFrom(os, appID, r.Method, mpath, rb, string(caller), b.now())
-		app.Tenancy.ReleaseFrom(os, appID, app.allowSegs, r.Method, mpath)
+		app.Tenancy.ReleaseFrom(os, appID, app.tenancyPatterns(r.Method, mpath), r.Method, mpath)
 		if filtered, did := app.Tenancy.FilterResponse(os, appID, r.Method, mpath, rb, string(caller), b.now()); did {
 			rb = filtered
 		} else if filtered, did := app.Tenancy.FilterObject(os, appID, r.Method, mpath, rb, string(caller)); did {
