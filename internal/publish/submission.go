@@ -180,7 +180,7 @@ type SubMethod struct {
 // $APP/secrets.json under SecretKey, from which the byo ${TOKEN} headers resolve
 // it). One SubSignup describes one leg, selected by Step.
 type SubSignup struct {
-	Step        string         `json:"step"`         // "create" | "register" | "verify" | "broker" | "account"
+	Step        string         `json:"step"`         // "create" | "register" | "verify" | "broker" | "account" | "set_key"
 	URL         string         `json:"url"`          // create/register/verify: the provider endpoint POSTed
 	BrokerURL   string         `json:"broker_url"`   // broker: the Pilot broker /signup endpoint (signed)
 	KeyPath     string         `json:"key_path"`     // create/verify: dotted path to the key (create defaults to data.api_key)
@@ -220,6 +220,20 @@ type SubRoute struct {
 	// metadata file so a SubLocal method can recall it (e.g. buy_number →
 	// ~/.pilot/.agentphone). Best-effort; never fails the call.
 	CaptureTo string `json:"capture_to"`
+	// Public marks an endpoint the provider serves without credentials; it is
+	// exempt from the adapter's no-key-yet gate (see scaffold.HTTPRoute.Public).
+	Public bool `json:"public"`
+	// SaveKey makes this route the one that issues the byo API key: the string
+	// at Path in its JSON answer is cached under SecretKey and redacted from the
+	// reply (see scaffold.HTTPRoute.SaveKey). Start names the signup's first method.
+	SaveKey *SubSaveKey `json:"save_key,omitempty"`
+}
+
+// SubSaveKey is scaffold.SaveKeyRoute in submission form.
+type SubSaveKey struct {
+	Path      string `json:"path"`
+	SecretKey string `json:"secret_key"`
+	Start     string `json:"start,omitempty"`
 }
 
 // SubCLIRoute is the backend CLI mapping for a method. Enumerated methods bake
@@ -468,12 +482,19 @@ func validateSubSignupMethod(n string, m SubMethod) []string {
 		if strings.TrimSpace(m.Signup.SecretKey) == "" {
 			e = append(e, fmt.Sprintf("Method %q: a broker signup step needs signup.secret_key", n))
 		}
+	case "set_key":
+		if strings.TrimSpace(m.Signup.SecretKey) == "" {
+			e = append(e, fmt.Sprintf("Method %q: a set_key step needs signup.secret_key", n))
+		}
+		if strings.TrimSpace(m.Signup.URL) != "" {
+			https("url", m.Signup.URL)
+		}
 	case "account":
 		if strings.TrimSpace(m.Signup.SecretKey) == "" {
 			e = append(e, fmt.Sprintf("Method %q: an account step needs signup.secret_key", n))
 		}
 	default:
-		e = append(e, fmt.Sprintf("Method %q: signup.step must be create|register|verify|broker|account", n))
+		e = append(e, fmt.Sprintf("Method %q: signup.step must be create|register|verify|broker|account|set_key", n))
 	}
 	if m.HasHTTP() || m.HasCLI() || m.HasLocal() {
 		e = append(e, fmt.Sprintf("Method %q: a signup method must not also declare an http/cli/local route", n))
@@ -717,7 +738,10 @@ func (s Submission) ToConfig() *scaffold.Config {
 				Passthrough:   m.CLI.Passthrough,
 			}
 		default:
-			route := &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path, CaptureTo: m.HTTP.CaptureTo}
+			route := &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path, CaptureTo: m.HTTP.CaptureTo, Public: m.HTTP.Public}
+			if sk := m.HTTP.SaveKey; sk != nil {
+				route.SaveKey = &scaffold.SaveKeyRoute{Path: sk.Path, SecretKey: sk.SecretKey, Start: sk.Start}
+			}
 			// Carry each param's explicit request location so the generator can
 			// resolve query/path/path_raw/body/header placement. Omitted `in`
 			// keeps the verb/path default (back-compat).

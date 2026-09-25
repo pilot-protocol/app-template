@@ -201,7 +201,12 @@ func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL 
 		rawPathParams: []string{ {{- range $p := .HTTP.RawPathParams}}{{printf "%q" $p}}, {{end -}} },
 	}, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (multipart upload)
 {{- else if .Signup}}
-{{- if eq .Signup.Step "account"}}
+{{- if .Signup.IsSetKey}}
+	d.Register("{{.Name}}", setKeyHandler(setKeyConfig{
+		secretKey: {{printf "%q" .Signup.SecretKey}},
+		keyURL:    {{printf "%q" .Signup.URL}},
+	}, manifestPath)) // {{.Duration}} (local: cache a key you obtained from the provider)
+{{- else if eq .Signup.Step "account"}}
 	d.Register("{{.Name}}", accountHandler(accountConfig{
 		secretKey: {{printf "%q" .Signup.SecretKey}},
 		emailKey:  {{printf "%q" .Signup.EmailKey}},
@@ -238,7 +243,7 @@ func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL 
 	}, manifestPath, dur("{{.TimeoutFor}}"))) // {{.Duration}} (no-broker self-signup: register)
 {{- end}}
 {{- else}}
-	d.Register("{{.Name}}", {{if $.HasKeyMintSignup}}requireKey(manifestPath, {{printf "%q" $.AuthSecretKey}}, {{printf "%q" $.SignupMethodName}}, {{end}}{{if .HTTP.CaptureTo}}captureWrap(expandHome("{{.HTTP.CaptureTo}}"), {{end}}forward(c, route{
+	d.Register("{{.Name}}", {{if and $.HasKeyMintSignup (not .HTTP.Public)}}requireKey(manifestPath, {{printf "%q" $.AuthSecretKey}}, {{printf "%q" $.SignupMethodName}}, {{printf "%q" $.SignupHint}}, {{end}}{{if .HTTP.SaveKey}}saveKeyWrap(manifestPath, {{printf "%q" .HTTP.SaveKey.Path}}, {{printf "%q" .HTTP.SaveKey.SecretKey}}, {{end}}{{if .HTTP.CaptureTo}}captureWrap(expandHome("{{.HTTP.CaptureTo}}"), {{end}}forward(c, route{
 		method: "{{.HTTP.Verb}}", pathTmpl: "{{.HTTP.Path}}", bodyVerb: {{.HTTP.BodyVerb}},
 		pathParams:    []string{ {{- range $p := .HTTP.PathParams}}{{printf "%q" $p}}, {{end -}} },
 		rawPathParams: []string{ {{- range $p := .HTTP.RawPathParams}}{{printf "%q" $p}}, {{end -}} },
@@ -246,7 +251,7 @@ func registerHandlers(d *ipc.Dispatcher, c *backend.Client, version, backendURL 
 		bodyParams:    []string{ {{- range $p := .HTTP.BodyParams}}{{printf "%q" $p}}, {{end -}} },
 		headerParams:  []string{ {{- range $p := .HTTP.HeaderParams}}{{printf "%q" $p}}, {{end -}} },
 		bodyRawParam:  "{{.HTTP.BodyRawParam}}",
-	}, dur("{{.TimeoutFor}}")){{if .HTTP.CaptureTo}}){{end}}{{if $.HasKeyMintSignup}}){{end}}) // {{.Duration}}
+	}, dur("{{.TimeoutFor}}")){{if .HTTP.CaptureTo}}){{end}}{{if .HTTP.SaveKey}}){{end}}{{if and $.HasKeyMintSignup (not .HTTP.Public)}}){{end}}) // {{.Duration}}
 {{- end}}
 {{- end}}
 	d.Register("{{.Namespace}}.help", helpHandler(version, backendURL))
@@ -288,16 +293,14 @@ func localRead(store string) ipc.Handler {
 // method mints the key, it is stored locally under $APP/secrets.json (in ~/.pilot)
 // and the adapter injects it into the Authorization header on every subsequent
 // call automatically — the agent never sees or passes the key.
-func requireKey(manifestPath, secretKey, signupMethod string, h ipc.Handler) ipc.Handler {
+func requireKey(manifestPath, secretKey, signupMethod, hint string, h ipc.Handler) ipc.Handler {
 	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
 		if os.Getenv(secretKey) == "" && loadSecrets(manifestPath)[secretKey] == "" {
 			msg := map[string]any{
 				"ok":           false,
 				"needs_signup": true,
 				"activate":     signupMethod,
-				"message": "No API key on this host yet. Call " + signupMethod +
-					" once (no arguments required) to provision a free account and managed inbox — " +
-					"the key is then stored locally under ~/.pilot and injected on every call automatically; you never pass it.",
+				"message":      hint,
 			}
 			b, _ := json.Marshal(msg)
 			return json.RawMessage(b), nil

@@ -285,6 +285,104 @@ func accountHandler(ac accountConfig, manifestPath string) ipc.Handler {
 	}
 }
 
+// setKeyConfig / setKeyHandler are the plain byo leg: the user creates a key at
+// the provider (keyURL says where) and hands it over once. It is cached under
+// secretKey in $APP/secrets.json and injected on every later call. Unlike the
+// minting steps this OVERWRITES a cached key, so a revoked or mistyped key can be
+// replaced without touching files by hand. Local, no backend call.
+type setKeyConfig struct {
+	secretKey string
+	keyURL    string
+}
+
+func setKeyHandler(sc setKeyConfig, manifestPath string) ipc.Handler {
+	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
+		var in struct {
+			APIKey string `json:"api_key"`
+		}
+		if len(req.Payload) > 0 {
+			_ = json.Unmarshal(req.Payload, &in)
+		}
+		in.APIKey = strings.TrimSpace(in.APIKey)
+		if in.APIKey == "" {
+			where := ""
+			if sc.keyURL != "" {
+				where = " (create one at " + sc.keyURL + ")"
+			}
+			return nil, errors.New("set_key: api_key is required — pass {\"api_key\":\"...\"}" + where)
+		}
+		dir := signupAppDir(manifestPath)
+		if dir == "" {
+			return nil, errors.New("set_key: cannot locate the app directory to cache the key")
+		}
+		path := filepath.Join(dir, "secrets.json")
+		m := signupReadSecrets(path)
+		replaced := m[sc.secretKey] != ""
+		m[sc.secretKey] = in.APIKey
+		if err := signupWriteSecrets(path, m); err != nil {
+			return nil, fmt.Errorf("set_key: cache key: %w", err)
+		}
+		return signupResult(map[string]any{
+			"ok": true, "key_field": sc.secretKey, "api_key": "saved", "replaced": replaced,
+			"message": "key cached to secrets.json and used on every subsequent call",
+		})
+	}
+}
+
+// saveKeyWrap wraps a route whose response issues the API key (http.save_key).
+// On a successful JSON object answer carrying a non-empty string at keyPath,
+// the key is cached under secretKey in $APP/secrets.json — overwriting, since
+// the provider has just issued a new one — and the reply is rewritten so the
+// agent sees that it was saved rather than the key itself. Any other answer
+// passes through untouched.
+func saveKeyWrap(manifestPath, keyPath, secretKey string, h ipc.Handler) ipc.Handler {
+	return func(ctx context.Context, req *ipc.Envelope) (json.RawMessage, error) {
+		out, err := h(ctx, req)
+		if err != nil {
+			return out, err
+		}
+		key := signupDigString(out, keyPath)
+		if key == "" {
+			return out, nil
+		}
+		dir := signupAppDir(manifestPath)
+		if dir == "" {
+			return nil, errors.New("save_key: cannot locate the app directory to cache the key — the key was not stored; sign in again")
+		}
+		path := filepath.Join(dir, "secrets.json")
+		m := signupReadSecrets(path)
+		m[secretKey] = key
+		if err := signupWriteSecrets(path, m); err != nil {
+			return nil, fmt.Errorf("save_key: cache key: %w", err)
+		}
+		var obj map[string]any
+		if json.Unmarshal(out, &obj) != nil {
+			return signupResult(map[string]any{"ok": true, "key_field": secretKey, "api_key": "saved"})
+		}
+		redactPath(obj, keyPath, "saved on this host as "+secretKey+"; sent on every call")
+		return signupResult(obj)
+	}
+}
+
+// redactPath replaces the value at a dotted path in decoded JSON.
+func redactPath(obj map[string]any, dotted, with string) {
+	parts := strings.Split(dotted, ".")
+	cur := obj
+	for i, p := range parts {
+		if i == len(parts)-1 {
+			if _, ok := cur[p]; ok {
+				cur[p] = with
+			}
+			return
+		}
+		next, ok := cur[p].(map[string]any)
+		if !ok {
+			return
+		}
+		cur = next
+	}
+}
+
 // ── shared helpers ──────────────────────────────────────────────────────────
 
 func signupResult(m map[string]any) (json.RawMessage, error) {
@@ -326,6 +424,11 @@ func signupMergeSecrets(path string, add map[string]string) error {
 			m[k] = v
 		}
 	}
+	return signupWriteSecrets(path, m)
+}
+
+// signupWriteSecrets atomically replaces path (0600) with m.
+func signupWriteSecrets(path string, m map[string]string) error {
 	out, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
