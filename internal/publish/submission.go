@@ -223,6 +223,17 @@ type SubRoute struct {
 	// Public marks an endpoint the provider serves without credentials; it is
 	// exempt from the adapter's no-key-yet gate (see scaffold.HTTPRoute.Public).
 	Public bool `json:"public"`
+	// SaveKey makes this route the one that issues the byo API key: the string
+	// at Path in its JSON answer is cached under SecretKey and redacted from the
+	// reply (see scaffold.HTTPRoute.SaveKey). Start names the signup's first method.
+	SaveKey *SubSaveKey `json:"save_key,omitempty"`
+}
+
+// SubSaveKey is scaffold.SaveKeyRoute in submission form.
+type SubSaveKey struct {
+	Path      string `json:"path"`
+	SecretKey string `json:"secret_key"`
+	Start     string `json:"start,omitempty"`
 }
 
 // SubCLIRoute is the backend CLI mapping for a method. Enumerated methods bake
@@ -728,6 +739,9 @@ func (s Submission) ToConfig() *scaffold.Config {
 			}
 		default:
 			route := &scaffold.HTTPRoute{Verb: orDefault(m.HTTP.Verb, "GET"), Path: m.HTTP.Path, CaptureTo: m.HTTP.CaptureTo, Public: m.HTTP.Public}
+			if sk := m.HTTP.SaveKey; sk != nil {
+				route.SaveKey = &scaffold.SaveKeyRoute{Path: sk.Path, SecretKey: sk.SecretKey, Start: sk.Start}
+			}
 			// Carry each param's explicit request location so the generator can
 			// resolve query/path/path_raw/body/header placement. Omitted `in`
 			// keeps the verb/path default (back-compat).
