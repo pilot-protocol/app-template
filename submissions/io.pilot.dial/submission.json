@@ -1,0 +1,803 @@
+{
+  "id": "io.pilot.dial",
+  "version": "0.2.0",
+  "namespace": "dial",
+  "description": "Give your agent a real US phone number: AI voice calls, SMS and iMessage, with $5 of credit and no credit card.",
+  "email": "gal@getdial.ai",
+  "backend": {
+    "type": "http",
+    "base_url": "https://api.getdial.ai/v1",
+    "auth": "byo",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer ${DIAL_API_KEY}"
+      }
+    ]
+  },
+  "methods": [
+    {
+      "name": "dial.set_key",
+      "latency": "fast",
+      "signup": {
+        "step": "set_key",
+        "url": "https://getdial.ai/dashboard",
+        "secret_key": "DIAL_API_KEY"
+      },
+      "description": "Already have a Dial API key (sk_live_...)? Save it on this host; it is sent on every call and calling again replaces it. Local, free.",
+      "params": [
+        {
+          "name": "api_key",
+          "type": "string",
+          "required": true,
+          "description": "Your sk_live_... key."
+        }
+      ]
+    },
+    {
+      "name": "dial.status",
+      "description": "Your account: credit balance, plan, and the limits currently in force (max call duration, max concurrent calls). Free. Call this first to orient.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/account"
+      },
+      "params": []
+    },
+    {
+      "name": "dial.usage",
+      "description": "Activity analytics: message and call counts, voice minutes, per-day series, and busiest numbers. Free.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/usage"
+      },
+      "params": [
+        {
+          "name": "days",
+          "type": "int",
+          "required": false,
+          "description": "How many days back to summarize (default 30).",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "dial.signup",
+      "description": "Start creating (or signing in to) a Dial account. Emails a 6-digit code and returns a verificationId; pass both to dial.verify. Free.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/auth/signup",
+        "public": true
+      },
+      "params": [
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "description": "Email address to create the account under; the 6-digit verification code is sent to it.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "dial.verify",
+      "description": "Redeem the emailed code. Signing in to an existing account: the API key is issued and saved on this host at once. New account: the email is verified and a registrationId comes back — Dial also requires a verified phone number that a human owns, so continue with dial.register_number. Free.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/auth/verify",
+        "public": true,
+        "save_key": {
+          "path": "apiKey",
+          "secret_key": "DIAL_API_KEY",
+          "start": "dial.signup"
+        }
+      },
+      "params": [
+        {
+          "name": "verificationId",
+          "type": "string",
+          "required": true,
+          "description": "The id returned by dial.signup.",
+          "in": "body"
+        },
+        {
+          "name": "code",
+          "type": "string",
+          "required": true,
+          "description": "The 6-digit code emailed by dial.signup.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "dial.register_number",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/auth/register-number",
+        "public": true
+      },
+      "description": "New accounts only: text a 6-digit code to the phone number that will own the account. Ask your human for a number they keep that can receive SMS — never invent one, and a Dial number is refused. A verified number is bound to one Dial account permanently. Free.",
+      "params": [
+        {
+          "name": "registrationId",
+          "type": "string",
+          "required": true,
+          "description": "From dial.verify.",
+          "in": "body"
+        },
+        {
+          "name": "phoneNumber",
+          "type": "string",
+          "required": true,
+          "description": "The owner's phone number, E.164 preferred (e.g. +14155550123).",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "dial.verify_number",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/auth/verify-number",
+        "public": true,
+        "save_key": {
+          "path": "apiKey",
+          "secret_key": "DIAL_API_KEY",
+          "start": "dial.signup"
+        }
+      },
+      "description": "New accounts only: submit the SMS code. This creates the account (with $5 of credit and a first number) and the API key is saved on this host automatically — every other dial.* method then works. Free.",
+      "params": [
+        {
+          "name": "registrationId",
+          "type": "string",
+          "required": true,
+          "description": "From dial.verify.",
+          "in": "body"
+        },
+        {
+          "name": "code",
+          "type": "string",
+          "required": true,
+          "description": "The 6-digit code from the SMS.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "dial.list_numbers",
+      "description": "Your phone numbers, with capabilities, setup status, and per-number inbound configuration. Free.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/numbers"
+      },
+      "params": []
+    },
+    {
+      "name": "dial.buy_number",
+      "description": "Provision a new US phone number. COSTS $3/month. Requires an explicit consent attestation because it spends money on behalf of the account holder, so confirm with your human first.",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/numbers"
+      },
+      "params": [
+        {
+          "name": "explicitProgrammaticConsent",
+          "type": "string",
+          "required": true,
+          "description": "Short human-readable attestation that the account holder consented to provisioning this number programmatically. Stored for the audit trail.",
+          "in": "body"
+        },
+        {
+          "name": "capabilities",
+          "type": "object",
+          "required": false,
+          "description": "Channels the number should support: [\"sms\",\"call\"] (default), or add \"imessage\" for an iMessage number (provisioned asynchronously).",
+          "in": "body"
+        },
+        {
+          "name": "inboundInstruction",
+          "type": "string",
+          "required": false,
+          "description": "System prompt the AI uses on inbound calls to this number; a sensible default is used if omitted.",
+          "in": "body"
+        },
+        {
+          "name": "areaCode",
+          "type": "string",
+          "required": false,
+          "description": "Preferred US area code; omitted means any available US number. Ignored for iMessage numbers.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "dial.get_number",
+      "description": "One phone number by id. Free.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/numbers/{id}"
+      },
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "The number's Dial id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "dial.set_number",
+      "description": "Update a number: nickname, inbound behavior, voice, language, call ceiling, and (iMessage numbers only) the display name and avatar recipients see. Only the fields you send change. Free.",
+      "latency": "fast",
+      "http": {
+        "verb": "PATCH",
+        "path": "/numbers/{id}"
+      },
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "The number's Dial id.",
+          "in": "path"
+        },
+        {
+          "name": "nickname",
+          "type": "string",
+          "required": false,
+          "description": "Human-readable label, e.g. \"Support line\". Empty string clears it.",
+          "in": "body"
+        },
+        {
+          "name": "inboundInstruction",
+          "type": "string",
+          "required": false,
+          "description": "New system prompt for inbound calls to this number.",
+          "in": "body"
+        },
+        {
+          "name": "inboundVoiceGender",
+          "type": "string",
+          "required": false,
+          "description": "Voice gender for inbound calls: \"male\" or \"female\". Omitted leaves it unchanged.",
+          "in": "body"
+        },
+        {
+          "name": "maxCallDurationSeconds",
+          "type": "int",
+          "required": false,
+          "description": "Per-call ceiling for this number, in seconds (60-3600).",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "dial.release_number",
+      "description": "Release a number. IRREVERSIBLE: the number is gone and the unused month is not refunded. Confirm with your human first.",
+      "latency": "med",
+      "http": {
+        "verb": "DELETE",
+        "path": "/numbers/{id}"
+      },
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "The number's Dial id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "dial.send_message",
+      "description": "Send a text. Delivers over iMessage when the recipient supports it, otherwise SMS, same call either way. COSTS MONEY (US SMS $0.02 per segment). Pass exactly one of fromNumber or fromNumberId.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/messages"
+      },
+      "params": [
+        {
+          "name": "to",
+          "type": "string",
+          "required": true,
+          "description": "Destination phone number, E.164 (e.g. +14155550123).",
+          "in": "body"
+        },
+        {
+          "name": "fromNumber",
+          "type": "string",
+          "required": false,
+          "description": "One of your numbers in E.164 to send from.",
+          "in": "body"
+        },
+        {
+          "name": "fromNumberId",
+          "type": "string",
+          "required": false,
+          "description": "Number id to send from; defaults to your primary number.",
+          "in": "body"
+        },
+        {
+          "name": "body",
+          "type": "string",
+          "required": true,
+          "description": "Message text.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "dial.list_messages",
+      "description": "Your messages, inbound and outbound, newest first (up to the 100 most recent). Free. Poll this for replies, or prefer dial.wait_for_event to block until one arrives.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/messages"
+      },
+      "params": [
+        {
+          "name": "since",
+          "type": "string",
+          "required": false,
+          "description": "ISO-8601 timestamp; only messages after this.",
+          "in": "query"
+        },
+        {
+          "name": "direction",
+          "type": "string",
+          "required": false,
+          "description": "Filter by direction: \"inbound\" or \"outbound\".",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "dial.typing",
+      "description": "Show or clear a typing indicator before you reply. iMessage numbers display it; SMS numbers ignore it, so it is always safe to call. Sending a message clears it automatically. Free.",
+      "latency": "fast",
+      "http": {
+        "verb": "POST",
+        "path": "/typing"
+      },
+      "params": [
+        {
+          "name": "toNumber",
+          "type": "string",
+          "required": true,
+          "description": "Recipient phone number, E.164.",
+          "in": "body"
+        },
+        {
+          "name": "fromNumber",
+          "type": "string",
+          "required": true,
+          "description": "The number the indicator appears from: one of your numbers in E.164, its id, or nickname.",
+          "in": "body"
+        },
+        {
+          "name": "value",
+          "type": "bool",
+          "required": true,
+          "description": "true to start the indicator, false to clear it.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "dial.place_call",
+      "description": "Place an outbound AI voice call. Returns a call id immediately; the call runs in the background. COSTS MONEY per minute. Pass transferTo to have the agent wait out hold queues and IVR menus and hand the live call to a human when a real person answers. Poll dial.get_call, or block on dial.wait_for_event with call.ended.",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/calls"
+      },
+      "params": [
+        {
+          "name": "to",
+          "type": "string",
+          "required": true,
+          "description": "Destination phone number, E.164.",
+          "in": "body"
+        },
+        {
+          "name": "outboundInstruction",
+          "type": "string",
+          "required": true,
+          "description": "System prompt for the AI voice agent on this call.",
+          "in": "body"
+        },
+        {
+          "name": "transferTo",
+          "type": "string",
+          "required": false,
+          "description": "Number in E.164 to hand the call to a human. The agent rides out hold music and automated menus and cold-transfers the moment a real person answers — never to a recording or an IVR. Must differ from to and the from number.",
+          "in": "body"
+        },
+        {
+          "name": "fromNumber",
+          "type": "string",
+          "required": false,
+          "description": "One of your numbers in E.164 to call from.",
+          "in": "body"
+        },
+        {
+          "name": "fromNumberId",
+          "type": "string",
+          "required": false,
+          "description": "Number id to call from; defaults to your primary number.",
+          "in": "body"
+        },
+        {
+          "name": "maxCallDurationSeconds",
+          "type": "int",
+          "required": false,
+          "description": "Hard ceiling for this call, in seconds (60-3600).",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "dial.get_call",
+      "description": "One call with its status and transcript once available. THE poll target after dial.place_call. Free.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/calls/{id}"
+      },
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "The call's Dial id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "dial.list_calls",
+      "description": "Your calls, newest first (up to the 100 most recent), inbound and outbound. Free.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/calls"
+      },
+      "params": []
+    },
+    {
+      "name": "dial.end_call",
+      "description": "Hang up a call that is still in progress. Free.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/calls/{id}/stop"
+      },
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "The call's Dial id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "dial.wait_for_event",
+      "description": "Block until a matching event arrives instead of polling. Use it for an inbound reply or a 2FA code (message.received) or a finished call (call.ended, call.transcribed). A 408 means the wait timed out: try again, it is not an error. Free.",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/events/wait"
+      },
+      "params": [
+        {
+          "name": "eventType",
+          "type": "string",
+          "required": true,
+          "description": "Event type to wait for, e.g. message.received or call.ended.",
+          "in": "body"
+        },
+        {
+          "name": "filters",
+          "type": "object",
+          "required": false,
+          "description": "Exact-match filters on event fields, as name/value pairs.",
+          "in": "body"
+        },
+        {
+          "name": "timeout",
+          "type": "int",
+          "required": false,
+          "description": "Seconds to wait before returning empty (max 60).",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "dial.list_context_mcps",
+      "description": "The MCP servers connected to your voice agent. Secrets and tokens are masked. Free.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/context-mcps"
+      },
+      "params": []
+    },
+    {
+      "name": "dial.add_context_mcp",
+      "description": "Connect an MCP server so its tools are available to your AI voice agent DURING calls, to look something up or take an action mid-conversation. Works unattended for servers needing no auth or a static header. An OAuth server instead returns an authorizationUrl and stays pending until a human grants consent in a browser. Free.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/context-mcps"
+      },
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "A label for this MCP connection.",
+          "in": "body"
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "required": true,
+          "description": "The MCP server's URL.",
+          "in": "body"
+        },
+        {
+          "name": "headers",
+          "type": "object",
+          "required": false,
+          "description": "Optional static headers to send to the MCP server (e.g. an API key).",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "dial.remove_context_mcp",
+      "description": "Disconnect an MCP server from your voice agent. Its tools stop being offered on future calls. Free.",
+      "latency": "fast",
+      "http": {
+        "verb": "DELETE",
+        "path": "/context-mcps/{id}"
+      },
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "The connection's Dial id.",
+          "in": "path"
+        }
+      ]
+    }
+  ],
+  "vendor": {
+    "name": "Dial",
+    "url": "https://getdial.ai",
+    "contact": "gal@getdial.ai",
+    "agent_usage": "Fully autonomous once the operator supplies DIAL_API_KEY at install time. No human step is required for the core loop. Typical run: 1. dial.status to confirm credit and the limits in force (free). 2. dial.list_numbers; if empty, dial.buy_number with an explicitProgrammaticConsent attestation ($3/mo, so confirm with the human first). 3. dial.send_message to text someone, or dial.place_call with an outboundInstruction to run an AI voice call. 4. dial.wait_for_event with eventType message.received to block on the reply, or call.ended to block on the call finishing. Then dial.get_call for the transcript. Every method is JSON in, JSON out over REST, and dial.help returns the full method list with parameters and latency classes at runtime, so an agent can discover the surface without prior knowledge. Two places a human is genuinely needed, both avoidable: - dial.signup / dial.verify send a 6-digit code by email, so they only work unattended if the agent can read that inbox. An agent that already has a key never calls them. - dial.add_context_mcp against an OAuth-protected MCP server returns an authorizationUrl and stays pending until someone grants consent in a browser. Servers needing no auth or a static header connect unattended.",
+    "capabilities": "- Provision a real US phone number, and release it - Send SMS and iMessage, with automatic iMessage-to-SMS fallback - Read inbound and outbound message history - Show an iMessage typing indicator - Place an autonomous AI voice call from a given number - Wait out a hold queue or IVR and hand the live call to a human the moment a real person answers (transferTo) - Read call status and full call transcripts - Hang up an in-progress call - Block until an inbound message, 2FA code, or finished call arrives (long-poll, no webhook needed) - Configure a number: nickname, inbound behavior, voice, language, max call duration - Set the iMessage display name and avatar recipients see - Connect an MCP server so its tools are callable by the voice agent during a live call - Read account status, credit balance, active limits, and usage analytics - Create a Dial account and exchange an emailed code for an API key"
+  },
+  "listing": {
+    "display_name": "Dial",
+    "tagline": "A complete phone identity for your agent — voice calls, SMS and iMessage on a real US number, provisioned in one call.",
+    "app_description": "**Signup.** `dial.signup` → `dial.verify` signs in to an existing account and saves its key. A **new** account also needs a phone number a human owns: `dial.register_number` texts it a code, and `dial.verify_number` creates the account and saves the key. Already have a key? `dial.set_key`.\n\nDial gives your agent its own real phone number: place and receive AI voice calls, send and receive SMS and iMessage, and wait on inbound events without polling. Bring your Dial API key at install time and every method authenticates as your own account. The account is yours, works outside Pilot too, and starts with $5 of credit and no credit card. No key yet? dial.signup emails a 6-digit code and dial.verify exchanges it for one. What you can do - Call people. dial.place_call runs an autonomous AI voice call from your number: book a table, chase a delivery, return a missed call. Pass transferTo and it waits out hold music and IVR menus, then cold-transfers to your human the moment a real person answers — never to a recording. Poll dial.get_call for the transcript, or block on dial.wait_for_event. - Give the call your tools. Connect a Context MCP and your MCP server tools become available to the voice agent DURING the call, so it can look something up or take an action mid-conversation. Dial runs the OAuth 2.1 flow and keeps the token fresh in the background. - Text people. dial.send_message delivers over iMessage when the recipient supports it and falls back to SMS otherwise, same call either way. Show a typing indicator first with dial.typing. - Wait, do not poll. dial.wait_for_event blocks until an inbound reply, a 2FA code, or a finished call shows up. A 408 means try again, not an error. - Own the identity. Set each number inbound behavior, voice and language, and on iMessage numbers the display name and avatar recipients see in Messages. Cost Reads are free. $3/month per number. US SMS $0.02 per segment. Managed voice $0.22/min all-in; self-hosted voice $0.13/min if you bring your own LLM over a WebSocket. Your $5 signup credit covers the first usage and spend pauses at $0 rather than surprising you. Good to know A brand-new account is on the free tier until it is topped up, which caps calls at 5 minutes and 2 concurrent calls. Both lift permanently on the first top-up. Emergency and crisis numbers are blocked. Always pass numbers in E.164, e.g. +14155551234. Every method, its parameters and latency class are discoverable at runtime via dial.help.",
+    "license": "MIT",
+    "homepage": "https://getdial.ai",
+    "source_url": "https://github.com/GetDial-AI/cli",
+    "categories": [
+      "communications",
+      "phone",
+      "voice",
+      "messaging"
+    ],
+    "keywords": [
+      "phone",
+      "sms",
+      "imessage",
+      "voice",
+      "calls",
+      "telephony",
+      "agent",
+      "mcp",
+      "webhooks"
+    ]
+  },
+  "product_demo": {
+    "skill": "io.pilot.dial",
+    "title": "Full usage demo",
+    "metered": true,
+    "when_to_use": "When a task needs a phone: call a business and sit through the hold queue, text someone and wait for the reply, or receive a 2FA code on a real US number.",
+    "quickstart": {
+      "goal": "See your credit and the limits in force before spending anything",
+      "command": "pilotctl appstore call io.pilot.dial dial.status '{}'",
+      "expect": "{\"credit\":\"$5.00\",\"plan\":\"free\",\"maxCallDurationSeconds\":300,\"maxConcurrentCalls\":2}",
+      "cost": "$0.00 (read)",
+      "note": "Free. A new account starts with $5 and no card. No key yet? dial.signup emails a code; dial.verify signs you in (existing account) or, for a new one, dial.register_number + dial.verify_number verify a phone your human owns. The key is saved on this host automatically."
+    },
+    "examples": [
+      {
+        "title": "Get a number, then text someone",
+        "goal": "A number is the prerequisite for everything else",
+        "command": "pilotctl appstore call io.pilot.dial dial.buy_number '{\"areaCode\":\"415\",\"explicitProgrammaticConsent\":\"yes\"}'",
+        "expect": "{\"id\":\"num_...\",\"phoneNumber\":\"+14155550123\"}",
+        "cost": "$3.00/month",
+        "note": "Spends money, so it requires an explicit consent attestation — confirm with your human first. Then dial.send_message delivers over iMessage when the recipient supports it, else SMS."
+      },
+      {
+        "title": "Place a call and let it wait out the IVR",
+        "goal": "The thing an agent genuinely cannot do itself",
+        "command": "pilotctl appstore call io.pilot.dial dial.place_call '{\"to\":\"+14155550199\",\"fromNumber\":\"+14155550123\",\"outboundInstruction\":\"Ask if they take reservations for 4 at 8pm Friday\",\"transferTo\":\"+14155550100\"}'",
+        "expect": "{\"id\":\"call_...\",\"status\":\"queued\"}",
+        "cost": "$0.22/min",
+        "note": "transferTo hands the live call to your human the moment a real person answers — never to a recording. Poll dial.get_call for the transcript."
+      },
+      {
+        "title": "Block until the reply arrives, instead of polling",
+        "command": "pilotctl appstore call io.pilot.dial dial.wait_for_event '{\"eventType\":\"message.received\",\"timeout\":120}'",
+        "expect": "{\"event\":\"message.received\",\"message\":{\"body\":\"Your code is 481920\"}}",
+        "cost": "$0.00 (read)",
+        "note": "A 408 means try again, not an error. This is how you catch a 2FA code without spinning."
+      }
+    ],
+    "cost": {
+      "unit": "USD",
+      "free_budget": "$5.00 signup credit, no card",
+      "hard_cap_usd": 5.0,
+      "operations": [
+        {
+          "op": "reads (status, usage, list_*, get_call, wait_for_event)",
+          "price": "free"
+        },
+        {
+          "op": "dial.buy_number",
+          "price": "$3.00/month",
+          "note": "requires an explicit consent attestation"
+        },
+        {
+          "op": "dial.send_message",
+          "price": "$0.02 per SMS segment",
+          "note": "iMessage delivery where supported"
+        },
+        {
+          "op": "dial.place_call",
+          "price": "$0.22/min",
+          "note": "$0.13/min self-hosted if you bring your own LLM"
+        }
+      ],
+      "worked_total": "$3.44 — one number for a month ($3.00), one 2-minute call ($0.44), reads free. Inside the $5 signup credit."
+    },
+    "gotchas": [
+      "New accounts need a real phone number your human owns (register_number + verify_number). Ask for it; never invent one.",
+      "Reads are free; buying a number, texting and calling cost money. Check dial.status first.",
+      "dial.buy_number needs an explicit consent attestation because it spends — confirm with your human.",
+      "A new account is capped at 5-minute calls and 2 concurrent until the first top-up.",
+      "Always pass numbers in E.164, e.g. +14155551234. Emergency and crisis numbers are blocked."
+    ],
+    "next": [
+      "io.pilot.dial dial.help '{}'"
+    ]
+  },
+  "next_steps": {
+    "schema": 1,
+    "app": "io.pilot.dial",
+    "edges": [
+      {
+        "from": "*",
+        "on": "ok",
+        "why": "no Dial API key on this host yet, so nothing else will authenticate",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.dial dial.signup '{\"email\":\"you@example.com\"}'",
+            "why": "emails a 6-digit code and returns a verificationId for dial.verify; already have a key? dial.set_key",
+            "kind": "gateway"
+          }
+        ],
+        "match": "\"needs_signup\"\\s*:\\s*true"
+      },
+      {
+        "from": "dial.status",
+        "on": "ok",
+        "why": "you know the credit and the limits in force, so the next thing an agent needs is a number to act from",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.dial dial.list_numbers '{}'",
+            "why": "if this is empty you need dial.buy_number, which costs $3/month and needs explicit consent",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "dial.place_call",
+        "on": "ok",
+        "why": "the call runs in the background, so the id is a handle rather than a result",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.dial dial.wait_for_event '{\"eventType\":\"call.ended\",\"timeout\":300}'",
+            "why": "blocks until the call finishes instead of spinning on get_call; a 408 means try again",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "dial.send_message",
+        "on": "ok",
+        "why": "a sent text is only half a conversation; the reply is what the agent is usually waiting for",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.dial dial.wait_for_event '{\"eventType\":\"message.received\",\"timeout\":120}'",
+            "why": "long-polls for the inbound reply or 2FA code rather than polling list_messages",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "dial.buy_number",
+        "on": "err",
+        "code": 400,
+        "why": "buying a number spends money, so it is refused without an explicit consent attestation",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.dial dial.buy_number '{\"areaCode\":\"415\",\"explicitProgrammaticConsent\":\"yes\"}'",
+            "why": "confirm the $3/month charge with your human first, then pass explicitProgrammaticConsent",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "dial.verify",
+        "on": "ok",
+        "match": "\"registrationId\"",
+        "why": "the email is verified but new Dial accounts also need a phone number a human owns",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.dial dial.register_number '{\"registrationId\":\"<registrationId>\",\"phoneNumber\":\"<your human's number>\"}'",
+            "why": "ask your human for a number they keep that receives SMS",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "dial.register_number",
+        "on": "ok",
+        "why": "a 6-digit code was texted to that number",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.dial dial.verify_number '{\"registrationId\":\"<registrationId>\",\"code\":\"<code from the SMS>\"}'",
+            "why": "creates the account and saves the key on this host",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "dial.verify_number",
+        "on": "ok",
+        "why": "the account exists and its key is saved",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.dial dial.status '{}'",
+            "why": "see your $5 credit and limits before spending",
+            "kind": "flow"
+          }
+        ]
+      }
+    ]
+  }
+}

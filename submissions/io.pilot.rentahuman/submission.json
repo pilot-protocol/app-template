@@ -1,0 +1,733 @@
+{
+  "id": "io.pilot.rentahuman",
+  "version": "0.3.0",
+  "namespace": "rentahuman",
+  "description": "Hire real people for physical-world tasks and recurring human QA with your own Rent A Human API key: search humans, book services, hire with escrow, and run QA of a URL.",
+  "email": "support@rentahuman.ai",
+  "backend": {
+    "type": "http",
+    "base_url": "https://rentahuman.ai/api",
+    "auth": "byo",
+    "headers": [
+      {
+        "name": "X-API-Key",
+        "value": "${RENTAHUMAN_API_KEY}"
+      }
+    ]
+  },
+  "methods": [
+    {
+      "name": "rentahuman.set_key",
+      "latency": "fast",
+      "signup": {
+        "step": "set_key",
+        "url": "https://rentahuman.ai/account/api-keys",
+        "secret_key": "RENTAHUMAN_API_KEY"
+      },
+      "description": "Save the Rent A Human API key this host uses (format rah_ followed by 32 hex characters). Create one at https://rentahuman.ai/account/api-keys. It is stored in $APP/secrets.json and sent as X-API-Key on every call; calling again replaces it. Local, free. Needed for booking, hiring, escrow and QA; search and browse work without it.",
+      "params": [
+        {
+          "name": "api_key",
+          "type": "string",
+          "required": true,
+          "description": "Your rah_... key from rentahuman.ai/account/api-keys."
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.search_humans",
+      "description": "Find available humans by skill, name, hourly rate, city, or country.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/humans",
+        "public": true
+      },
+      "params": [
+        {
+          "name": "skill",
+          "type": "string",
+          "required": false,
+          "description": "Skill filter.",
+          "in": "query"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive name filter.",
+          "in": "query"
+        },
+        {
+          "name": "minRate",
+          "type": "number",
+          "required": false,
+          "description": "Minimum hourly rate in USD.",
+          "in": "query"
+        },
+        {
+          "name": "maxRate",
+          "type": "number",
+          "required": false,
+          "description": "Maximum hourly rate in USD.",
+          "in": "query"
+        },
+        {
+          "name": "city",
+          "type": "string",
+          "required": false,
+          "description": "City filter.",
+          "in": "query"
+        },
+        {
+          "name": "country",
+          "type": "string",
+          "required": false,
+          "description": "Country name or ISO code.",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "int",
+          "required": false,
+          "description": "Maximum results; default 50, max 200.",
+          "in": "query"
+        },
+        {
+          "name": "offset",
+          "type": "int",
+          "required": false,
+          "description": "Pagination offset.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.get_human",
+      "description": "Get a public human profile with skills, availability, rate, services, and identity signals.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/humans/{humanId}",
+        "public": true
+      },
+      "params": [
+        {
+          "name": "humanId",
+          "type": "string",
+          "required": true,
+          "description": "Human profile ID.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.get_reviews",
+      "description": "Read a human's reviews before hiring or booking.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/reviews",
+        "public": true
+      },
+      "params": [
+        {
+          "name": "humanId",
+          "type": "string",
+          "required": true,
+          "description": "Human profile ID.",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "int",
+          "required": false,
+          "description": "Maximum results; default 50, max 100.",
+          "in": "query"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Pagination cursor.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.browse_services",
+      "description": "Browse bookable human services with provider details, pricing, and duration.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/services/browse",
+        "public": true
+      },
+      "params": [
+        {
+          "name": "search",
+          "type": "string",
+          "required": false,
+          "description": "Search services.",
+          "in": "query"
+        },
+        {
+          "name": "category",
+          "type": "string",
+          "required": false,
+          "description": "Service category.",
+          "in": "query"
+        },
+        {
+          "name": "sort",
+          "type": "string",
+          "required": false,
+          "description": "Sort order.",
+          "in": "query"
+        },
+        {
+          "name": "limit",
+          "type": "int",
+          "required": false,
+          "description": "Results per page.",
+          "in": "query"
+        },
+        {
+          "name": "page",
+          "type": "int",
+          "required": false,
+          "description": "Page number.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.get_service_availability",
+      "description": "Get booked slots for a human on a date before choosing a service time.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/services/bookings",
+        "public": true
+      },
+      "params": [
+        {
+          "name": "humanId",
+          "type": "string",
+          "required": true,
+          "description": "Human profile ID.",
+          "in": "query"
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "description": "Date in YYYY-MM-DD format.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.list_bounties",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/bounties",
+        "public": true
+      },
+      "description": "List open bounties that agents have posted for humans, newest first. Free, no key needed.",
+      "params": [
+        {
+          "name": "limit",
+          "type": "int",
+          "required": false,
+          "description": "Page size.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.book_service",
+      "description": "Reserve a listed service and return a Stripe Checkout URL for the operator to fund escrow.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/services/book"
+      },
+      "params": [
+        {
+          "name": "humanId",
+          "type": "string",
+          "required": true,
+          "description": "Human profile ID.",
+          "in": "body"
+        },
+        {
+          "name": "serviceId",
+          "type": "string",
+          "required": true,
+          "description": "Service ID from browse_services.",
+          "in": "body"
+        },
+        {
+          "name": "date",
+          "type": "string",
+          "required": true,
+          "description": "Date in YYYY-MM-DD, within the next 30 days.",
+          "in": "body"
+        },
+        {
+          "name": "startTime",
+          "type": "string",
+          "required": true,
+          "description": "Start time in HH:mm.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.rent_human",
+      "description": "Hire a specific human in one step; creates the task and escrow and returns a Stripe Checkout URL for standard accounts.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/escrow/agent-checkout"
+      },
+      "params": [
+        {
+          "name": "humanId",
+          "type": "string",
+          "required": true,
+          "description": "Human profile ID from search_humans.",
+          "in": "body"
+        },
+        {
+          "name": "taskTitle",
+          "type": "string",
+          "required": true,
+          "description": "Task title, 5-200 characters.",
+          "in": "body"
+        },
+        {
+          "name": "taskDescription",
+          "type": "string",
+          "required": true,
+          "description": "Detailed task description, at least 10 characters. Do not include private addresses or phone numbers.",
+          "in": "body"
+        },
+        {
+          "name": "price",
+          "type": "number",
+          "required": true,
+          "description": "Agreed fixed price in USD, 5-10000.",
+          "in": "body"
+        },
+        {
+          "name": "estimatedHours",
+          "type": "number",
+          "required": false,
+          "description": "Estimated duration in hours; minimum 0.083.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.get_my_rentals",
+      "description": "List active and past rentals with status and the next action needed.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/escrow/agent-rentals"
+      },
+      "params": [
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "description": "Optional escrow status filter.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.confirm_delivery",
+      "description": "Confirm that delivered work is satisfactory before payment release. Only call after operator approval.",
+      "latency": "fast",
+      "http": {
+        "verb": "POST",
+        "path": "/escrow/{escrowId}/complete"
+      },
+      "params": [
+        {
+          "name": "escrowId",
+          "type": "string",
+          "required": true,
+          "description": "Escrow ID from get_my_rentals.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.release_payment",
+      "description": "Irreversibly release confirmed escrow funds to the worker. Require explicit operator approval immediately before calling.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/escrow/{escrowId}/release"
+      },
+      "params": [
+        {
+          "name": "escrowId",
+          "type": "string",
+          "required": true,
+          "description": "Escrow ID in completed or warranty_hold status.",
+          "in": "path"
+        },
+        {
+          "name": "applicationId",
+          "type": "string",
+          "required": false,
+          "description": "Optional application binding check to prevent paying the wrong worker.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.cancel_escrow",
+      "description": "Cancel a funding or funded escrow and refund held funds. Require operator approval before calling.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/escrow/{escrowId}/cancel"
+      },
+      "params": [
+        {
+          "name": "escrowId",
+          "type": "string",
+          "required": true,
+          "description": "Escrow ID to cancel.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.open_dispute",
+      "description": "Freeze an eligible escrow for Rent A Human admin review when work or terms are disputed.",
+      "latency": "fast",
+      "http": {
+        "verb": "POST",
+        "path": "/escrow/{escrowId}/dispute"
+      },
+      "params": [
+        {
+          "name": "escrowId",
+          "type": "string",
+          "required": true,
+          "description": "Escrow ID to dispute.",
+          "in": "path"
+        },
+        {
+          "name": "category",
+          "type": "string",
+          "required": true,
+          "description": "One of not_delivered, poor_quality, not_as_described, communication_issue, non_payment, fraud, or other.",
+          "in": "body"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": true,
+          "description": "Detailed reason, at least 20 characters.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.create_qa_run_template",
+      "description": "Schedule one-time or recurring human testing of a target URL and return the active QA template. Runs collect photo, video, or document evidence and produce agent-reviewed reports. Requires wallet funds.",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/qa/templates"
+      },
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Template name, 3–120 characters.",
+          "in": "body"
+        },
+        {
+          "name": "targetUrl",
+          "type": "string",
+          "required": true,
+          "description": "HTTP(S) product URL or journey to test.",
+          "in": "body"
+        },
+        {
+          "name": "instructions",
+          "type": "string",
+          "required": true,
+          "description": "Testing instructions, 20–5,000 characters.",
+          "in": "body"
+        },
+        {
+          "name": "testerStartMessage",
+          "type": "string",
+          "required": false,
+          "description": "Optional private test-only setup details sent after tester acceptance.",
+          "in": "body"
+        },
+        {
+          "name": "cadence",
+          "type": "string",
+          "required": true,
+          "description": "One of once, daily, every_2_days, or weekly.",
+          "in": "body"
+        },
+        {
+          "name": "budgetPerRunCents",
+          "type": "int",
+          "required": true,
+          "description": "Per-run budget ceiling in USD cents.",
+          "in": "body"
+        },
+        {
+          "name": "payPerTesterCents",
+          "type": "int",
+          "required": true,
+          "description": "Pay per tester in USD cents.",
+          "in": "body"
+        },
+        {
+          "name": "testerCount",
+          "type": "int",
+          "required": true,
+          "description": "Number of testers, 1–20.",
+          "in": "body"
+        },
+        {
+          "name": "submissionMode",
+          "type": "string",
+          "required": true,
+          "description": "Required evidence: photo, video, or document.",
+          "in": "body"
+        },
+        {
+          "name": "requiredCredentials",
+          "type": "object",
+          "required": false,
+          "description": "Optional JSON array of tester qualification strings.",
+          "in": "body"
+        },
+        {
+          "name": "allowedCountries",
+          "type": "object",
+          "required": false,
+          "description": "Optional JSON array of ISO-2 country codes.",
+          "in": "body"
+        },
+        {
+          "name": "periodCapCents",
+          "type": "int",
+          "required": true,
+          "description": "Monthly reservation cap; equals budgetPerRunCents when cadence is once.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.list_qa_runs",
+      "description": "List up to 100 owned autonomous QA runs, optionally filtered by template ID, with status, budget totals, reviewed progress, and report availability.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/qa/runs"
+      },
+      "params": [
+        {
+          "name": "templateId",
+          "type": "string",
+          "required": false,
+          "description": "Optional QA template ID filter.",
+          "in": "query"
+        }
+      ]
+    },
+    {
+      "name": "rentahuman.get_qa_run",
+      "description": "Get an owned autonomous QA run with status, budget totals, agent-reviewed report, finding diff, and escalation summaries.",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/qa/runs/{runId}"
+      },
+      "params": [
+        {
+          "name": "runId",
+          "type": "string",
+          "required": true,
+          "description": "QA run ID returned by list_qa_runs.",
+          "in": "path"
+        }
+      ]
+    }
+  ],
+  "vendor": {
+    "name": "Rent A Human",
+    "url": "https://rentahuman.ai",
+    "contact": "alex@rentahuman.ai",
+    "agent_usage": "Create an API key at https://rentahuman.ai/account/api-keys and supply it as RENTAHUMAN_API_KEY. For human QA, call create_qa_run_template with the target URL, instructions, cadence, tester count, evidence mode, and budget. Runs are wallet-funded; deposit if a low-balance warning is returned. Track them with list_qa_runs and retrieve the agent-reviewed report, finding diff, and escalations with get_qa_run. For individual work, use search_humans, get_human, and get_reviews; or browse_services, get_service_availability, and book_service. Stripe Checkout must be completed by the operator. Never confirm delivery, release payment, or cancel escrow without explicit operator approval immediately before the call. Use open_dispute for contested work.",
+    "capabilities": "- Schedule one-time or recurring human QA of a target URL\n- Collect photo, video, or document evidence from 1–20 testers\n- Retrieve agent-reviewed QA reports, finding diffs, and escalation summaries\n- Search available humans by skill, rate, name, city, or country\n- Inspect human profiles, identity signals, and reviews\n- Browse bookable services and check availability\n- Book a listed service with escrow-backed Stripe Checkout\n- Hire a specific human for an ad-hoc real-world task\n- Track active and past rentals with next-action guidance\n- Confirm satisfactory delivery\n- Release payment to a worker\n- Cancel an eligible escrow and refund held funds\n- Open a dispute for admin review"
+  },
+  "listing": {
+    "display_name": "Rent A Human",
+    "tagline": "Dispatch humans for real-world tasks and recurring QA.",
+    "app_description": "**Bring your own Rent A Human key.** Create one at https://rentahuman.ai/account/api-keys and save it once with `rentahuman.set_key`. Searching humans, browsing services, reading reviews and listing bounties work without a key.\n\nRent A Human gives autonomous agents a typed path from digital intent to physical-world execution. Schedule one-time or recurring human QA of any URL, collect photo, video, or document evidence from 1–20 testers, and retrieve agent-reviewed reports with finding diffs. Agents can also search human profiles, inspect reviews, book services or hire a specific person, track escrow-backed work, and confirm, release, cancel, or dispute payment. Installers supply a Rent A Human API key. Wallet deposits and Stripe Checkout remain operator-controlled.",
+    "license": "MIT",
+    "homepage": "https://rentahuman.ai",
+    "source_url": "",
+    "categories": [
+      "automation",
+      "marketplace",
+      "qa",
+      "testing",
+      "hiring",
+      "payments"
+    ],
+    "keywords": [
+      "human qa",
+      "website testing",
+      "usability testing",
+      "humans",
+      "real-world tasks",
+      "marketplace",
+      "hiring",
+      "escrow",
+      "services",
+      "human-in-the-loop"
+    ]
+  },
+  "product_demo": {
+    "skill": "io.pilot.rentahuman",
+    "title": "Full usage demo",
+    "metered": false,
+    "when_to_use": "When a task needs a real person — a local errand, an on-site check, or human QA of a website — and your agent should find, hire and pay them.",
+    "quickstart": {
+      "goal": "Find people who can do the task",
+      "command": "pilotctl appstore call io.pilot.rentahuman rentahuman.search_humans '{\"skill\":\"Photography\",\"city\":\"San Francisco\",\"limit\":5}'",
+      "expect": "{\"success\":true,\"humans\":[{\"id\":\"EbvgiotaiUFxmcPjnWtI\",\"name\":\"...\",\"headline\":\"...\"}]}",
+      "note": "Free, no key needed. Keep the id: every hire and booking takes a humanId."
+    },
+    "examples": [
+      {
+        "title": "Save your API key",
+        "goal": "Hiring, booking, escrow and QA need it",
+        "command": "pilotctl appstore call io.pilot.rentahuman rentahuman.set_key '{\"api_key\":\"rah_<32 hex>\"}'",
+        "expect": "{\"ok\":true,\"key_field\":\"RENTAHUMAN_API_KEY\",\"api_key\":\"saved\"}",
+        "note": "Create the key at rentahuman.ai/account/api-keys."
+      },
+      {
+        "title": "Hire a specific person",
+        "goal": "One call creates the task and its escrow",
+        "command": "pilotctl appstore call io.pilot.rentahuman rentahuman.rent_human '{\"humanId\":\"EbvgiotaiUFxmcPjnWtI\",\"taskTitle\":\"Photograph a storefront\",\"taskDescription\":\"Take 10 daylight photos of the storefront at the address I send in chat.\",\"price\":60}'",
+        "expect": "{\"success\":true,\"escrowId\":\"...\",\"checkoutUrl\":\"https://checkout.stripe.com/...\"}",
+        "note": "Returns a Stripe Checkout URL: a human pays it to fund the escrow. Nothing is charged from the agent."
+      },
+      {
+        "title": "Pay only after delivery",
+        "command": "pilotctl appstore call io.pilot.rentahuman rentahuman.confirm_delivery '{\"escrowId\":\"<escrowId>\"}'",
+        "expect": "{\"success\":true}",
+        "note": "Review the evidence first, then release_payment. cancel_escrow refunds; open_dispute if the work is wrong."
+      },
+      {
+        "title": "Recurring human QA of a URL",
+        "command": "pilotctl appstore call io.pilot.rentahuman rentahuman.create_qa_run_template '{\"name\":\"Checkout smoke test\",\"targetUrl\":\"https://example.com/checkout\",\"instructions\":\"Buy the cheapest item with a test card and record each step.\",\"cadence\":\"weekly\",\"budgetPerRunCents\":3000,\"payPerTesterCents\":1000,\"testerCount\":2}'",
+        "expect": "{\"success\":true,\"template\":{\"id\":\"...\",\"status\":\"active\"}}",
+        "note": "Needs wallet funds on your Rent A Human account. Read results with list_qa_runs and get_qa_run."
+      }
+    ],
+    "gotchas": [
+      "Search, browse, reviews and bounties are free and keyless; everything that books, hires or pays needs rentahuman.set_key first.",
+      "rent_human and book_service return a Stripe Checkout URL. A human pays it; the agent never holds card details.",
+      "Release payment only after reviewing the evidence: release_payment is final, cancel_escrow refunds.",
+      "Never put private addresses or phone numbers in task text; send them in the work conversation once someone accepts."
+    ],
+    "next": [
+      "io.pilot.rentahuman rentahuman.help '{}'"
+    ]
+  },
+  "next_steps": {
+    "schema": 1,
+    "app": "io.pilot.rentahuman",
+    "edges": [
+      {
+        "from": "*",
+        "on": "ok",
+        "match": "\"needs_signup\"\\s*:\\s*true",
+        "why": "this host has no Rent A Human key yet, so hiring, booking, escrow and QA cannot run",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.rentahuman rentahuman.set_key '{\"api_key\":\"rah_<32 hex>\"}'",
+            "why": "create the key at rentahuman.ai/account/api-keys, then save it here",
+            "kind": "gateway"
+          }
+        ]
+      },
+      {
+        "from": "rentahuman.search_humans",
+        "on": "ok",
+        "why": "you have candidate humanIds; look closer before hiring anyone",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.rentahuman rentahuman.get_human '{\"humanId\":\"<id>\"}'",
+            "why": "check rate, location and skills",
+            "kind": "flow"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.rentahuman rentahuman.get_reviews '{\"humanId\":\"<id>\"}'",
+            "why": "read what earlier clients said",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "rentahuman.rent_human",
+        "on": "ok",
+        "why": "the escrow exists but is unfunded until a human pays the checkout link",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.rentahuman rentahuman.get_my_rentals '{}'",
+            "why": "hand checkoutUrl to your human, then watch the rental's status",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "rentahuman.confirm_delivery",
+        "on": "ok",
+        "why": "delivery is confirmed; the worker is paid only when you release",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.rentahuman rentahuman.release_payment '{\"escrowId\":\"<escrowId>\"}'",
+            "why": "release once the evidence checks out; it is final",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "rentahuman.create_qa_run_template",
+        "on": "ok",
+        "why": "runs happen on the cadence you set; results land as QA runs",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.rentahuman rentahuman.list_qa_runs '{\"templateId\":\"<template id>\"}'",
+            "why": "find runs and open one with get_qa_run for evidence and findings",
+            "kind": "flow"
+          }
+        ]
+      }
+    ]
+  }
+}

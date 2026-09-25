@@ -1,0 +1,871 @@
+{
+  "product_demo": {
+    "skill": "io.pilot.kinetic",
+    "title": "Full usage demo",
+    "metered": false,
+    "when_to_use": "When you need to know what to charge and want it grounded in your own customers' answers: a price range, a specific price point, or which features carry the value.",
+    "quickstart": {
+      "goal": "Find out which study answers your question",
+      "command": "pilotctl appstore call io.pilot.kinetic kinetic.method_recommend '{\"decision\":\"price_range\"}'",
+      "expect": "{\"decision\":\"price_range\",\"recommended\":{\"study_type\":\"van_westendorp\",\"price_cents\":14900},\"why\":\"...\",\"alternatives\":[...]}",
+      "note": "Free, no token needed. decision is one of price_range, exact_price, feature_priorities, package_pricing — the methods answer different questions."
+    },
+    "examples": [
+      {
+        "title": "Save your API token",
+        "goal": "Every study, results and billing call needs it",
+        "command": "pilotctl appstore call io.pilot.kinetic kinetic.set_key '{\"api_key\":\"kp_live_<id>.<secret>\"}'",
+        "expect": "{\"ok\":true,\"key_field\":\"KINETIC_API_TOKEN\",\"api_key\":\"saved\"}",
+        "note": "Create the token on kineticpricing.com under Integrations. No account yet? kinetic.signup_start emails the holder a confirmation link."
+      },
+      {
+        "title": "Draft a study and preview it",
+        "goal": "Everything up to launch is free",
+        "command": "pilotctl appstore call io.pilot.kinetic kinetic.study_create '{\"Idempotency-Key\":\"<uuid>\",\"name\":\"Pro tier\",\"product_desc\":\"SaaS analytics for small teams\",\"segment_desc\":\"Founders at 5-50 person startups\",\"decision_type\":\"first_time\",\"currency\":\"USD\"}'",
+        "expect": "{\"id\":\"3572c965-...\",\"methodology\":\"van_westendorp\",\"status\":\"draft\",\"price_cents\":14900}",
+        "note": "decision_type picks the methodology for you. Every mutating call needs an Idempotency-Key."
+      },
+      {
+        "title": "Check the price before spending",
+        "command": "pilotctl appstore call io.pilot.kinetic kinetic.offer_list '{}'",
+        "expect": "{\"offers\":[{\"study_type\":\"van_westendorp\",\"price_cents\":14900}]}",
+        "note": "Launching costs $149-$199, paid by the account holder on Stripe."
+      },
+      {
+        "title": "Read computed results, not guesses",
+        "command": "pilotctl appstore call io.pilot.kinetic kinetic.results_get '{\"id\":\"stu_abc123\"}'",
+        "expect": "{\"optimal_price_point\":42,\"acceptable_range\":{\"low\":34,\"high\":58},\"n\":31}",
+        "note": "Call study_quality_get first: speeders make a clean number worthless."
+      }
+    ],
+    "gotchas": [
+      "Save your token first: kinetic.set_key {\"api_key\":\"kp_live_...\"}. Only method_list, method_recommend, offer_list and research work without one.",
+      "Everything except launching is free. The $149-$199 fee is paid by a human on Stripe.",
+      "Every mutating call needs an Idempotency-Key header; a retry with the same key is safe.",
+      "study_checkout_create returns a link and does NOT pay. Hand the URL to your human and stop.",
+      "You supply the respondents; Kinetic has no panel.",
+      "Check study_quality_get and progress before trusting a result."
+    ],
+    "next": [
+      "io.pilot.kinetic kinetic.help '{}'"
+    ]
+  },
+  "next_steps": {
+    "schema": 1,
+    "app": "io.pilot.kinetic",
+    "edges": [
+      {
+        "from": "*",
+        "on": "ok",
+        "match": "\"needs_signup\"\\s*:\\s*true",
+        "why": "this host has no Kinetic token yet, so study, results and billing calls cannot run",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.kinetic kinetic.set_key '{\"api_key\":\"kp_live_<id>.<secret>\"}'",
+            "why": "the account holder creates the token under Integrations on kineticpricing.com",
+            "kind": "gateway"
+          },
+          {
+            "cmd": "pilotctl appstore call io.pilot.kinetic kinetic.signup_start '{\"email\":\"<holder-email>\",\"authority_basis\":\"authorized_agent\"}'",
+            "why": "no account yet: Kinetic emails the holder a confirmation link",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "kinetic.method_recommend",
+        "on": "ok",
+        "why": "you now know which method answers your question, so create that study as a free draft",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.kinetic kinetic.study_create '{\"study_type\":\"van_westendorp\",\"name\":\"Pro tier pricing\"}'",
+            "why": "use the study_type the recommendation returned; drafting and editing are free",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "kinetic.study_create",
+        "on": "ok",
+        "why": "a draft costs nothing, so the next free step is reading the survey exactly as a respondent will see it",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.kinetic kinetic.survey_preview '{\"id\":\"<study-id>\"}'",
+            "why": "preview stores no respondent evidence, and once the study is live the questions are fixed",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "kinetic.study_checkout_create",
+        "on": "ok",
+        "why": "this returned a payment link and did not complete the purchase, so nothing moves until a human pays",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.kinetic kinetic.study_get '{\"id\":\"<study-id>\"}'",
+            "why": "give checkout_url to your human, wait for them to pay on Stripe, then poll here before launching",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "kinetic.results_get",
+        "on": "ok",
+        "why": "a clean-looking number can come from bad responses, so quality is worth checking before acting on it",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.kinetic kinetic.study_quality_get '{\"id\":\"<study-id>\"}'",
+            "why": "speeders and straight-liners make results worthless; also confirm progress cleared the minimum sample",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "kinetic.study_launch",
+        "on": "err",
+        "code": 402,
+        "why": "the study has not been paid for, so it cannot go live yet",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.kinetic kinetic.study_checkout_create '{\"study_id\":\"<study-id>\"}'",
+            "why": "returns a Stripe link for your human to pay; launch works once payment clears",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "kinetic.signup_start",
+        "on": "ok",
+        "why": "nothing exists until the holder clicks the emailed link",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.kinetic kinetic.signup_status '{\"id\":\"<attempt-id>\",\"attempt_token\":\"<attempt_token>\"}'",
+            "why": "poll until state is verified, then complete with the holder's consent",
+            "kind": "flow"
+          }
+        ]
+      },
+      {
+        "from": "kinetic.signup_complete",
+        "on": "ok",
+        "why": "the account exists but this host still has no API token",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.kinetic kinetic.set_key '{\"api_key\":\"kp_live_<id>.<secret>\"}'",
+            "why": "the holder creates a token under Integrations; save it here",
+            "kind": "flow"
+          }
+        ]
+      }
+    ]
+  },
+  "id": "io.pilot.kinetic",
+  "version": "1.0.1",
+  "namespace": "kinetic",
+  "description": "Run real pricing research with your own customers: pick the method that fits the decision, draft and preview the survey, collect responses, and read deterministic results with a narrative written from those numbers. Van Westendorp, Gabor-Granger, MaxDiff and choice-based conjoint.",
+  "email": "support@kineticpricing.com",
+  "backend": {
+    "base_url": "https://api.kineticpricing.com",
+    "auth": "byo",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer ${KINETIC_API_TOKEN}"
+      }
+    ]
+  },
+  "methods": [
+    {
+      "name": "kinetic.set_key",
+      "latency": "fast",
+      "signup": {
+        "step": "set_key",
+        "url": "https://kineticpricing.com",
+        "secret_key": "KINETIC_API_TOKEN"
+      },
+      "description": "Save the Kinetic API access token this host uses (format kp_live_<id>.<secret>). The account holder creates it on kineticpricing.com under Integrations, choosing its scopes. It is stored in $APP/secrets.json and sent on every call; calling again replaces it. Local, free. Call this before any study, results or billing method.",
+      "params": [
+        {
+          "name": "api_key",
+          "type": "string",
+          "required": true,
+          "description": "The kp_live_... token from Integrations on kineticpricing.com."
+        }
+      ]
+    },
+    {
+      "name": "kinetic.method_list",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/methods",
+        "public": true
+      },
+      "description": "List the pricing-research methods available, with each one's server-owned launch price in cents, methodology version, and sample-size guidance. Van Westendorp finds an acceptable price RANGE, Gabor-Granger tests exact price POINTS, MaxDiff ranks feature value, choice-based conjoint models trade-offs. Free, and the right first call when you do not yet know which study to run.",
+      "params": []
+    },
+    {
+      "name": "kinetic.method_recommend",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/methods/recommendation",
+        "public": true
+      },
+      "description": "Say which kind of pricing decision you face and get back the method that answers it, with the reason and the alternatives. Free, no token needed. Use this instead of guessing between Van Westendorp and Gabor-Granger: they answer different questions, and the wrong one produces a confident, useless number.",
+      "params": [
+        {
+          "name": "decision",
+          "type": "string",
+          "required": true,
+          "in": "body",
+          "description": "One of: price_range (what range can I charge), exact_price (which of these specific prices), feature_priorities (which features carry the value), package_pricing (how to package tiers)."
+        }
+      ]
+    },
+    {
+      "name": "kinetic.study_create",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/studies"
+      },
+      "description": "START HERE once you know the decision. Creates a draft study. You do NOT pick the method: Kinetic derives the methodology from decision_type (first_time and new_tier map to Van Westendorp today) and returns it on the study along with price_cents. Free — a draft costs nothing and is not launched. Returns {id, methodology, status:\"draft\", price_cents}.",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on every mutating call; a retry with the same key returns the original result instead of creating a second study.",
+          "in": "header"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "A name for the study.",
+          "in": "body"
+        },
+        {
+          "name": "product_desc",
+          "type": "string",
+          "required": true,
+          "description": "What you sell, in plain language, e.g. 'A SaaS analytics tool for small teams'.",
+          "in": "body"
+        },
+        {
+          "name": "segment_desc",
+          "type": "string",
+          "required": true,
+          "description": "Who you are pricing for, e.g. 'Founders at 5-50 person startups'.",
+          "in": "body"
+        },
+        {
+          "name": "decision_type",
+          "type": "string",
+          "required": true,
+          "description": "One of underpriced | new_tier | first_time | other. This is what selects the methodology, so it is the most consequential field on the call.",
+          "in": "body"
+        },
+        {
+          "name": "currency",
+          "type": "string",
+          "required": true,
+          "description": "ISO currency code, e.g. USD.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.study_prefill",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/studies/prefill"
+      },
+      "description": "Generate a draft study filled in from a description of your product and audience, so you edit a sensible starting point rather than an empty form. Free.",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "What you sell and to whom, in plain language.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.study_get",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/studies/{study_id}"
+      },
+      "description": "Read one study: its configuration, state, and position in the lifecycle. Free.",
+      "params": [
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.study_list",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/studies"
+      },
+      "description": "List your studies with their states. Free.",
+      "params": []
+    },
+    {
+      "name": "kinetic.study_update",
+      "latency": "med",
+      "http": {
+        "verb": "PATCH",
+        "path": "/v1/studies/{study_id}"
+      },
+      "description": "Edit a draft study: name, prices, features, audience and question configuration. Only the fields you send change. Free, and only valid before launch.",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.study_duplicate",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/studies/{study_id}/duplicate"
+      },
+      "description": "Copy an existing study into a new draft, to run the same design against a different audience or set of prices. Free.",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study to copy.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.survey_regenerate",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/studies/{study_id}/survey/regenerate"
+      },
+      "description": "Regenerate the respondent-facing survey from the study's current configuration after editing it. Free.",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.survey_preview",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/studies/{study_id}/preview"
+      },
+      "description": "Read the survey exactly as a respondent will see it, WITHOUT storing any respondent evidence. Free. Always preview before launching: once a study is live the questions are fixed, and a bad question wastes the whole sample.",
+      "params": [
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.study_launch",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/studies/{study_id}/launch"
+      },
+      "description": "Take a draft live so it can collect responses. COSTS MONEY: the launch price comes from kinetic.method_list (currently $149-$199 by method) and must be paid first via kinetic.study_checkout_create. Confirm with your human before calling. Once live the questions are fixed.",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.respondent_link_get",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/studies/{study_id}/respondent-link"
+      },
+      "description": "Get the link to send to your customers or prospects. THEY are the respondents: Kinetic supplies no panel, so the quality of the answer depends on who you send this to. Free.",
+      "params": [
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.study_progress_get",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/studies/{study_id}/progress"
+      },
+      "description": "How many responses have arrived against the recommended sample size. Free. Poll after launch; results are only meaningful once you clear the method's recommended minimum.",
+      "params": [
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.study_quality_get",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/studies/{study_id}/quality"
+      },
+      "description": "Response-quality signals: speeders, straight-liners, and other patterns meaning a response should not be trusted. Free. Check this before believing the results.",
+      "params": [
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.study_close",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/studies/{study_id}/close"
+      },
+      "description": "Stop collecting responses and finalize the study so results can be computed. Free.",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.results_get",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/studies/{study_id}/results"
+      },
+      "description": "The deterministic results: numbers Kinetic's analysis engine computed from the responses, not a model's opinion of them. Free. This is the output you act on.",
+      "params": [
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.evidence_get",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/studies/{study_id}/evidence"
+      },
+      "description": "The structured respondent evidence behind the results, so a number can be traced to the answers that produced it. Free.",
+      "params": [
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.narrative_generate",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/studies/{study_id}/narrative"
+      },
+      "description": "Generate a written explanation of the results. The narrative is written FROM the deterministic results, so it explains the computed numbers rather than inventing them. Free.",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.narrative_get",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/studies/{study_id}/narrative"
+      },
+      "description": "Read a previously generated narrative. Free.",
+      "params": [
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.results_export_csv",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/studies/{study_id}/exports/csv"
+      },
+      "description": "Export results and responses as CSV for analysis elsewhere. Free.",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The study id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.offer_list",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/billing/offers",
+        "public": true
+      },
+      "description": "List what is purchasable and what it costs: one-time study prices and Kinetic Pro plans. Free, and the honest place to check a price before committing to a spend.",
+      "params": []
+    },
+    {
+      "name": "kinetic.study_checkout_create",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/billing/checkouts/study"
+      },
+      "description": "Start payment for a draft study. Returns {checkout_url, study_id, amount_cents} and does NOT complete the purchase. A human must open checkout_url and pay on Stripe's hosted page; hand them the link and stop. Once paid, kinetic.study_launch will work. Confirm the amount with your human first.",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "study_id",
+          "type": "string",
+          "required": true,
+          "description": "The draft study to pay for.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.teardown_create",
+      "latency": "slow",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/teardowns"
+      },
+      "description": "Run a teardown of a public pricing page and get a structured read of how it is constructed. Free.",
+      "params": [
+        {
+          "name": "Idempotency-Key",
+          "type": "string",
+          "required": true,
+          "description": "Any unique string per distinct request, e.g. a UUID. Required on mutating calls; a retry with the same key returns the original result rather than repeating the operation.",
+          "in": "header"
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "required": false,
+          "description": "The pricing page URL to tear down.",
+          "in": "body"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.teardown_get",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/teardowns/{teardown_id}"
+      },
+      "description": "Read a completed teardown. Free.",
+      "params": [
+        {
+          "name": "teardown_id",
+          "type": "string",
+          "required": true,
+          "description": "The teardown id.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.research_list",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/research",
+        "public": true
+      },
+      "description": "Browse Kinetic's published pricing research. Free.",
+      "params": []
+    },
+    {
+      "name": "kinetic.research_get",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/research/{slug}",
+        "public": true
+      },
+      "description": "Read one published research piece. Free.",
+      "params": [
+        {
+          "name": "slug",
+          "type": "string",
+          "required": true,
+          "description": "The research slug from kinetic.research_list.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.task_get",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/tasks/{task_id}"
+      },
+      "description": "Poll a long-running task (prefill, teardown, export) for completion. Free.",
+      "params": [
+        {
+          "name": "task_id",
+          "type": "string",
+          "required": true,
+          "description": "The task id returned by the operation that started it.",
+          "in": "path"
+        }
+      ]
+    },
+    {
+      "name": "kinetic.signup_start",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/signup-attempts",
+        "public": true
+      },
+      "description": "No Kinetic account yet? Start agent-assisted signup: Kinetic emails the account holder a confirmation link and returns an attempt id plus an attempt_token shown ONCE — keep both. The account only exists after the holder clicks the link and you call kinetic.signup_complete with their consent. Free.",
+      "params": [
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "description": "The account holder's email; the confirmation link goes there."
+        },
+        {
+          "name": "authority_basis",
+          "type": "string",
+          "required": true,
+          "description": "\"self\" if the holder is signing up themselves, \"authorized_agent\" if you act for them."
+        }
+      ]
+    },
+    {
+      "name": "kinetic.signup_status",
+      "latency": "fast",
+      "http": {
+        "verb": "GET",
+        "path": "/v1/signup-attempts/{id}",
+        "public": true
+      },
+      "description": "Check a signup attempt: pending_verification until the holder clicks the emailed link, then verified, then completed (or expired). Free.",
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "The attempt id from kinetic.signup_start.",
+          "in": "path"
+        },
+        {
+          "name": "attempt_token",
+          "type": "string",
+          "required": true,
+          "description": "The attempt_token from kinetic.signup_start."
+        }
+      ]
+    },
+    {
+      "name": "kinetic.signup_complete",
+      "latency": "med",
+      "http": {
+        "verb": "POST",
+        "path": "/v1/signup-attempts/{id}/complete",
+        "public": true
+      },
+      "description": "Create the account once signup_status is verified. Pass terms_accepted=true ONLY with the account holder's actual consent to Kinetic's terms. The holder then creates an API token under Integrations and you save it with kinetic.set_key. Free.",
+      "params": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "The attempt id.",
+          "in": "path"
+        },
+        {
+          "name": "attempt_token",
+          "type": "string",
+          "required": true,
+          "description": "The attempt_token from kinetic.signup_start."
+        },
+        {
+          "name": "terms_accepted",
+          "type": "boolean",
+          "required": true,
+          "description": "Must be true, and only with the holder's consent."
+        }
+      ]
+    }
+  ],
+  "listing": {
+    "display_name": "Kinetic Pricing",
+    "tagline": "Decide what to charge, using answers from your own customers rather than a guess.",
+    "app_description": "**Bring your own Kinetic token.** Create an API access token under Integrations on kineticpricing.com and save it once with `kinetic.set_key`. No account yet? `kinetic.signup_start` emails the account holder a confirmation link; after they confirm, `kinetic.signup_complete` creates the account. `method_list`, `method_recommend`, `offer_list` and the research library work without a token.\n\nKinetic Pricing runs real pricing research end to end: choose the method that fits the decision, draft and preview the survey, send a link to your own customers, and read results computed by an analysis engine rather than asserted by a model.\n\n**Pick the right method or the answer is worthless.** `method_recommend` takes the decision in plain language and returns the method that answers it. Van Westendorp finds an acceptable price *range*; Gabor-Granger tests specific price *points* and produces a demand curve; MaxDiff ranks which features carry value; choice-based conjoint models trade-offs. Asking the wrong one produces a confident, useless number.\n\n**Everything up to launch is free.** Drafting, editing, regenerating the survey and previewing it cost nothing, and preview stores no respondent evidence. Launching costs $149-$199 depending on method, and that fee is paid by the account holder on Stripe's hosted page. `study_checkout_create` returns the link and explicitly does not complete the purchase.\n\n**You supply the respondents.** Kinetic has no panel. `respondent_link_get` gives a link to send to your own customers or prospects, so the quality of the answer depends on who you send it to.\n\n**The numbers are computed, not narrated.** `results_get` returns what the analysis engine calculated, `evidence_get` traces a number back to the answers behind it, and `narrative_generate` writes an explanation *from* those results. Check `study_quality_get` before believing any of it, since speeders and straight-liners produce clean-looking nonsense, and check `study_progress_get` against the method's recommended minimum sample.\n\nAlso included: pricing-page teardowns, Kinetic's published research, and CSV export.",
+    "license": "Proprietary",
+    "homepage": "https://kineticpricing.com",
+    "source_url": "https://kineticpricing.com",
+    "categories": [
+      "business",
+      "analytics",
+      "research"
+    ],
+    "keywords": [
+      "pricing",
+      "willingness to pay",
+      "van westendorp",
+      "gabor granger",
+      "maxdiff",
+      "conjoint",
+      "market research",
+      "saas pricing"
+    ]
+  },
+  "vendor": {
+    "name": "Kinetic Pricing",
+    "url": "https://kineticpricing.com",
+    "contact": "support@kineticpricing.com",
+    "agent_usage": "An agent starts with kinetic.method_recommend, describing the pricing decision in plain language, because Van Westendorp and Gabor-Granger answer different questions. It creates a free draft with kinetic.study_create, or kinetic.study_prefill from a product description, edits it with kinetic.study_update, and reads it exactly as a respondent will with kinetic.survey_preview, which stores no evidence. Launching costs money: kinetic.offer_list gives the price, kinetic.study_checkout_create returns a Stripe link a human must open and pay, and only then does kinetic.study_launch succeed. The agent hands the link from kinetic.respondent_link_get to its human to distribute, since Kinetic supplies no panel. It polls kinetic.study_progress_get until the recommended minimum sample is cleared, checks kinetic.study_quality_get for speeders and straight-liners, then reads kinetic.results_get for the deterministic numbers, kinetic.evidence_get to trace them, and kinetic.narrative_generate for an explanation written from those results.",
+    "capabilities": "method_list and method_recommend: choose the study that actually answers the pricing decision.\nstudy_create, study_prefill, study_update, study_duplicate: build and edit a draft, free until launch.\nsurvey_preview and survey_regenerate: read the survey as a respondent will, storing no evidence.\noffer_list and study_checkout_create: see the price and get a Stripe link a human pays; the call does not complete the purchase.\nstudy_launch and study_close: take a paid study live and finalize it.\nrespondent_link_get: the link you send to your own customers, since there is no panel.\nstudy_progress_get and study_quality_get: sample progress, and the speeder and straight-liner signals that decide whether results mean anything.\nresults_get, evidence_get, narrative_generate, results_export_csv: computed results, the answers behind them, a written explanation, and CSV.\nteardown_create and research_list: pricing-page teardowns and Kinetic's published research."
+  }
+}
