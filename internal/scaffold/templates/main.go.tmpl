@@ -33,6 +33,7 @@ import (
 {{- if or .Backend.Headers (eq .Backend.Type "http")}}
 	"strings"
 {{- end}}
+	"sync"
 	"syscall"
 	"time"
 
@@ -41,6 +42,14 @@ import (
 )
 
 func main() {
+{{- if or (eq .Backend.Type "cli") (eq .Backend.Type "hybrid")}}
+	// This binary doubles as the guard that stops in-flight CLI children if
+	// the adapter is killed (backend/childguard.go); that mode takes no flags.
+	if backend.IsChildGuard(os.Args) {
+		backend.ChildGuardMain()
+		return
+	}
+{{- end}}
 	// Captured first, before anything slow (asset staging), so a parent that
 	// dies while we start up is still noticed by watchParent.
 	parentPID := os.Getppid()
@@ -68,6 +77,16 @@ func main() {
 		log.Fatal("{{.BinaryName}}: --socket is required (the pilot daemon supplies it)")
 	}
 
+	// Installed before any startup work (asset staging can take a while on
+	// first spawn) so a stop during startup is handled too: staging is
+	// cancelled and cleans up instead of the default SIGTERM action killing
+	// the process mid-download.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	ctx, parentGone := context.WithCancel(ctx)
+	defer parentGone()
+	go watchParent(ctx, parentPID, parentGone)
+
 {{- if eq .Backend.Type "http"}}
 	cfg := resolveConfig(*manifestPath)
 {{- if or .Managed .HasBrokerSignup}}
@@ -89,15 +108,12 @@ func main() {
 		appDir = filepath.Dir(*manifestPath)
 	}
 {{- if .HasAssets}}
-	stagedCmd, err := backend.StageAssets(appDir)
-	if err != nil {
-		log.Fatalf("{{.BinaryName}}: install assets: %v", err)
-	}
-	base := {{printf "%#v" .Backend.Command}}
-	if stagedCmd != "" {
-		base[0] = stagedCmd
-	}
-	runner := backend.NewRunner(base{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+	// Assets are staged in the background (see backend/stage.go): the socket
+	// must appear within the supervisor's readiness window, which a first-start
+	// download does not fit in. Local calls wait for the binary.
+	stager := backend.NewStager(ctx, appDir)
+	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+	runner.SetCommandResolver(stager.Command)
 {{- else}}
 	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
 {{- end}}
@@ -109,20 +125,17 @@ func main() {
 {{- if .HasAssets}}
 	// Native delivery: fetch this host's binaries from the Pilot R2 artifact
 	// registry (verify sha → stage under $APP → run ordered install args) and
-	// exec the staged path, not an assumed-installed command. See backend/stage.go.
+	// exec the staged path, not an assumed-installed command. Staging runs in the
+	// background (see backend/stage.go): the socket must appear within the
+	// supervisor's readiness window, which a first-start download does not fit
+	// in. Help answers at once; a call that needs the binary waits for it.
 	appDir := os.Getenv("APP")
 	if *manifestPath != "" {
 		appDir = filepath.Dir(*manifestPath)
 	}
-	stagedCmd, err := backend.StageAssets(appDir)
-	if err != nil {
-		log.Fatalf("{{.BinaryName}}: install assets: %v", err)
-	}
-	base := {{printf "%#v" .Backend.Command}}
-	if stagedCmd != "" {
-		base[0] = stagedCmd
-	}
-	runner := backend.NewRunner(base{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+	stager := backend.NewStager(ctx, appDir)
+	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
+	runner.SetCommandResolver(stager.Command)
 {{- else}}
 	runner := backend.NewRunner({{printf "%#v" .Backend.Command}}{{range .Backend.EnvPassthrough}}, {{printf "%q" .}}{{end}})
 {{- end}}
@@ -137,14 +150,18 @@ func main() {
 	registerHandlers(d, runner, readAppVersion(*manifestPath))
 {{- end}}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	ctx, parentGone := context.WithCancel(ctx)
-	defer parentGone()
-	go watchParent(ctx, parentPID, parentGone)
-
-	if err := serve(ctx, *socket, d); err != nil {
-		log.Fatalf("{{.BinaryName}}: serve: %v", err)
+	serveErr := serve(ctx, *socket, d)
+{{- if and (ne .Backend.Type "http") .HasAssets}}
+	// serve also returns on a listen error: stop staging either way, and let an
+	// interrupted download remove its partial file before the process exits.
+	parentGone()
+	stager.Wait(5 * time.Second)
+{{- end}}
+{{- if or (eq .Backend.Type "cli") (eq .Backend.Type "hybrid")}}
+	backend.CloseChildGuard(2 * time.Second)
+{{- end}}
+	if serveErr != nil {
+		log.Fatalf("{{.BinaryName}}: serve: %v", serveErr)
 	}
 }
 
@@ -204,12 +221,23 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 		_ = ln.Close() // unblocks Accept
 	}()
 
+	// Live connections, so shutdown can wait for in-flight calls: their ctx is
+	// cancelled with ours, which makes the backend kill any CLI child it is
+	// running. Returning before those handlers finish would exit the process
+	// with the child still alive (reparented to init).
+	var (
+		mu    sync.Mutex
+		conns = map[net.Conn]struct{}{}
+		wg    sync.WaitGroup
+	)
+
 	log.Printf("{{.BinaryName}}: listening on %s", socketPath)
 	var backoff time.Duration
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
+				drain(&mu, conns, &wg)
 				return nil // clean shutdown
 			}
 			// Running out of descriptors is transient (in-flight calls give
@@ -220,6 +248,7 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 				log.Printf("{{.BinaryName}}: accept: %v; retrying in %s", err, backoff)
 				select {
 				case <-ctx.Done():
+					drain(&mu, conns, &wg)
 					return nil
 				case <-time.After(backoff):
 				}
@@ -228,7 +257,19 @@ func serve(ctx context.Context, socketPath string, d *ipc.Dispatcher) error {
 			return fmt.Errorf("accept: %w", err)
 		}
 		backoff = 0
-		go serveConn(ctx, conn, d)
+		mu.Lock()
+		conns[conn] = struct{}{}
+		mu.Unlock()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				mu.Lock()
+				delete(conns, conn)
+				mu.Unlock()
+			}()
+			serveConn(ctx, conn, d)
+		}()
 	}
 }
 
@@ -267,6 +308,28 @@ func serveConn(ctx context.Context, conn net.Conn, d *ipc.Dispatcher) {
 		log.Printf("{{.BinaryName}}: conn closed with error: %v", err)
 	}
 	_ = pr.Close() // Serve returned first (shutdown): release the copier
+}
+
+// shutdownGrace bounds how long shutdown waits for in-flight calls to unwind
+// (a cancelled CLI child is SIGKILLed at once; its pipes get backend.killGrace).
+const shutdownGrace = 8 * time.Second
+
+// drain closes every open connection (unblocking idle reads; a handler that is
+// still running keeps going until its cancelled work returns) and waits, up to
+// shutdownGrace, for all connection goroutines to finish.
+func drain(mu *sync.Mutex, conns map[net.Conn]struct{}, wg *sync.WaitGroup) {
+	mu.Lock()
+	for c := range conns {
+		_ = c.Close()
+	}
+	mu.Unlock()
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(shutdownGrace):
+		log.Printf("{{.BinaryName}}: shutdown: in-flight calls still running after %s", shutdownGrace)
+	}
 }
 
 // registerHandlers wires each IPC method to its backend call. Method names MUST

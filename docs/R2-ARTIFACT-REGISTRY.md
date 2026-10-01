@@ -39,11 +39,14 @@ set install order + args              fold into the bundle tarball          fetc
    (`proc.exec`, `fs.write $APP`, `net.dial <r2-host>`). The whole tarball is
    sha-pinned in the catalogue, so `install.json` (and the expected asset shas)
    can't be altered undetected.
-4. **Install + call** (host). The generated cli adapter calls `StageAssets($APP)`
-   on first spawn (`internal/backend/stage.go`): read `install.json` → select the
-   asset(s) for `runtime.GOOS/GOARCH` → in ascending `order`, fetch from R2,
-   verify sha256, stage under `$APP` (single file, or `tar.gz` extracted via the
-   host `tar`), run any install `args` — then exec the staged `exec_path` per call.
+4. **Install + call** (host). The generated cli adapter stages its assets on
+   first spawn (`internal/backend/stage.go`, `NewStager` → `StageAssetsContext`),
+   in the background while it already serves: read `install.json` → select the
+   asset(s) for `runtime.GOOS/GOARCH` → in ascending `order`, fetch from R2 into
+   `$APP/.staged/tmp`, verify sha256, stage under `$APP` (single file, or `tar.gz`
+   extracted via the host `tar`), run any install `args` — then exec the staged
+   `exec_path` per call. A call that arrives before staging is done waits for it
+   within its own deadline; a failed download is retried by a later call.
 
 ## R2 layout
 
