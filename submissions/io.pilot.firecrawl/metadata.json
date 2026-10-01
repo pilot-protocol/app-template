@@ -3,12 +3,11 @@
   "id": "io.pilot.firecrawl",
   "display_name": "Firecrawl",
   "tagline": "Turn any website into clean, LLM-ready data",
-  "description_md": "**Firecrawl** turns any website into clean, LLM-ready data. This app exposes the\n**complete Firecrawl v2 API** — all 50 operations — as Pilot app-store methods,\ngenerated 1:1 from Firecrawl's published OpenAPI spec.\n\nYou do not need a Firecrawl account, an API key, an inbox, or a browser. The app is\nkeyless: Pilot's broker verifies your agent identity, meters your usage, and\nauthenticates upstream on your behalf. Install and call.\n\n**What you get**\n\n- **Scrape** — one URL to clean markdown, HTML, links, screenshots, or schema-shaped\n  JSON. Handles JS-heavy pages, PDFs and Office documents, geo/proxy emulation,\n  ad-blocking, and PII redaction.\n- **Search** — web, news, and image search with query-relevant highlights, domain\n  and time filters, and optional full scraping of every result in the same call.\n- **Map** — enumerate every URL on a domain in about a second. The cheap way to scope\n  a crawl before you pay for one.\n- **Crawl** — async whole-site extraction with include/exclude path regexes, depth and\n  page limits, subdomain and external-link control, robots.txt handling, and webhooks.\n  Describe the crawl in plain English and preview the generated options for free.\n- **Batch scrape** — many known URLs in one job, with per-URL error reporting.\n- **Extract** — LLM-powered structured extraction across many pages against your JSON\n  Schema, optionally with web search and source citations.\n- **Agent** — autonomous web research. Give a prompt and a credit ceiling; the agent\n  decides where to go and returns structured data.\n- **Interact** — drive a real browser with Playwright or natural language, either bound\n  to a scrape job or as a standalone session with persistent profile storage.\n- **Monitor** — recurring checks on pages, whole sites, or web-wide searches, with an AI\n  judge that filters noise against a plain-language goal, and webhook/email/Slack alerts.\n- **Research index** — search scientific papers, read their full-text passages, expand to\n  related work, and search GitHub issues, PRs, and READMEs.\n- **Support** — `firecrawl.ask` diagnoses a failing job from your account's logs, and\n  `firecrawl.docs_search` answers Firecrawl questions with citations.\n- **Usage** — credits, tokens, queue depth, and recent activity, so an agent can check\n  cost and capacity before committing to an expensive call.\n\n**Start with `firecrawl.help`** — it returns every method with its full parameter set,\nlatency class, and measured roundtrip.\n\n**Cost control.** `firecrawl.crawl` takes `limit` and `firecrawl.agent` takes\n`maxCredits`; both default high. Set them. `firecrawl.map` and\n`firecrawl.crawl_params_preview` are the cheap ways to scope work before you spend.\nCheck `firecrawl.credit_usage` and `firecrawl.balance` before a large job.\n\n**Not exposed:** `POST /v2/parse` (upload a local file for parsing) takes\n`multipart/form-data`, which the JSON-in/JSON-out app-store IPC contract cannot\nexpress. Use `firecrawl.scrape` on a public document URL instead — it parses PDF,\nDOCX, XLSX and friends natively.\n",
+  "description_md": "**Firecrawl** turns any website into clean, LLM-ready data. This app exposes the\n**complete Firecrawl v2 API** — all 50 operations — as Pilot app-store methods,\ngenerated 1:1 from Firecrawl's published OpenAPI spec.\n\n**Run `firecrawl.signup` once.** It provisions a real mailbox for your Pilot identity,\nregisters it with Firecrawl, and caches the returned API key locally — no email to\nsupply, no browser, no human step. From then on every method authenticates\nautomatically against **your own Firecrawl account**: your own 10,000 credits, your own\nrate and concurrency limits, your own jobs. Nothing is shared with other Pilot users.\n\nCalling `firecrawl.signup` accepts [Firecrawl's Terms of\nService](https://www.firecrawl.dev/terms-of-service); the acceptance is recorded against\nyour Pilot identity with a timestamp, and `firecrawl.account` shows it back to you.\n\n**What you get**\n\n- **Scrape** — one URL to clean markdown, HTML, links, screenshots, or schema-shaped\n  JSON. Handles JS-heavy pages, PDFs and Office documents, geo/proxy emulation,\n  ad-blocking, and PII redaction.\n- **Search** — web, news, and image search with query-relevant highlights, domain\n  and time filters, and optional full scraping of every result in the same call.\n- **Map** — enumerate every URL on a domain in about a second. The cheap way to scope\n  a crawl before you pay for one.\n- **Crawl** — async whole-site extraction with include/exclude path regexes, depth and\n  page limits, subdomain and external-link control, robots.txt handling, and webhooks.\n  Describe the crawl in plain English and preview the generated options for free.\n- **Batch scrape** — many known URLs in one job, with per-URL error reporting.\n- **Extract** — LLM-powered structured extraction across many pages against your JSON\n  Schema, optionally with web search and source citations.\n- **Agent** — autonomous web research. Give a prompt and a credit ceiling; the agent\n  decides where to go and returns structured data.\n- **Interact** — drive a real browser with Playwright or natural language, either bound\n  to a scrape job or as a standalone session with persistent profile storage.\n- **Monitor** — recurring checks on pages, whole sites, or web-wide searches, with an AI\n  judge that filters noise against a plain-language goal, and webhook/email/Slack alerts.\n- **Research index** — search scientific papers, read their full-text passages, expand to\n  related work, and search GitHub issues, PRs, and READMEs.\n- **Support** — `firecrawl.ask` diagnoses a failing job from your account's logs, and\n  `firecrawl.docs_search` answers Firecrawl questions with citations.\n- **Usage** — credits, tokens, queue depth, and recent activity, so an agent can check\n  cost and capacity before committing to an expensive call.\n\n**Start with `firecrawl.help`** — it returns every method with its full parameter set,\nlatency class, and measured roundtrip.\n\n**Cost control.** `firecrawl.crawl` takes `limit` and `firecrawl.agent` takes\n`maxCredits`; both default high. Set them — a crawl bills per page. `firecrawl.map` and\n`firecrawl.crawl_params_preview` are the cheap ways to scope work before you spend.\nCheck `firecrawl.credit_usage` before a large job. Your starting credits expire 3 months\nafter signup and are granted once per identity.\n\n**Not exposed:** `POST /v2/parse` (upload a local file for parsing) takes\n`multipart/form-data`, which the JSON-in/JSON-out app-store IPC contract cannot\nexpress. Use `firecrawl.scrape` on a public document URL instead — it parses PDF,\nDOCX, XLSX and friends natively.\n",
   "vendor": {
     "name": "Firecrawl",
     "url": "https://firecrawl.dev",
-    "contact": "apps@pilotprotocol.network",
-    "publisher_pubkey": "ed25519:65ICQnQrQIPNc6nHARupXf+J7B8pYOXq29kCMqqHRsQ="
+    "contact": "apps@pilotprotocol.network"
   },
   "homepage": "https://firecrawl.dev",
   "source_url": "https://github.com/pilot-protocol/firecrawl-app",
@@ -32,16 +31,24 @@
     "browser"
   ],
   "size": {
-    "bundle_bytes": 4901773,
-    "installed_bytes": 8999266
+    "bundle_bytes": 0,
+    "installed_bytes": 0
   },
   "compat": {
-    "min_pilot_version": "1.10.0",
+    "min_pilot_version": "1.0.0",
     "runtimes": [
       "go"
     ]
   },
   "methods": [
+    {
+      "name": "firecrawl.signup",
+      "summary": "Get your OWN Firecrawl account and API key in one call — no email, no browser, no human step. Provisions a real mailbox for your Pilot identity, registers it with Firecrawl, and caches the returned key so every other firecrawl.* method authenticates automatically. Idempotent: one account per Pilot identity, so a repeat call returns the same one. You get your own credit balance and your own concurrency limit — nothing is shared with other Pilot users. BY CALLING THIS YOU ACCEPT FIRECRAWL'S TERMS OF SERVICE (https://www.firecrawl.dev/terms-of-service); the acceptance is recorded against your Pilot identity with a timestamp. Run it ONCE before anything else."
+    },
+    {
+      "name": "firecrawl.account",
+      "summary": "Show your Firecrawl account — the mailbox provisioned for you, a signed_up flag, and when you accepted Firecrawl's terms. Local, instant, free (reads $APP/secrets.json; no backend call). If signed_up is false, call firecrawl.signup first."
+    },
     {
       "name": "firecrawl.scrape",
       "summary": "Scrape one URL into clean LLM-ready markdown (or html/links/screenshot/json)."
@@ -239,19 +246,15 @@
       "summary": "Replace the account's threat-protection policy. Full-document update — unspecified fields reset to defaults."
     },
     {
-      "name": "firecrawl.balance",
-      "summary": "Your remaining Pilot budget for this app, read free from the broker's per-user credit ledger — returns {\"balance\":\"$X.XX\",\"credits_remaining\":\u003cmicro-$\u003e,\"credits_seed\":\u003cmicro-$\u003e,\"unit\":\"micro_usd\",\"scope\":\"per-pilot-user\"}. This is YOUR budget, not the shared account's. No partner API call, no charge, and never a 402. The same figure also rides on the X-Pilot-Credits-Remaining header of every metered response; call this when you just want to check what's left before a spend."
-    },
-    {
       "name": "firecrawl.help",
       "summary": "Discovery: every method with params, kind, and latency class."
     }
   ],
   "changelog": [
     {
-      "version": "0.1.0",
+      "version": "0.2.0",
       "notes": [
-        "Released v0.1.0"
+        "Released v0.2.0"
       ]
     }
   ],
