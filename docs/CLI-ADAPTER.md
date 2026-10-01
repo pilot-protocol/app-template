@@ -48,9 +48,10 @@ The generated `exec.go` is defensive by default:
   OOM the adapter; truncation is flagged in the reply.
 - **Structured failures** — a non-zero exit is returned as
   `{"stdout","stderr","exit","truncated"}` rather than an opaque error, so the
-  caller sees everything the CLI produced. Only spawn failures (binary missing)
-  and timeouts surface as IPC errors; the per-method `timeout`/`duration` bounds
-  the run and the child is killed on cancel (SIGTERM, then SIGKILL after 5 s).
+  caller sees everything the CLI produced. Spawn failures (binary missing),
+  timeouts and a child ended by a signal surface as IPC errors, never as
+  `{"exit":-1}`; the per-method `timeout`/`duration` bounds the run and the
+  child is killed on cancel (SIGTERM, then SIGKILL after 5 s).
 - **Children never outlive the adapter** — a child still running when the
   adapter goes away is stopped, however it goes: a SIGTERM waits for in-flight
   calls (and so their children); a dead supervisor makes the adapter shut down
@@ -65,6 +66,14 @@ The generated `exec.go` is defensive by default:
   `$APP/.staged/tmp`, not the shared `TMPDIR`; a stop during the first-spawn
   download removes the partial file, and a SIGKILLed start's leftover is swept
   by the next start.
+- **Ready before the binary** — an app that ships its binary (`assets`) listens
+  at once and stages the binary in the background: the supervisor waits only a
+  few seconds for the socket (and never marks a later one ready), and
+  `<ns>.help` needs no binary. A call that needs it waits within its own
+  deadline. A failed download is reported per call and retried by a later call
+  (backing off from 2 s to 5 min) instead of exiting, so a first start without
+  network recovers without a respawn. `tar` and install steps get the same
+  parent-death signal as CLI calls.
 
 ## Why HTTP works today and CLI doesn't
 
