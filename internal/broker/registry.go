@@ -306,6 +306,19 @@ func (a *AppEntry) allowed(method, path string) bool {
 	return false
 }
 
+// tenancyPatterns returns the templated allow paths a request's path params are
+// bound against for tenancy. A request that hits a LITERAL allow entry is a
+// static route with no resource id in its path — e.g. GET /v1/agents/voices
+// declared beside GET /v1/agents/{agent_id}. Binding it against the sibling
+// template would read "voices" as an agent id, find no owner, and refuse a
+// route the registry explicitly allows. Query and body refs are still checked.
+func (a *AppEntry) tenancyPatterns(method, path string) [][]string {
+	if a.allowSet[costKey(strings.ToUpper(method), path)] || a.allowSet[costKey("", path)] {
+		return nil
+	}
+	return a.allowSegs
+}
+
 // allowPattern is a templated allow entry; method "" matches any verb.
 type allowPattern struct {
 	method string
