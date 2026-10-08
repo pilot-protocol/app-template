@@ -1,0 +1,32 @@
+name: rotate-wallet-publisher
+
+# One-off, admin-approved rotation of io.pilot.wallet's publisher pin
+# (2026-10-08). The key the catalogue pinned (ed25519:VF8fdEP…) is held by
+# no workflow, so wallet 0.4.0 could not be signed with it. This re-points
+# the pin to the new wallet key and opens the catalogue PR, re-signed with
+# CATALOG_SIGN_KEY (publish.RotatePublisher, as /admin/rotate-key does).
+# The app id and the key are fixed here so the workflow cannot re-pin
+# anything else; delete this file once the rotation has merged.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rotate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Rotate io.pilot.wallet's publisher pin
+        env:
+          CATALOG_PUBLISH_TOKEN: ${{ secrets.CATALOG_PUBLISH_TOKEN }}
+          CATALOG_SIGN_KEY: ${{ secrets.CATALOG_SIGN_KEY }}
+        run: |
+          go run ./cmd/rotate-publisher \
+            -id io.pilot.wallet \
+            -publisher 'ed25519:xAD0ai5GYWo8v0cmdhytZYRjSbi2edgEthWkBnO+1ik='
