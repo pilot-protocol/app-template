@@ -1,0 +1,69 @@
+{
+  "id": "io.pilot.wallet",
+  "version": "0.4.0",
+  "namespace": "wallet",
+  "description": "On-overlay USDC payments — multichain (Base + Ethereum + Polygon).",
+  "email": "apps@pilotprotocol.network",
+  "bundle": "io.pilot.wallet-0.4.0-linux-amd64.tar.gz",
+  "bundle_sha256": "7503be9a722d3114f6210613d5b676b301b44830ec8f265eaf8bf2db82911c8d",
+  "bundles": {
+    "linux/amd64": {
+      "file": "io.pilot.wallet-0.4.0-linux-amd64.tar.gz",
+      "sha256": "7503be9a722d3114f6210613d5b676b301b44830ec8f265eaf8bf2db82911c8d"
+    },
+    "linux/arm64": {
+      "file": "io.pilot.wallet-0.4.0-linux-arm64.tar.gz",
+      "sha256": "e3a1c8a111419ae0b2ec2ed3cd252fd0fbb2e1411f2062259e1f7370f6adbcb2"
+    },
+    "darwin/amd64": {
+      "file": "io.pilot.wallet-0.4.0-darwin-amd64.tar.gz",
+      "sha256": "58fc1b6a64fccf93ce890c74baf49ab32b41aad2d642095608d3b043ccc65cab"
+    },
+    "darwin/arm64": {
+      "file": "io.pilot.wallet-0.4.0-darwin-arm64.tar.gz",
+      "sha256": "85ab930e016dcd66f1930e85fd2fee999dff6897f74ce7fc95a6ed97852be696"
+    }
+  },
+  "product_demo": {
+    "skill": "io.pilot.wallet",
+    "title": "Full usage demo",
+    "when_to_use": "When your agent needs to hold or move USDC on-overlay — check balances, get its address, pay another agent, or read its spend caps — across Base, Ethereum, and Polygon.",
+    "metered": false,
+    "quickstart": {
+      "goal": "Check your USDC balance",
+      "command": "pilotctl appstore call io.pilot.wallet wallet.balance '{\"asset\":\"USDC\"}'",
+      "expect": "{\"asset\":\"USDC\",\"amount\":\"12.50\"}"
+    },
+    "examples": [
+      {
+        "title": "Get your receive address",
+        "command": "pilotctl appstore call io.pilot.wallet wallet.address '{}'",
+        "expect": "{\"address\":\"0x...\"}"
+      },
+      {
+        "title": "Per-chain USDC balances (Base/Ethereum/Polygon)",
+        "command": "pilotctl appstore call io.pilot.wallet wallet.evm.chains '{}'",
+        "expect": "{\"chains\":[{\"chain_id\":8453,\"balance\":\"10.00\"}]}"
+      },
+      {
+        "title": "Review the spend caps the supervisor enforces",
+        "command": "pilotctl appstore call io.pilot.wallet wallet.spend_caps '{}'",
+        "expect": "{\"caps\":[{\"asset\":\"USDC\",\"limit\":\"50.00\",\"window_sec\":86400}]}"
+      },
+      {
+        "title": "Every non-zero asset balance at once",
+        "command": "pilotctl appstore call io.pilot.wallet wallet.balances '{}'",
+        "expect": "{\"balances\":{\"USDC\":\"12.50\"}}"
+      }
+    ],
+    "gotchas": [
+      "Spend caps are declared in the manifest and enforced by the supervisor on every signing op — a pay over the cap is rejected.",
+      "One secp256k1 address works across all three USDC mainnets; use the wallet.evm.* methods for per-chain detail.",
+      "wallet.balance takes an asset (e.g. \"USDC\"); wallet.balances returns them all."
+    ],
+    "next": [
+      "io.pilot.wallet wallet.balances '{}'",
+      "io.pilot.wallet wallet.spend_caps '{}'"
+    ]
+  }
+}
