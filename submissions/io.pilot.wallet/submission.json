@@ -1,27 +1,27 @@
 {
   "id": "io.pilot.wallet",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "namespace": "wallet",
   "description": "On-overlay USDC payments — multichain (Base + Ethereum + Polygon).",
   "email": "apps@pilotprotocol.network",
-  "bundle": "io.pilot.wallet-0.4.0-linux-amd64.tar.gz",
-  "bundle_sha256": "7503be9a722d3114f6210613d5b676b301b44830ec8f265eaf8bf2db82911c8d",
+  "bundle": "io.pilot.wallet-0.4.1-linux-amd64.tar.gz",
+  "bundle_sha256": "362655029f4f1157adea8910e950538730d8c3dc7d3339eb1034f3a451b7695e",
   "bundles": {
     "linux/amd64": {
-      "file": "io.pilot.wallet-0.4.0-linux-amd64.tar.gz",
-      "sha256": "7503be9a722d3114f6210613d5b676b301b44830ec8f265eaf8bf2db82911c8d"
+      "file": "io.pilot.wallet-0.4.1-linux-amd64.tar.gz",
+      "sha256": "362655029f4f1157adea8910e950538730d8c3dc7d3339eb1034f3a451b7695e"
     },
     "linux/arm64": {
-      "file": "io.pilot.wallet-0.4.0-linux-arm64.tar.gz",
-      "sha256": "e3a1c8a111419ae0b2ec2ed3cd252fd0fbb2e1411f2062259e1f7370f6adbcb2"
+      "file": "io.pilot.wallet-0.4.1-linux-arm64.tar.gz",
+      "sha256": "70556dcf3c57c596d23d7feb37a39ebbff01ffd06a103f00a244aa00c60a3f24"
     },
     "darwin/amd64": {
-      "file": "io.pilot.wallet-0.4.0-darwin-amd64.tar.gz",
-      "sha256": "58fc1b6a64fccf93ce890c74baf49ab32b41aad2d642095608d3b043ccc65cab"
+      "file": "io.pilot.wallet-0.4.1-darwin-amd64.tar.gz",
+      "sha256": "b3bf7b73869e5b8e03ffc24a7e6cef87dc51a3bd9b26e4f7cee0262f6af97eab"
     },
     "darwin/arm64": {
-      "file": "io.pilot.wallet-0.4.0-darwin-arm64.tar.gz",
-      "sha256": "85ab930e016dcd66f1930e85fd2fee999dff6897f74ce7fc95a6ed97852be696"
+      "file": "io.pilot.wallet-0.4.1-darwin-arm64.tar.gz",
+      "sha256": "4ce3766917a84a3c862c444bf560e8e26314ed50957aee108d7d421927890022"
     }
   },
   "product_demo": {
