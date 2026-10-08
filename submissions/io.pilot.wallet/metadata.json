@@ -28,7 +28,7 @@
     "payments"
   ],
   "size": {
-    "bundle_bytes": 5145187,
+    "bundle_bytes": 5145210,
     "installed_bytes": 0
   },
   "compat": {
@@ -101,11 +101,12 @@
   ],
   "changelog": [
     {
-      "version": "0.4.0",
+      "version": "0.4.1",
       "date": "2026-10-08",
       "notes": [
         "Builds for macOS (Apple silicon and Intel) and Linux (arm64 and amd64); 0.3.3 shipped for Apple-silicon Macs only",
         "Never loses its keys: keeps a copy of both identity files outside the install dir, restores a missing one (after an uninstall, or an old pilotctl's upgrade) instead of creating a new key, and refuses to create one while any copy exists",
+        "pilotctl v1.13.0-v1.13.9 refuse this upgrade instead of deleting the wallet's keys (they delete an app's state on upgrade); the 0.3.3 key stays on disk until pilotctl is v1.13.10 or later",
         "Exits when the daemon that started it dies; no per-call logging; never removes a newer instance's socket",
         "wallet.help lists every method",
         "Settler client; settler.transfer goes through the wallet spend cap",
