@@ -278,7 +278,8 @@ fi
 
 git commit -m "catalogue: ${ID} v${VERSION} (rich, from R2)"
 git push -u origin "$BRANCH"
+PLATFORMS="$(jq -r 'keys | join(", ")' <<<"$BUNDLES_JSON")"
 gh pr create -R "$PLATFORM_REPO" --base main --head "$BRANCH" \
   --title "catalogue: ${ID} v${VERSION}" \
-  --body "Automated catalogue update for **${ID} v${VERSION}** (rich submission, bundles already on R2). Primary: ${BUNDLE_URL} (sha256 ${SHA}). Platforms: $(jq -r 'keys | join(\", \")' <<<\"$BUNDLES_JSON\"). Publisher: ${PUBLISHER}. catalogue.json re-signed with CATALOG_SIGN_KEY. CI verifies; human approves per APP-PUBLISHING-SPEC §7.2."
+  --body "Automated catalogue update for **${ID} v${VERSION}** (rich submission, bundles already on R2). Primary: ${BUNDLE_URL} (sha256 ${SHA}). Platforms: ${PLATFORMS}. Publisher: ${PUBLISHER}. catalogue.json re-signed with CATALOG_SIGN_KEY. CI verifies; human approves per APP-PUBLISHING-SPEC §7.2."
 echo "==> done: $ID v$VERSION ($found platform asset(s))"
