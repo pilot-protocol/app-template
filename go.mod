@@ -1,9 +1,9 @@
 module github.com/pilot-protocol/app-template
 
-go 1.25.0
+go 1.25.10
 
 require (
-	github.com/pilot-protocol/app-store v1.0.1-beta.1.0.20260622180016-07b4170265dc
+	github.com/pilot-protocol/app-store v1.0.7
 	github.com/sendgrid/sendgrid-go v3.16.1+incompatible
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.52.0
@@ -18,7 +18,7 @@ require (
 	github.com/sendgrid/rest v2.6.9+incompatible // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
