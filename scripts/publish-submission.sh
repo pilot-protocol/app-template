@@ -121,7 +121,9 @@ MANIFEST_MEMBER="$(
 PUBLISHER="$(tar -xzOf "$DIR/$PRIMARY_FILE" "$MANIFEST_MEMBER" | jq -r '.store.publisher // empty')"
 [ -n "$PUBLISHER" ] || echo "WARNING: no store.publisher in $PRIMARY_FILE manifest — catalogue entry will be UNPINNED (refused on v1.12.3+ hosts)"
 
-MDSRC="$DIR/metadata.json"   # the v2 store-page record, emitted by `pilot-app submit`
+# The v2 store-page record, emitted by `pilot-app submit`. Absolute: it is read
+# after the cd into the platform clone below, where $DIR does not resolve.
+MDSRC="$(cd "$DIR" && pwd)/metadata.json"
 
 echo "==> updating catalogue (v$CATVER) on $PLATFORM_REPO via PR"
 WORK="$(mktemp -d)"
@@ -225,7 +227,8 @@ fi
 
 git commit -m "catalogue: ${ID} v${VERSION}"
 git push -u origin "$BRANCH"
+PLATFORMS="$(jq -r 'keys | join(", ")' <<<"$BUNDLES_JSON")"
 gh pr create -R "$PLATFORM_REPO" --base main --head "$BRANCH" \
   --title "catalogue: ${ID} v${VERSION}" \
-  --body "Automated catalogue update for ${ID} v${VERSION}. Primary bundle: ${BUNDLE_URL} (sha256 ${SHA}). Platforms: $(jq -r 'keys | join(\", \")' <<<\"$BUNDLES_JSON\"). CI verifies; human approves per APP-PUBLISHING-SPEC §7.2."
+  --body "Automated catalogue update for ${ID} v${VERSION}. Primary bundle: ${BUNDLE_URL} (sha256 ${SHA}). Platforms: ${PLATFORMS:-${PRIMARY_FILE} only}. CI verifies; human approves per APP-PUBLISHING-SPEC §7.2."
 echo "==> done: $ID v$VERSION ($CATVER, ${#FILES[@]} asset(s))"
