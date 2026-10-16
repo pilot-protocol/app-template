@@ -1,6 +1,6 @@
 {
   "id": "io.pilot.plainweb",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Plainweb - retrieve any web page in plain text: no HTML or JS returned, simply plain Markdown",
   "email": "alex@vulturelabs.io",
   "backend": {
