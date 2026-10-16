@@ -1,6 +1,6 @@
 {
   "id": "io.pilot.aegis",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "AEGIS is a runtime firewall for AI agents: scan files, commands, and tool results for prompt injection, jailbreaks, homoglyph/leetspeak obfuscation, and impersonation before your agent acts on them. An 880 KB, fully-offline Rust binary — L1 Aho-Corasick pattern matching (microseconds) plus an optional local judge model. 90% recall / 95% precision on a held-out set.",
   "email": "apps@pilotprotocol.network",
   "backend": {
@@ -133,41 +133,52 @@
     "url": "https://aegis.pilotprotocol.network",
     "contact": "apps@pilotprotocol.network",
     "agent_usage": "Scan untrusted content before acting on it: aegis.scan for files/dirs; aegis.exec {\"args\":[\"scan-cmd\"],\"stdin\":...} as a PreToolUse gate (exit 0 allow / 2 block) and {\"args\":[\"scan-result\"],\"stdin\":...} as a PostToolUse check. aegis.status tails the audit log; aegis.targets/aegis.config introspect. Fully offline.",
-    "capabilities": "Delivers the AEGIS 0.1.3 runtime firewall as a sha-pinned, relocatable per-OS/arch bundle. L1 Aho-Corasick patterns (pure Rust, microseconds) plus an optional local Qwen3-1.7B judge (llama.cpp, offline). 90% recall / 95% precision on a held-out set. HMAC-chained audit log. MIT."
+    "capabilities": "Delivers the AEGIS 0.1.4 runtime firewall as a sha-pinned, relocatable per-OS/arch bundle. L1 Aho-Corasick patterns (pure Rust, microseconds) plus an optional local Qwen3-1.7B judge (llama.cpp, offline). 90% recall / 95% precision on a held-out set. HMAC-chained audit log. MIT."
   },
   "artifacts": [
     {
       "role": "binary",
       "os": "darwin",
       "arch": "arm64",
-      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.aegis/0.1.3/darwin-arm64/aegis-0.1.3-darwin-arm64.tar.gz",
-      "sha256": "dc20fc8c70aa0516d5fd503709a5c3c1e7f91964591bfa378c8bfe946db85b01",
-      "size": 448175,
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.aegis/0.1.4/darwin-arm64/aegis-0.1.4-darwin-arm64.tar.gz",
+      "sha256": "5fc1037ab60e20d26640809d39d012d9d41087ab5faab4e2cc85ede974847bdf",
+      "size": 468831,
       "unpack": "tar.gz",
-      "exec_path": "aegis-0.1.3-darwin-arm64/bin/aegis",
+      "exec_path": "aegis-0.1.4-darwin-arm64/bin/aegis",
+      "order": 1
+    },
+    {
+      "role": "binary",
+      "os": "darwin",
+      "arch": "amd64",
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.aegis/0.1.4/darwin-amd64/aegis-0.1.4-darwin-amd64.tar.gz",
+      "sha256": "4556f59f2fe6f01ec370a3e26eff6b799c1f364b442db15102e5960483710e3b",
+      "size": 527693,
+      "unpack": "tar.gz",
+      "exec_path": "aegis-0.1.4-darwin-amd64/bin/aegis",
       "order": 1
     },
     {
       "role": "binary",
       "os": "linux",
       "arch": "amd64",
-      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.aegis/0.1.3/linux-amd64/aegis-0.1.3-linux-amd64.tar.gz",
-      "sha256": "5cb700460a4072894429fa0f90038d9d597fac0b9e160d7c1090a04ad3ea3745",
-      "size": 571791,
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.aegis/0.1.4/linux-amd64/aegis-0.1.4-linux-amd64.tar.gz",
+      "sha256": "47642a275ffe35eec5e5150274937c3c5bbb95263d8a61a65a6e9773fd24e47f",
+      "size": 608346,
       "unpack": "tar.gz",
-      "exec_path": "aegis-0.1.3-linux-amd64/bin/aegis",
-      "order": 2
+      "exec_path": "aegis-0.1.4-linux-amd64/bin/aegis",
+      "order": 1
     },
     {
       "role": "binary",
       "os": "linux",
       "arch": "arm64",
-      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.aegis/0.1.3/linux-arm64/aegis-0.1.3-linux-arm64.tar.gz",
-      "sha256": "1fd9156ef23bb755965d9d6511f6ba2345bc409233dd010acb20be0ea956b857",
-      "size": 505315,
+      "url": "https://pub-2328865fa11041b8a5efba00b940ec14.r2.dev/io.pilot.aegis/0.1.4/linux-arm64/aegis-0.1.4-linux-arm64.tar.gz",
+      "sha256": "b3564ada80f6c3a0118c402eabcf1c08e0e9430a4a3ffde7d8464858c0f154b9",
+      "size": 538648,
       "unpack": "tar.gz",
-      "exec_path": "aegis-0.1.3-linux-arm64/bin/aegis",
-      "order": 3
+      "exec_path": "aegis-0.1.4-linux-arm64/bin/aegis",
+      "order": 1
     }
   ],
   "product_demo": {
