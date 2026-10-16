@@ -1,0 +1,44 @@
+[
+  {
+    "label": "version",
+    "vanilla": [
+      "--version"
+    ],
+    "method": "doordash.version",
+    "payload": {}
+  },
+  {
+    "label": "cli_help",
+    "vanilla": [
+      "--help"
+    ],
+    "method": "doordash.cli_help",
+    "payload": {}
+  },
+  {
+    "label": "exec_root_help",
+    "vanilla": [
+      "--help"
+    ],
+    "method": "doordash.exec",
+    "payload": {
+      "args": [
+        "--help"
+      ]
+    }
+  },
+  {
+    "label": "exec_search_help",
+    "vanilla": [
+      "search",
+      "--help"
+    ],
+    "method": "doordash.exec",
+    "payload": {
+      "args": [
+        "search",
+        "--help"
+      ]
+    }
+  }
+]
