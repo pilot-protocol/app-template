@@ -65,6 +65,15 @@ jobs:
           set -euo pipefail
           gcloud compute ssh "$INSTANCE" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap --command '
             set -e
+            # Go 1.27.3 on the VM before building: startup.sh installs it on
+            # boot, this covers a VM that has not been reset since.
+            # publish-server also compiles submitted adapters with it.
+            GO_VERSION=1.27.3
+            if ! /usr/local/go/bin/go version 2>/dev/null | grep -q "go${GO_VERSION} "; then
+              tgz=$(mktemp)
+              curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o "$tgz"
+              sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "$tgz" && rm -f "$tgz"
+            fi
             sudo -u pilot bash -c "export PATH=\$PATH:/usr/local/go/bin; \
               cd /opt/pilot/app-template && git pull --ff-only && \
               go build -o /opt/pilot/publish-server ./cmd/publish-server && \

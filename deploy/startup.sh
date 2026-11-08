@@ -9,7 +9,7 @@
 #   admin-token          gates /admin + approve/reject
 set -euo pipefail
 
-GO_VERSION=1.25.0
+GO_VERSION=1.27.3
 ARCH=linux-amd64
 
 apt-get update -y

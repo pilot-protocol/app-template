@@ -5,7 +5,7 @@
 #
 # Build from the repo root:
 #   docker build -f deploy/docker/publish-server.Dockerfile -t pilot-publish-server .
-FROM golang:1.25
+FROM golang:1.27.3
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
