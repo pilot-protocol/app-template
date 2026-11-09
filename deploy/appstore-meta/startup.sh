@@ -16,7 +16,7 @@
 #   appstore-meta-ref    git ref to build (empty -> main)
 set -euo pipefail
 
-GO_VERSION=1.25.0
+GO_VERSION=1.27.3
 ARCH=linux-amd64
 REPO=https://github.com/pilot-protocol/app-template
 

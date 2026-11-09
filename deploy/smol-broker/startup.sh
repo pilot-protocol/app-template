@@ -12,7 +12,7 @@
 #   SMOL_DERIVE_SECRET  the HMAC secret used to mint per-user keys
 set -euo pipefail
 
-GO_VERSION=1.25.0
+GO_VERSION=1.27.3
 BRANCH="${BROKER_BRANCH:-main}"
 HOSTNAME_FQDN="smol-broker.pilotprotocol.network"
 
