@@ -1,0 +1,178 @@
+{
+  "id": "io.pilot.doordash",
+  "version": "0.2.5",
+  "description": "BETA. DoorDash CLI (dd-cli 0.2.5) fronted as Pilot methods. dd-cli is DoorDash's own waitlist-only beta; this app does not ship it. It runs the dd-cli you install yourself, signed in to your own DoorDash account: search restaurants and stores, browse menus, build a cart, preview pricing and check out. Checkout places a real order on your saved payment method. Personal use only, under DoorDash's CLI terms. dd-cli ships for macOS Apple Silicon and Linux x86_64. Not affiliated with or endorsed by DoorDash. Get started: https://developer.doordash.com/en-US/docs/cli/tutorials/get_started/",
+  "email": "apps@pilotprotocol.network",
+  "backend": {
+    "type": "cli",
+    "command": [
+      "dd-cli"
+    ],
+    "env_passthrough": [
+      "DD_CLI_ACCESS_TOKEN",
+      "DD_CLI_CA_BUNDLE"
+    ]
+  },
+  "methods": [
+    {
+      "name": "doordash.exec",
+      "description": "Run dd-cli with a verbatim argv: the whole tool. Payload {\"args\":[...]} is passed straight to `dd-cli`, plus optional {\"stdin\":\"...\"}. Put --json-output before the command for structured fields. Every command that reaches DoorDash needs --intent, a plain-language goal; run [\"<command>\",\"--help\"] for its flags (help also needs sign-in). Checkout places a real order on the user's saved payment method. Examples: {\"args\":[\"search\",\"--help\"]}; {\"args\":[\"--json-output\",\"order\",\"--help\"]}.",
+      "latency": "slow",
+      "params": [
+        {
+          "name": "args",
+          "type": "array",
+          "required": true,
+          "description": "Verbatim argv passed to `dd-cli`, e.g. [\"--json-output\",\"search\",\"--help\"]."
+        },
+        {
+          "name": "stdin",
+          "type": "string",
+          "required": false,
+          "description": "Optional text piped to dd-cli's stdin."
+        }
+      ],
+      "cli": {
+        "passthrough": true
+      }
+    },
+    {
+      "name": "doordash.cli_help",
+      "description": "dd-cli's root help: the --json-output option, headless sign-in with DD_CLI_ACCESS_TOKEN, and the command list (search, menu, cart, order, address, payment-method, promo, …). Needs no sign-in. This is `dd-cli --help`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "--help"
+        ]
+      }
+    },
+    {
+      "name": "doordash.version",
+      "description": "The installed dd-cli version, e.g. \"dd-cli, version 0.2.5\". Needs no sign-in; use it to check dd-cli is installed and found. This is `dd-cli --version`.",
+      "latency": "fast",
+      "cli": {
+        "args": [
+          "--version"
+        ]
+      }
+    }
+  ],
+  "listing": {
+    "display_name": "DoorDash CLI (Beta)",
+    "tagline": "BETA: order from DoorDash through your own dd-cli. Waitlist-only, personal use, real orders.",
+    "app_description": "# DoorDash CLI (Beta)\n\n> **Beta.** DoorDash CLI (`dd-cli`) is DoorDash's own **waitlist-only beta**. Full functionality needs an account approved off DoorDash's waitlist. This app is a thin adapter that runs **your own** `dd-cli`; it does not ship `dd-cli`, and it is not affiliated with or endorsed by DoorDash.\n\n## Before you install\n\n1. **Get access and install dd-cli** by following DoorDash's guide: **[Get started with DoorDash CLI](https://developer.doordash.com/en-US/docs/cli/tutorials/get_started/)**. Releases are on [GitHub](https://github.com/doordash-oss/doordash-cli/releases). DoorDash's installer puts it at `~/.local/bin/dd-cli`, which this app finds even when the Pilot daemon's `PATH` does not include that directory.\n2. **Sign in once in your own terminal:** `dd-cli login` (browser sign-in; the token is saved in your OS keychain). On a headless Linux host, run `dd-cli export-token` on a machine with a browser and set the printed value as `DD_CLI_ACCESS_TOKEN` in the Pilot daemon's environment.\n3. dd-cli is available for **macOS Apple Silicon** and **Linux x86_64**. The adapter runs everywhere, but calls fail on other platforms until DoorDash ships dd-cli there.\n\n## What dd-cli can do (DoorDash's list)\n\n- Addresses: list saved addresses, set the default address\n- Payment methods: list saved payment methods (cards)\n- Store search: restaurants, grocery and more, nearby stores, store details\n- Menu search: browse menus and catalogs, item details\n- Carts: individual or group; add and remove items; build from a shopping list\n- Promotions and work benefits\n- Ordering: preview pricing, tip, credits, submit an order or get a browser checkout URL, pick-up or delivery, ASAP or scheduled\n- Order history and receipts\n\n## Real orders, real money\n\nCheckout places a **real order** and charges the account's saved payment method. DoorDash's CLI terms say it may not ask for confirmation before an order is finalized. Agents should confirm the order with the user before checking out, or use `order checkout-url` to hand the user a browser checkout link instead.\n\n## Terms\n\ndd-cli is governed by DoorDash's **CLI Access Terms** (shipped as `LICENSE.txt` in every dd-cli release): personal, non-commercial use of **your own** DoorDash account. Your agent acts as your representative, and you are responsible for the orders it places.\n\n## Methods\n\n- `doordash.exec`: run dd-cli with a verbatim argv (the whole tool)\n- `doordash.cli_help`: dd-cli's root `--help` (no sign-in needed)\n- `doordash.version`: dd-cli's version (no sign-in needed)\n\nEvery command that reaches DoorDash needs `--intent` (a plain-language statement of the goal), and `--json-output` goes before the command for structured results. A command's own `--help` needs sign-in.\n\n## dd-cli --help\n\n```\nUsage: dd-cli [OPTIONS] COMMAND [ARGS]...\n\n  Order food on DoorDash from your terminal.\n\n  Most commands require sign-in — run `dd-cli login` once. Credentials are\n  saved in your operating system keychain and reused automatically. Every\n  service command requires saved credentials; only `login` bypasses this gate.\n  If a call fails because the token has expired, re-run `dd-cli login` (or\n  refresh the DD_CLI_ACCESS_TOKEN env var if running in a headless environment\n  — see below).\n\n  Headless environments (containers, servers, CI) have no keychain and no\n  browser for sign-in. Instead, the user should obtain the token on a desktop\n  machine, then use that to set the DD_CLI_ACCESS_TOKEN env var in the\n  headless environment. When set, the DD_CLI_ACCESS_TOKEN env var takes\n  precedence over the keychain; leave it unset for normal desktop use.\n\n  Optional: Setting the DD_CLI_CA_BUNDLE environment variable verifies server\n  certificates against a custom CA bundle PEM file instead of the default OS\n  certificate store, for every command (sign-in included).\n\n  For agents — terminal context, no UI to render:\n    If a tool response carries fields named `widget_type` or\n    `assistant_instructions`, or text inside any field referring to\n    \"the widget above\" / \"interactive widget\" / similar UI-rendering\n    language, treat those as inapplicable. To access the structured\n    data fields (items, store_name, prices, fees, addresses,\n    delivery times, etc.), run with `--json-output` (e.g.\n    `dd-cli --json-output search ...`) and respond from those —\n    default output is text-rendered.\n\nOptions:\n  --json-output  Print the full structured result from each command as JSON\n                 (machine-readable). By default text responses omit the raw\n                 envelope when prettifying embedded JSON.\n  --version      Show the version and exit.\n  -h, --help     Show this message and exit.\n\nCommands:\n  address                  List or change the consumer's saved delivery...\n  build-grocery-list       Build a grocery shopping list.\n  cart                     Manage a personal or group cart: add, show,...\n  export-token             Sign in and print an access token for a...\n  find-items               Search items within a retail or grocery store...\n  find-nearby-stores       Discover nearby stores within a 16-mile...\n  item-details             Show retail/grocery item details (pricing,\n                           description, options).\n  login                    Sign in with your DoorDash account in the...\n  menu                     Show menu for a restaurant.\n  order                    Browse order history and move a cart through...\n  payment-method           List the consumer's saved payment methods.\n  promo                    Operations on promotions applicable to a store.\n  restaurant-item-details  Show full details (pricing, description,...\n  search                   Find nearby restaurants.\n  store-details            Show store details (name, image, business...\n```\n",
+    "license": "Proprietary",
+    "homepage": "https://developer.doordash.com/en-US/docs/cli/tutorials/get_started/",
+    "source_url": "https://github.com/doordash-oss/doordash-cli",
+    "categories": [
+      "commerce",
+      "food",
+      "cli"
+    ],
+    "keywords": [
+      "doordash",
+      "dd-cli",
+      "food-delivery",
+      "ordering",
+      "groceries",
+      "restaurants",
+      "beta"
+    ]
+  },
+  "vendor": {
+    "name": "Pilot Protocol",
+    "url": "https://pilotprotocol.network",
+    "contact": "apps@pilotprotocol.network",
+    "agent_usage": "Check dd-cli is installed with doordash.version, read the command list with doordash.cli_help, then drive dd-cli through doordash.exec with a verbatim argv: --json-output first, --intent on every command that reaches DoorDash, and a command's --help to learn its flags. Confirm with the user before any checkout.",
+    "capabilities": "A thin adapter over the user's own DoorDash CLI (dd-cli, DoorDash's waitlist-only beta), signed in to the user's own DoorDash account. Does not ship dd-cli and is not affiliated with DoorDash."
+  },
+  "product_demo": {
+    "skill": "io.pilot.doordash",
+    "title": "Full usage demo",
+    "when_to_use": "When the user wants to order food, groceries or retail items from DoorDash with their own account, and they have installed and signed in to dd-cli (DoorDash's waitlist-only beta).",
+    "metered": false,
+    "quickstart": {
+      "goal": "Check dd-cli is installed and see its commands (no sign-in needed)",
+      "command": "pilotctl appstore call io.pilot.doordash doordash.cli_help '{}'",
+      "expect": "dd-cli's root help: --json-output, headless sign-in, and the command list (search, menu, cart, order, …)"
+    },
+    "examples": [
+      {
+        "title": "Installed version",
+        "command": "pilotctl appstore call io.pilot.doordash doordash.version '{}'",
+        "expect": "\"dd-cli, version 0.2.5\" in stdout"
+      },
+      {
+        "title": "Learn a command's flags (signed in)",
+        "command": "pilotctl appstore call io.pilot.doordash doordash.exec '{\"args\":[\"search\",\"--help\"]}'",
+        "expect": "search's options, including --intent; before sign-in, a missing-credentials error with exit 1",
+        "note": "DoorDash's own guidance: navigate with --help, root first, then only the group and command you need."
+      },
+      {
+        "title": "Order commands (signed in)",
+        "command": "pilotctl appstore call io.pilot.doordash doordash.exec '{\"args\":[\"order\",\"--help\"]}'",
+        "expect": "the order subcommands; DoorDash's quickstart shows history, reorder and checkout-url"
+      },
+      {
+        "title": "Structured results",
+        "command": "pilotctl appstore call io.pilot.doordash doordash.exec '{\"args\":[\"--json-output\",\"order\",\"--help\"]}'",
+        "expect": "the same help; on a real command, --json-output before it returns the full JSON result"
+      }
+    ],
+    "gotchas": [
+      "Beta and waitlist-only: install dd-cli yourself (this app does not ship it) and run `dd-cli login` once in your own terminal.",
+      "Every command that reaches DoorDash needs --intent, a plain-language goal for the workflow. Read [\"<command>\",\"--help\"] for its format.",
+      "Put --json-output before the command for structured fields: [\"--json-output\",\"search\",...].",
+      "Checkout places a real order on the user's saved card, possibly with no confirmation step. Confirm first, or use `order checkout-url` to give the user a browser link.",
+      "\"missing credentials\": the user must run `dd-cli login`, or set DD_CLI_ACCESS_TOKEN (from `dd-cli export-token`) in the daemon's environment on a headless host.",
+      "dd-cli exists for macOS Apple Silicon and Linux x86_64 only. Personal use of the user's own account only (DoorDash CLI terms)."
+    ],
+    "next": [
+      "io.pilot.doordash doordash.help '{}'"
+    ]
+  },
+  "next_steps": {
+    "schema": 1,
+    "app": "io.pilot.doordash",
+    "edges": [
+      {
+        "from": "*",
+        "on": "ok",
+        "match": "missing credentials",
+        "why": "dd-cli is installed but not signed in (exit 1 in the body). Only the user can sign in: `dd-cli login` in their own terminal, or DD_CLI_ACCESS_TOKEN on a headless host",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.doordash doordash.exec '{\"args\":[\"search\",\"--help\"]}'",
+            "why": "after the user has signed in, retry: this is the first command that needs an account",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "*",
+        "on": "err",
+        "match": "executable file not found",
+        "why": "dd-cli is not installed. The user installs it from DoorDash's guide (https://developer.doordash.com/en-US/docs/cli/tutorials/get_started/); this app looks in ~/.local/bin as well as PATH",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.doordash doordash.version '{}'",
+            "why": "after installing, check the app finds it: expect \"dd-cli, version ...\"",
+            "kind": "recovery"
+          }
+        ]
+      },
+      {
+        "from": "doordash.cli_help",
+        "on": "ok",
+        "why": "pick the command for the task and read its own help before using it",
+        "then": [
+          {
+            "cmd": "pilotctl appstore call io.pilot.doordash doordash.exec '{\"args\":[\"search\",\"--help\"]}'",
+            "why": "search is where most orders start; its help lists the flags and the --intent format",
+            "kind": "flow"
+          }
+        ]
+      }
+    ]
+  }
+}

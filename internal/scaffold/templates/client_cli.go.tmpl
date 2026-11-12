@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -136,6 +137,7 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 			argv0 = p
 		}
 	}
+	argv0 = findCommand(argv0)
 
 	cmd := exec.CommandContext(ctx, argv0, args...)
 	cmd.Env = r.childEnv()
@@ -193,6 +195,39 @@ func (r *Runner) Run(ctx context.Context, spec Spec, call Call) (json.RawMessage
 		"truncated": stdout.truncated || stderr.truncated,
 	})
 	return wrapped, nil
+}
+
+// userBinDirs are where per-user installers put a CLI (DoorDash's dd-cli and
+// pipx use ~/.local/bin; Homebrew uses /opt/homebrew/bin or /usr/local/bin).
+// The daemon that spawns this adapter usually runs under launchd or systemd
+// with a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin on macOS), so a CLI the
+// user installed and runs fine from their shell is not found by name.
+var userBinDirs = []string{"~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "~/bin"}
+
+// findCommand returns name unchanged when it is a path or PATH resolves it;
+// otherwise the first executable of that name in userBinDirs, or name (so the
+// spawn error still names the command the user has to install).
+func findCommand(name string) string {
+	if strings.ContainsRune(name, filepath.Separator) {
+		return name
+	}
+	if _, err := exec.LookPath(name); err == nil {
+		return name
+	}
+	home, _ := os.UserHomeDir()
+	for _, dir := range userBinDirs {
+		if strings.HasPrefix(dir, "~/") {
+			if home == "" {
+				continue
+			}
+			dir = filepath.Join(home, dir[2:])
+		}
+		p := filepath.Join(dir, name)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
+			return p
+		}
+	}
+	return name
 }
 
 // childEnv builds the scrubbed environment for the child: the minimal baseline
