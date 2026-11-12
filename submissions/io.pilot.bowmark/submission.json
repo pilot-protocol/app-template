@@ -101,7 +101,7 @@
     ]
   },
   "id": "io.pilot.bowmark",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "namespace": "bowmark",
   "description": "Live data from real websites, including the values that only appear after somebody operates the page: prices, stock, fares, quotes, and anything behind a form or a login. Call bowmark.get_library({query}) for the typed function library, then send a short JavaScript script to bowmark.run({script}) and Bowmark executes it on the real sites.",
   "email": "christopher@bowmark.ai",
